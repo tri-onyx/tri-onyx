@@ -1128,6 +1128,7 @@ function renderGraph() {
           ${a.description ? `<div style="color:var(--muted);margin-bottom:4px">${escapeHtml(a.description)}</div>` : ''}
           <div class="row"><span class="label">Model:</span><span>${a.model || '?'}</span></div>
           <div class="row"><span class="label">Status:</span><span>${a.status || 'inactive'}</span></div>
+          <div class="row"><span class="label">Network:</span><span>${formatNetwork(a.network)}</span></div>
         </div>
         <div class="risk-square ${d.effectiveRisk}">
           <span class="risk-icon">${riskIcon(d.effectiveRisk)}</span>
@@ -1151,7 +1152,6 @@ function renderGraph() {
       <div class="section">
         <div class="section-header"><div class="section-title">🦾 Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>
-        <div class="axis-row"><span class="axis-label">Network</span><span>${formatNetwork(a.network)}</span></div>
       </div>
 
       <div class="section">
