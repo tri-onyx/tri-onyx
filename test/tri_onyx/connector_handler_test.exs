@@ -324,7 +324,7 @@ defmodule TriOnyx.ConnectorHandlerTest do
 
     test "thumbsup approval reaction calls ApprovalQueue.approve", %{state: state} do
       {:ok, approval_id} =
-        TriOnyx.BCTP.ApprovalQueue.submit(%{
+        TriOnyx.BCP.ApprovalQueue.submit(%{
           query: %{},
           from_agent: "controller",
           to_agent: "reader",
@@ -344,12 +344,12 @@ defmodule TriOnyx.ConnectorHandlerTest do
                ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
 
       # Verify it was approved
-      assert [] = TriOnyx.BCTP.ApprovalQueue.list_pending()
+      assert [] = TriOnyx.BCP.ApprovalQueue.list_pending()
     end
 
     test "thumbsdown approval reaction calls ApprovalQueue.reject", %{state: state} do
       {:ok, approval_id} =
-        TriOnyx.BCTP.ApprovalQueue.submit(%{
+        TriOnyx.BCP.ApprovalQueue.submit(%{
           query: %{},
           from_agent: "controller",
           to_agent: "reader",
@@ -369,7 +369,7 @@ defmodule TriOnyx.ConnectorHandlerTest do
                ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
 
       # Verify it was rejected (no longer pending)
-      assert [] = TriOnyx.BCTP.ApprovalQueue.list_pending()
+      assert [] = TriOnyx.BCP.ApprovalQueue.list_pending()
     end
 
     test "reaction with no approval_id or agent_name is handled gracefully", %{state: state} do

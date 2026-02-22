@@ -1,4 +1,4 @@
-defmodule TriOnyx.BCTP.Query do
+defmodule TriOnyx.BCP.Query do
   @moduledoc """
   Structured query definition for the Bandwidth-Constrained Trust Protocol.
 

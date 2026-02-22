@@ -1,13 +1,13 @@
-defmodule TriOnyx.BCTP.ApprovalQueue do
+defmodule TriOnyx.BCP.ApprovalQueue do
   @moduledoc """
   GenServer for Cat-3 human approval queue.
 
   Holds pending approval items submitted by the gateway when a query or
   escalation requires human sign-off. Operators interact with the queue
-  through the HTTP API (GET /bctp/approvals, POST approve/reject).
+  through the HTTP API (GET /bcp/approvals, POST approve/reject).
 
   The `await_decision/3` function allows a caller to block (with timeout)
-  until a decision is made, implementing the BCTP principle that latency
+  until a decision is made, implementing the BCP principle that latency
   is a security feature — agents cannot bypass the approval step.
   """
 
@@ -116,7 +116,7 @@ defmodule TriOnyx.BCTP.ApprovalQueue do
       submitted_at: DateTime.utc_now()
     }
 
-    Logger.info("BCTP approval submitted: #{id} from=#{item.from_agent} to=#{item.to_agent}")
+    Logger.info("BCP approval submitted: #{id} from=#{item.from_agent} to=#{item.to_agent}")
 
     new_state = put_in(state, [:pending, id], item)
     {:reply, {:ok, id}, new_state}
@@ -135,7 +135,7 @@ defmodule TriOnyx.BCTP.ApprovalQueue do
           decided_at: DateTime.utc_now()
         }
 
-        Logger.info("BCTP approval approved: #{approval_id}")
+        Logger.info("BCP approval approved: #{approval_id}")
 
         state = %{state | pending: remaining_pending}
         state = put_in(state, [:decided, approval_id], decided)
@@ -158,7 +158,7 @@ defmodule TriOnyx.BCTP.ApprovalQueue do
           decided_at: DateTime.utc_now()
         }
 
-        Logger.info("BCTP approval rejected: #{approval_id} reason=#{reason}")
+        Logger.info("BCP approval rejected: #{approval_id} reason=#{reason}")
 
         state = %{state | pending: remaining_pending}
         state = put_in(state, [:decided, approval_id], decided)

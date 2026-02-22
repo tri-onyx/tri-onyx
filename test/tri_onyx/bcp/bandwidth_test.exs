@@ -1,7 +1,7 @@
-defmodule TriOnyx.BCTP.BandwidthTest do
+defmodule TriOnyx.BCP.BandwidthTest do
   use ExUnit.Case, async: true
 
-  alias TriOnyx.BCTP.{Bandwidth, Query}
+  alias TriOnyx.BCP.{Bandwidth, Query}
 
   defp make_budget(opts \\ []) do
     defaults = [max_bits_per_session: 1000.0, max_cat2_queries: 5, max_cat3_queries: 2]

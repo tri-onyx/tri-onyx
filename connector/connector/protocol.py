@@ -137,7 +137,7 @@ class ActionResult:
 
 @dataclass(slots=True)
 class ApprovalRequestMessage:
-    """Gateway requests human approval for a Cat-3 BCTP response."""
+    """Gateway requests human approval for a Cat-3 BCP response."""
 
     approval_id: str
     from_agent: str

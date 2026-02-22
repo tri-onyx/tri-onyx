@@ -50,9 +50,9 @@ from protocol import (
     MemorySaveMessage,
     SendMessageResponse,
     RestartAgentResponse,
-    BCTPQueryMessage,
-    BCTPResponseDeliveryMessage,
-    BCTPValidationResult,
+    BCPQueryMessage,
+    BCPResponseDeliveryMessage,
+    BCPValidationResult,
     SendEmailResponse,
     MoveEmailResponse,
     CreateFolderResponse,
@@ -70,8 +70,8 @@ from protocol import (
     emit_error,
     emit_send_message_request,
     emit_restart_agent_request,
-    emit_bctp_query_request,
-    emit_bctp_response,
+    emit_bcp_query_request,
+    emit_bcp_response,
     emit_send_email_request,
     emit_move_email_request,
     emit_create_folder_request,
@@ -161,9 +161,9 @@ class InboundDispatcher:
     def __init__(self) -> None:
         self.control_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
         self.send_message_responses: asyncio.Queue[SendMessageResponse] = asyncio.Queue()
-        self.bctp_query_queue: asyncio.Queue[BCTPQueryMessage] = asyncio.Queue()
-        self.bctp_response_delivery_queue: asyncio.Queue[BCTPResponseDeliveryMessage] = asyncio.Queue()
-        self.bctp_validation_results: asyncio.Queue[BCTPValidationResult] = asyncio.Queue()
+        self.bcp_query_queue: asyncio.Queue[BCPQueryMessage] = asyncio.Queue()
+        self.bcp_response_delivery_queue: asyncio.Queue[BCPResponseDeliveryMessage] = asyncio.Queue()
+        self.bcp_validation_results: asyncio.Queue[BCPValidationResult] = asyncio.Queue()
         self.send_email_responses: asyncio.Queue[SendEmailResponse] = asyncio.Queue()
         self.move_email_responses: asyncio.Queue[MoveEmailResponse] = asyncio.Queue()
         self.create_folder_responses: asyncio.Queue[CreateFolderResponse] = asyncio.Queue()
@@ -273,22 +273,22 @@ class InboundDispatcher:
                     await self.calendar_delete_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse calendar_delete_response: %s", exc)
-            elif msg_type == "bctp_query":
+            elif msg_type == "bcp_query":
                 # Route to control queue so the main loop can present
                 # the query to the LLM as a prompt
                 await self.control_queue.put(data)
-            elif msg_type == "bctp_response_delivery":
+            elif msg_type == "bcp_response_delivery":
                 try:
-                    delivery = BCTPResponseDeliveryMessage.from_dict(data)
-                    await self.bctp_response_delivery_queue.put(delivery)
+                    delivery = BCPResponseDeliveryMessage.from_dict(data)
+                    await self.bcp_response_delivery_queue.put(delivery)
                 except Exception as exc:
-                    log.error("Failed to parse bctp_response_delivery: %s", exc)
-            elif msg_type == "bctp_validation_result":
+                    log.error("Failed to parse bcp_response_delivery: %s", exc)
+            elif msg_type == "bcp_validation_result":
                 try:
-                    result = BCTPValidationResult.from_dict(data)
-                    await self.bctp_validation_results.put(result)
+                    result = BCPValidationResult.from_dict(data)
+                    await self.bcp_validation_results.put(result)
                 except Exception as exc:
-                    log.error("Failed to parse bctp_validation_result: %s", exc)
+                    log.error("Failed to parse bcp_validation_result: %s", exc)
             else:
                 # Only route recognised control types; skip unknown types
                 # (e.g. rate_limit_event from the API) to avoid noisy errors.
@@ -422,17 +422,17 @@ class RestartAgentHandler:
 
 
 # ---------------------------------------------------------------------------
-# BCTP tool handler
+# BCP tool handler
 # ---------------------------------------------------------------------------
 
-# Timeout for the gateway to deliver a BCTP response.
+# Timeout for the gateway to deliver a BCP response.
 # Cat-3 responses require human approval which can take minutes,
 # so this must be at least as long as the gateway's approval timeout (5m).
-_BCTP_RESPONSE_TIMEOUT_S = 330
+_BCP_RESPONSE_TIMEOUT_S = 330
 
 
-class BCTPHandler:
-    """Handles BCTP query/response tools for bandwidth-constrained trust protocol.
+class BCPHandler:
+    """Handles BCP query/response tools for bandwidth-constrained trust protocol.
 
     Controllers use ``send_query`` to request information from Reader agents.
     Readers use ``respond_to_query`` to answer incoming queries.  The gateway
@@ -445,13 +445,13 @@ class BCTPHandler:
     async def send_query(
         self, to: str, category: int, spec: dict[str, Any]
     ) -> str:
-        """Send a BCTP query and wait for the validated response delivery."""
+        """Send a BCP query and wait for the validated response delivery."""
         request_id = uuid.uuid4().hex
 
         log.info(
-            "BCTPQuery -> %s (category=%d, request_id=%s)", to, category, request_id
+            "BCPQuery -> %s (category=%d, request_id=%s)", to, category, request_id
         )
-        emit_bctp_query_request(
+        emit_bcp_query_request(
             request_id=request_id,
             to=to,
             category=category,
@@ -461,11 +461,11 @@ class BCTPHandler:
         try:
             delivery = await asyncio.wait_for(
                 self._wait_for_delivery(request_id),
-                timeout=_BCTP_RESPONSE_TIMEOUT_S,
+                timeout=_BCP_RESPONSE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
-            log.error("BCTPQuery timed out (request_id=%s)", request_id)
-            return f"Error: BCTP query timed out after {_BCTP_RESPONSE_TIMEOUT_S}s"
+            log.error("BCPQuery timed out (request_id=%s)", request_id)
+            return f"Error: BCP query timed out after {_BCP_RESPONSE_TIMEOUT_S}s"
 
         return json.dumps({
             "query_id": delivery.query_id,
@@ -477,46 +477,46 @@ class BCTPHandler:
 
     async def _wait_for_delivery(
         self, request_id: str
-    ) -> BCTPResponseDeliveryMessage:
+    ) -> BCPResponseDeliveryMessage:
         """Poll the delivery queue until we get our matching response."""
         while True:
-            delivery = await self._dispatcher.bctp_response_delivery_queue.get()
+            delivery = await self._dispatcher.bcp_response_delivery_queue.get()
             if delivery.query_id == request_id:
                 return delivery
             # Not ours -- put it back
-            await self._dispatcher.bctp_response_delivery_queue.put(delivery)
+            await self._dispatcher.bcp_response_delivery_queue.put(delivery)
             await asyncio.sleep(0.01)
 
     async def respond_to_query(
         self, query_id: str, response: dict[str, Any]
     ) -> str:
-        """Respond to an incoming BCTP query and wait for validation result."""
-        log.info("BCTPResponse for query_id=%s", query_id)
-        emit_bctp_response(query_id=query_id, response=response)
+        """Respond to an incoming BCP query and wait for validation result."""
+        log.info("BCPResponse for query_id=%s", query_id)
+        emit_bcp_response(query_id=query_id, response=response)
 
         try:
             result = await asyncio.wait_for(
                 self._wait_for_validation(query_id),
-                timeout=_BCTP_RESPONSE_TIMEOUT_S,
+                timeout=_BCP_RESPONSE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
-            return f"BCTP response sent for query {query_id} (validation pending — timed out waiting for result)."
+            return f"BCP response sent for query {query_id} (validation pending — timed out waiting for result)."
 
         if result.success:
-            return f"BCTP response for query {query_id} validated and delivered."
+            return f"BCP response for query {query_id} validated and delivered."
         else:
-            return f"Error: BCTP response for query {query_id} was rejected: {result.detail}"
+            return f"Error: BCP response for query {query_id} was rejected: {result.detail}"
 
     async def _wait_for_validation(
         self, query_id: str
-    ) -> BCTPValidationResult:
+    ) -> BCPValidationResult:
         """Poll the validation result queue until we get our matching result."""
         while True:
-            result = await self._dispatcher.bctp_validation_results.get()
+            result = await self._dispatcher.bcp_validation_results.get()
             if result.query_id == query_id:
                 return result
             # Not ours -- put it back
-            await self._dispatcher.bctp_validation_results.put(result)
+            await self._dispatcher.bcp_validation_results.put(result)
             await asyncio.sleep(0.01)
 
 
@@ -754,8 +754,8 @@ class CalendarHandler:
 
 # Logical tool names as seen by the gateway and agent definitions.
 _SEND_MESSAGE_TOOL = "SendMessage"
-_BCTP_QUERY_TOOL = "BCTPQuery"
-_BCTP_RESPOND_TOOL = "BCTPRespond"
+_BCP_QUERY_TOOL = "BCPQuery"
+_BCP_RESPOND_TOOL = "BCPRespond"
 
 # The SDK MCP server that hosts the tools.  The CLI sees them as
 # mcp__interagent__<ToolName>, but we normalize back to the logical name
@@ -763,8 +763,8 @@ _BCTP_RESPOND_TOOL = "BCTPRespond"
 # InformationClassifier work unchanged.
 _INTERAGENT_SERVER = "interagent"
 _SEND_MESSAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SEND_MESSAGE_TOOL}"
-_BCTP_QUERY_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCTP_QUERY_TOOL}"
-_BCTP_RESPOND_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCTP_RESPOND_TOOL}"
+_BCP_QUERY_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCP_QUERY_TOOL}"
+_BCP_RESPOND_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCP_RESPOND_TOOL}"
 _RESTART_AGENT_TOOL = "RestartAgent"
 _RESTART_AGENT_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_RESTART_AGENT_TOOL}"
 
@@ -793,8 +793,8 @@ _CALENDAR_DELETE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_DELETE_TOOL}"
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
-    _BCTP_QUERY_MCP_NAME: _BCTP_QUERY_TOOL,
-    _BCTP_RESPOND_MCP_NAME: _BCTP_RESPOND_TOOL,
+    _BCP_QUERY_MCP_NAME: _BCP_QUERY_TOOL,
+    _BCP_RESPOND_MCP_NAME: _BCP_RESPOND_TOOL,
     _RESTART_AGENT_MCP_NAME: _RESTART_AGENT_TOOL,
     _SEND_EMAIL_MCP_NAME: _SEND_EMAIL_TOOL,
     _MOVE_EMAIL_MCP_NAME: _MOVE_EMAIL_TOOL,
@@ -934,16 +934,16 @@ def build_restart_agent_tool(restart_handler: RestartAgentHandler) -> Any:
     return restart_agent
 
 
-def build_bctp_query_tool(bctp_handler: BCTPHandler) -> Any:
-    """Create BCTPQuery as an in-process SDK MCP tool.
+def build_bcp_query_tool(bcp_handler: BCPHandler) -> Any:
+    """Create BCPQuery as an in-process SDK MCP tool.
 
     Used by Controller agents to send bandwidth-constrained queries to
     Reader agents through the gateway.
     """
 
     @tool(
-        _BCTP_QUERY_TOOL,
-        "Send a BCTP query to a Reader agent. The gateway validates "
+        _BCP_QUERY_TOOL,
+        "Send a BCP query to a Reader agent. The gateway validates "
         "bandwidth constraints and routes the query.",
         {
             "type": "object",
@@ -954,7 +954,7 @@ def build_bctp_query_tool(bctp_handler: BCTPHandler) -> Any:
                 },
                 "category": {
                     "type": "integer",
-                    "description": "BCTP category (1-5) determining bandwidth allocation",
+                    "description": "BCP category (1-5) determining bandwidth allocation",
                 },
                 "spec": {
                     "type": "object",
@@ -965,7 +965,7 @@ def build_bctp_query_tool(bctp_handler: BCTPHandler) -> Any:
             "required": ["to", "category", "spec"],
         },
     )
-    async def bctp_query(args: dict[str, Any]) -> dict[str, Any]:
+    async def bcp_query(args: dict[str, Any]) -> dict[str, Any]:
         to = args.get("to", "")
         category = args.get("category", 0)
         spec = args.get("spec", {})
@@ -998,27 +998,27 @@ def build_bctp_query_tool(bctp_handler: BCTPHandler) -> Any:
                 "isError": True,
             }
 
-        result = await bctp_handler.send_query(to=to, category=category, spec=spec)
+        result = await bcp_handler.send_query(to=to, category=category, spec=spec)
         is_error = result.startswith("Error:")
         return {
             "content": [{"type": "text", "text": result}],
             "isError": is_error,
         }
 
-    return bctp_query
+    return bcp_query
 
 
-def build_bctp_respond_tool(bctp_handler: BCTPHandler) -> Any:
-    """Create BCTPRespond as an in-process SDK MCP tool.
+def build_bcp_respond_tool(bcp_handler: BCPHandler) -> Any:
+    """Create BCPRespond as an in-process SDK MCP tool.
 
-    Used by Reader agents to respond to incoming BCTP queries.  The
+    Used by Reader agents to respond to incoming BCP queries.  The
     gateway validates the response against bandwidth constraints before
     delivering it to the requesting Controller.
     """
 
     @tool(
-        _BCTP_RESPOND_TOOL,
-        "Respond to an incoming BCTP query. The gateway validates the "
+        _BCP_RESPOND_TOOL,
+        "Respond to an incoming BCP query. The gateway validates the "
         "response against bandwidth constraints before delivery.",
         {
             "type": "object",
@@ -1036,7 +1036,7 @@ def build_bctp_respond_tool(bctp_handler: BCTPHandler) -> Any:
             "required": ["query_id", "response"],
         },
     )
-    async def bctp_respond(args: dict[str, Any]) -> dict[str, Any]:
+    async def bcp_respond(args: dict[str, Any]) -> dict[str, Any]:
         query_id = args.get("query_id", "")
         response = args.get("response", {})
 
@@ -1056,7 +1056,7 @@ def build_bctp_respond_tool(bctp_handler: BCTPHandler) -> Any:
                 "isError": True,
             }
 
-        result = await bctp_handler.respond_to_query(
+        result = await bcp_handler.respond_to_query(
             query_id=query_id, response=response
         )
         return {
@@ -1064,7 +1064,7 @@ def build_bctp_respond_tool(bctp_handler: BCTPHandler) -> Any:
             "isError": False,
         }
 
-    return bctp_respond
+    return bcp_respond
 
 
 # ---------------------------------------------------------------------------
@@ -1354,23 +1354,23 @@ def build_calendar_delete_tool(calendar_handler: CalendarHandler) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# BCTP query → prompt formatting
+# BCP query → prompt formatting
 # ---------------------------------------------------------------------------
 
 
-def _format_bctp_query_prompt(query: BCTPQueryMessage) -> str:
-    """Format an inbound BCTP query as a prompt for the LLM.
+def _format_bcp_query_prompt(query: BCPQueryMessage) -> str:
+    """Format an inbound BCP query as a prompt for the LLM.
 
     The prompt tells the LLM exactly what information to research and how
-    to respond using the BCTPRespond tool with the correct query_id and
+    to respond using the BCPRespond tool with the correct query_id and
     response structure.
     """
     parts = [
-        f"You received a BCTP query (id: {query.query_id}) "
+        f"You received a BCP query (id: {query.query_id}) "
         f"from agent '{query.from_agent}' (category {query.category}).",
         "",
         "Research the requested information and respond using the "
-        "`mcp__interagent__BCTPRespond` tool with:",
+        "`mcp__interagent__BCPRespond` tool with:",
         f'  - query_id: "{query.query_id}"',
         "  - response: a JSON object with the field names and values described below",
         "",
@@ -1589,7 +1589,7 @@ async def main() -> None:
     client: ClaudeSDKClient | None = None
     send_handler: SendMessageHandler | None = None
     restart_handler: RestartAgentHandler | None = None
-    bctp_handler: BCTPHandler | None = None
+    bcp_handler: BCPHandler | None = None
     email_handler: EmailHandler | None = None
 
     try:
@@ -1611,7 +1611,7 @@ async def main() -> None:
                 config = msg
                 send_handler = SendMessageHandler(dispatcher)
                 restart_handler = RestartAgentHandler(dispatcher)
-                bctp_handler = BCTPHandler(dispatcher)
+                bcp_handler = BCPHandler(dispatcher)
                 email_handler = EmailHandler(dispatcher)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
@@ -1623,14 +1623,14 @@ async def main() -> None:
                 )
 
                 # Build SDK options from the gateway-provided configuration.
-                # Custom tools (SendMessage, BCTPQuery, BCTPRespond) are hosted
+                # Custom tools (SendMessage, BCPQuery, BCPRespond) are hosted
                 # as in-process SDK MCP tools.  We strip them from the SDK tool
                 # list and replace with the MCP-prefixed names the SDK generates.
                 _custom_tools = {
                     _SEND_MESSAGE_TOOL,
                     _RESTART_AGENT_TOOL,
-                    _BCTP_QUERY_TOOL,
-                    _BCTP_RESPOND_TOOL,
+                    _BCP_QUERY_TOOL,
+                    _BCP_RESPOND_TOOL,
                     _SEND_EMAIL_TOOL,
                     _MOVE_EMAIL_TOOL,
                     _CREATE_FOLDER_TOOL,
@@ -1651,17 +1651,17 @@ async def main() -> None:
                     interagent_tools.append(build_send_message_tool(send_handler))
                     sdk_tools.append(_SEND_MESSAGE_MCP_NAME)
 
-                if _BCTP_QUERY_TOOL in config.tools:
-                    interagent_tools.append(build_bctp_query_tool(bctp_handler))
-                    sdk_tools.append(_BCTP_QUERY_MCP_NAME)
+                if _BCP_QUERY_TOOL in config.tools:
+                    interagent_tools.append(build_bcp_query_tool(bcp_handler))
+                    sdk_tools.append(_BCP_QUERY_MCP_NAME)
 
                 if _RESTART_AGENT_TOOL in config.tools:
                     interagent_tools.append(build_restart_agent_tool(restart_handler))
                     sdk_tools.append(_RESTART_AGENT_MCP_NAME)
 
-                if _BCTP_RESPOND_TOOL in config.tools:
-                    interagent_tools.append(build_bctp_respond_tool(bctp_handler))
-                    sdk_tools.append(_BCTP_RESPOND_MCP_NAME)
+                if _BCP_RESPOND_TOOL in config.tools:
+                    interagent_tools.append(build_bcp_respond_tool(bcp_handler))
+                    sdk_tools.append(_BCP_RESPOND_MCP_NAME)
 
                 if interagent_tools:
                     server = create_sdk_mcp_server(
@@ -1754,12 +1754,12 @@ async def main() -> None:
                 log.info("Received prompt (%d chars), dispatching to SDK", len(msg.content))
                 await run_prompt(client, msg.content)
 
-            elif isinstance(msg, BCTPQueryMessage):
+            elif isinstance(msg, BCPQueryMessage):
                 if client is None or config is None:
-                    emit_error("Received BCTP query before start message")
+                    emit_error("Received BCP query before start message")
                     continue
-                prompt = _format_bctp_query_prompt(msg)
-                log.info("BCTP query %s -> prompt (%d chars)", msg.query_id, len(prompt))
+                prompt = _format_bcp_query_prompt(msg)
+                log.info("BCP query %s -> prompt (%d chars)", msg.query_id, len(prompt))
                 await run_prompt(client, prompt)
 
             elif isinstance(msg, MemorySaveMessage):

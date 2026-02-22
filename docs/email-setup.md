@@ -219,7 +219,7 @@ session **high taint** from the start. This is correct — email content is
 untrusted and may contain prompt injection attempts.
 
 The email agent should be treated as a high-taint agent. If it needs to
-communicate findings to low-taint agents, use BCTP queries (bandwidth-
+communicate findings to low-taint agents, use BCP queries (bandwidth-
 constrained trust protocol) rather than raw `SendMessage`.
 
 ### Credential isolation
@@ -254,7 +254,7 @@ customize it by editing `workspace/agent-definitions/email.md`:
   senders, domains, or subject patterns
 - **Change filesystem permissions** — restrict or expand what the agent can
   read and write
-- **Add BCTP channels** — configure structured communication with other agents
+- **Add BCP channels** — configure structured communication with other agents
   for forwarding summaries without taint propagation
 
 ### Example: newsletter-only processor

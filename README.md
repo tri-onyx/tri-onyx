@@ -96,11 +96,11 @@ Capability (which tools an agent has) is controlled at the agent definition leve
 
 Both axes are **monotonic** — they can only increase during a session. You cannot un-see a prompt injection or un-learn a database record. When effective risk exceeds the agent's policy threshold, the gateway kills the session. No downgrade, no capability revocation — kill and restart clean.
 
-### Bandwidth-Constrained Trust Protocol (BCTP)
+### Bandwidth-Constrained Trust Protocol (BCP)
 
 The hardest problem in multi-agent security: how do you extract useful information from a tainted agent without contaminating the receiver?
 
-TriOnyx's answer is to treat inter-agent communication as a **channel capacity problem**. Instead of trying to detect prompt injection in free text (an arms race), BCTP constrains the *bandwidth* of the channel through which tainted data reaches clean agents:
+TriOnyx's answer is to treat inter-agent communication as a **channel capacity problem**. Instead of trying to detect prompt injection in free text (an arms race), BCP constrains the *bandwidth* of the channel through which tainted data reaches clean agents:
 
 **Category 1 — Structured Primitives (~1-10 bits).** Booleans, enums, bounded integers. Validated by deterministic code. At 7 bits of channel capacity, there is no encoding that can represent a coherent instruction. Prompt injection is not probabilistically reduced — it is *structurally impossible*.
 
@@ -116,7 +116,7 @@ Every query carries a theoretical bandwidth in bits. The system maintains a runn
 
 | Layer | Mechanism | What it enforces |
 |-------|-----------|-----------------|
-| **Message routing** | Gateway intercepts all inter-agent communication | Biba integrity (no taint flowing to cleaner agents without BCTP), BLP confidentiality (no sensitivity flowing to network-capable agents) |
+| **Message routing** | Gateway intercepts all inter-agent communication | Biba integrity (no taint flowing to cleaner agents without BCP), BLP confidentiality (no sensitivity flowing to network-capable agents) |
 | **Filesystem** | FUSE driver with pre-computed path trie | Per-file read/write globs, risk-manifest-based taint/sensitivity filtering |
 | **Network** | iptables rules per container | Host allowlists, deny-all with Claude API exception |
 | **Credentials** | Gateway as sole secret holder | Agents never receive tokens; sensitivity auto-classified from auth usage |
@@ -294,7 +294,7 @@ agents/                   Agent definitions (markdown + YAML frontmatter)
 
 ## Documentation
 
-- [docs/bctp.md](docs/bctp.md) — Bandwidth-Constrained Trust Protocol specification
+- [docs/bcp.md](docs/bcp.md) — Bandwidth-Constrained Trust Protocol specification
 - [docs/protocol.md](docs/protocol.md) — Gateway-runtime JSON Lines protocol
 - [docs/agent-runtime.md](docs/agent-runtime.md) — Agent execution lifecycle
 - [docs/fuse-driver-spec.md](docs/fuse-driver-spec.md) — FUSE driver specification

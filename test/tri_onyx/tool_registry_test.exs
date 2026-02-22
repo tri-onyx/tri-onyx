@@ -6,7 +6,7 @@ defmodule TriOnyx.ToolRegistryTest do
   describe "known?/1" do
     test "returns true for built-in tools" do
       for tool <- ["Read", "Write", "Bash", "Grep", "Glob", "Edit", "WebFetch", "WebSearch",
-                    "SendMessage", "BCTPQuery", "BCTPRespond", "RestartAgent",
+                    "SendMessage", "BCPQuery", "BCPRespond", "RestartAgent",
                     "SendEmail", "MoveEmail", "CreateFolder", "NotebookEdit"] do
         assert ToolRegistry.known?(tool), "expected #{tool} to be known"
       end

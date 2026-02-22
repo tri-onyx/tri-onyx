@@ -1,12 +1,12 @@
-defmodule TriOnyx.BCTP.Channel do
+defmodule TriOnyx.BCP.Channel do
   @moduledoc """
-  BCTP routing module for bandwidth-constrained inter-agent communication.
+  BCP routing module for bandwidth-constrained inter-agent communication.
 
-  Analogous to `TriOnyx.Triggers.InterAgent` but for the BCTP protocol.
+  Analogous to `TriOnyx.Triggers.InterAgent` but for the BCP protocol.
   Routes structured queries from Controller agents to Reader agents and
   validates responses on the return path. Validated responses are delivered
-  with `channel_mode: :bctp` metadata, which signals `AgentSession` to skip
-  taint elevation — making BCTP communication taint-neutral.
+  with `channel_mode: :bcp` metadata, which signals `AgentSession` to skip
+  taint elevation — making BCP communication taint-neutral.
 
   All routing decisions are deterministic and gateway-enforced. No LLM logic.
   """
@@ -15,9 +15,9 @@ defmodule TriOnyx.BCTP.Channel do
 
   alias TriOnyx.AgentSession
   alias TriOnyx.AgentSupervisor
-  alias TriOnyx.BCTP.ApprovalQueue
-  alias TriOnyx.BCTP.Query
-  alias TriOnyx.BCTP.Validator
+  alias TriOnyx.BCP.ApprovalQueue
+  alias TriOnyx.BCP.Query
+  alias TriOnyx.BCP.Validator
   alias TriOnyx.ConnectorHandler
   alias TriOnyx.TriggerRouter
 
@@ -26,7 +26,7 @@ defmodule TriOnyx.BCTP.Channel do
   # ETS table for pending queries. Created once by Application.start/2 so the
   # table is owned by the long-lived Application process. Task processes that
   # call send_query/receive_response read/write to it but don't own it.
-  @pending_queries_table :bctp_pending_queries
+  @pending_queries_table :bcp_pending_queries
 
   @type query_spec :: map()
 
@@ -65,12 +65,12 @@ defmodule TriOnyx.BCTP.Channel do
   end
 
   @doc """
-  Controller initiates a BCTP query to a Reader agent.
+  Controller initiates a BCP query to a Reader agent.
 
   Pipeline:
-  1. Look up both agent definitions to verify BCTP channel exists
+  1. Look up both agent definitions to verify BCP channel exists
   2. Validate roles (from must be controller, to must be reader)
-  3. Look up BCTP channel config from controller's definition
+  3. Look up BCP channel config from controller's definition
   4. Build a Query from the spec
   5. Compute bandwidth
   6. Dispatch query to Reader's AgentPort
@@ -82,7 +82,7 @@ defmodule TriOnyx.BCTP.Channel do
   def send_query(from_agent, to_agent, query_spec) do
     with {:ok, from_def} <- lookup_agent(from_agent),
          {:ok, _to_def} <- lookup_agent(to_agent),
-         {:ok, channel_config} <- find_bctp_channel(from_def, to_agent, :controller),
+         {:ok, channel_config} <- find_bcp_channel(from_def, to_agent, :controller),
          :ok <- validate_category(query_spec, channel_config),
          {:ok, query} <- build_query(from_agent, to_agent, query_spec),
          bandwidth <- Query.compute_bandwidth(query),
@@ -92,7 +92,7 @@ defmodule TriOnyx.BCTP.Channel do
       :ets.insert(@pending_queries_table, {query.id, query})
 
       Logger.info(
-        "BCTP.Channel: query #{query.id} from #{from_agent} to #{to_agent} " <>
+        "BCP.Channel: query #{query.id} from #{from_agent} to #{to_agent} " <>
           "(cat-#{query.category}, #{Float.round(bandwidth, 1)} bits)"
       )
 
@@ -105,7 +105,7 @@ defmodule TriOnyx.BCTP.Channel do
 
   Pipeline:
   1. Validate response against Query spec via Validator
-  2. On success: deliver to Controller with `channel_mode: :bctp` metadata
+  2. On success: deliver to Controller with `channel_mode: :bcp` metadata
   3. On failure: reject response
 
   Returns `{:ok, validated_response}` or `{:error, reason}`.
@@ -120,7 +120,7 @@ defmodule TriOnyx.BCTP.Channel do
 
       {:ok, validated, anomalies} ->
         Logger.warning(
-          "BCTP.Channel: query #{query.id} response has anomalies: #{inspect(anomalies)}"
+          "BCP.Channel: query #{query.id} response has anomalies: #{inspect(anomalies)}"
         )
 
         deliver_to_controller(query, validated, opts)
@@ -128,7 +128,7 @@ defmodule TriOnyx.BCTP.Channel do
 
       {:ok, validated, anomalies, :requires_approval} ->
         Logger.warning(
-          "BCTP.Channel: query #{query.id} Cat-3 response requires approval, " <>
+          "BCP.Channel: query #{query.id} Cat-3 response requires approval, " <>
             "anomalies: #{inspect(anomalies)}"
         )
 
@@ -145,7 +145,7 @@ defmodule TriOnyx.BCTP.Channel do
         response_content = Map.get(validated, :response, Map.get(validated, "response", ""))
 
         Logger.info(
-          "BCTP.Channel: Cat-3 approval for query #{query.id}, " <>
+          "BCP.Channel: Cat-3 approval for query #{query.id}, " <>
             "validated keys=#{inspect(Map.keys(validated))}, " <>
             "response_content length=#{byte_size(to_string(response_content))}"
         )
@@ -168,22 +168,22 @@ defmodule TriOnyx.BCTP.Channel do
         # Block until human approves/rejects or timeout
         case ApprovalQueue.await_decision(ApprovalQueue, approval_id, @approval_timeout_ms) do
           {:approved, _item} ->
-            Logger.info("BCTP.Channel: query #{query.id} Cat-3 response approved")
+            Logger.info("BCP.Channel: query #{query.id} Cat-3 response approved")
             deliver_to_controller(query, validated, opts)
             {:ok, validated}
 
           {:rejected, reason} ->
-            Logger.warning("BCTP.Channel: query #{query.id} Cat-3 response rejected: #{reason}")
+            Logger.warning("BCP.Channel: query #{query.id} Cat-3 response rejected: #{reason}")
             {:error, {:approval_rejected, reason}}
 
           {:error, :timeout} ->
-            Logger.warning("BCTP.Channel: query #{query.id} Cat-3 approval timed out")
+            Logger.warning("BCP.Channel: query #{query.id} Cat-3 approval timed out")
             {:error, :approval_timeout}
         end
 
       {:error, reason} ->
         Logger.warning(
-          "BCTP.Channel: query #{query.id} response rejected: #{reason}"
+          "BCP.Channel: query #{query.id} response rejected: #{reason}"
         )
 
         {:error, {:validation_failed, reason}}
@@ -200,21 +200,21 @@ defmodule TriOnyx.BCTP.Channel do
     end
   end
 
-  @spec find_bctp_channel(TriOnyx.AgentDefinition.t(), String.t(), :controller | :reader) ::
-          {:ok, TriOnyx.AgentDefinition.bctp_channel()} | {:error, term()}
-  defp find_bctp_channel(definition, peer_name, expected_role) do
-    case Enum.find(definition.bctp_channels, fn ch ->
+  @spec find_bcp_channel(TriOnyx.AgentDefinition.t(), String.t(), :controller | :reader) ::
+          {:ok, TriOnyx.AgentDefinition.bcp_channel()} | {:error, term()}
+  defp find_bcp_channel(definition, peer_name, expected_role) do
+    case Enum.find(definition.bcp_channels, fn ch ->
            ch.peer == peer_name and ch.role == expected_role
          end) do
       nil ->
-        {:error, {:no_bctp_channel, definition.name, peer_name, expected_role}}
+        {:error, {:no_bcp_channel, definition.name, peer_name, expected_role}}
 
       channel ->
         {:ok, channel}
     end
   end
 
-  @spec validate_category(query_spec(), TriOnyx.AgentDefinition.bctp_channel()) ::
+  @spec validate_category(query_spec(), TriOnyx.AgentDefinition.bcp_channel()) ::
           :ok | {:error, term()}
   defp validate_category(%{category: cat}, %{max_category: max_cat}) when cat <= max_cat, do: :ok
 
@@ -225,7 +225,7 @@ defmodule TriOnyx.BCTP.Channel do
   @spec build_query(String.t(), String.t(), query_spec()) ::
           {:ok, Query.t()} | {:error, term()}
   defp build_query(from_agent, to_agent, spec) do
-    session_id = Map.get(spec, :session_id, "bctp-#{:crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)}")
+    session_id = Map.get(spec, :session_id, "bcp-#{:crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)}")
 
     attrs =
       spec
@@ -246,24 +246,24 @@ defmodule TriOnyx.BCTP.Channel do
     # First, try to deliver to an existing session
     case AgentSupervisor.find_session(to_agent) do
       {:ok, session_pid} ->
-        AgentSession.deliver_bctp_query(
+        AgentSession.deliver_bcp_query(
           session_pid, query.id, query.category, query.from, spec
         )
 
       :error ->
         # Reader not running — start it via TriggerRouter and deliver the query.
-        # The BCTP query serves as the trigger payload that starts the reader session.
-        # We dispatch a :bctp trigger to ensure the session is created, then deliver.
-        bctp_trigger = %{
-          type: :bctp,
+        # The BCP query serves as the trigger payload that starts the reader session.
+        # We dispatch a :bcp trigger to ensure the session is created, then deliver.
+        bcp_trigger = %{
+          type: :bcp,
           agent_name: to_agent,
-          payload: "BCTP query from #{query.from} (cat-#{query.category}, id=#{query.id})",
-          metadata: %{bctp_query: true, from_agent: query.from}
+          payload: "BCP query from #{query.from} (cat-#{query.category}, id=#{query.id})",
+          metadata: %{bcp_query: true, from_agent: query.from}
         }
 
-        case TriggerRouter.dispatch(bctp_trigger) do
+        case TriggerRouter.dispatch(bcp_trigger) do
           {:ok, session_pid} ->
-            AgentSession.deliver_bctp_query(
+            AgentSession.deliver_bcp_query(
               session_pid, query.id, query.category, query.from, spec
             )
 
@@ -281,7 +281,7 @@ defmodule TriOnyx.BCTP.Channel do
 
     case AgentSupervisor.find_session(query.from) do
       {:ok, session_pid} ->
-        case AgentSession.deliver_bctp_response(
+        case AgentSession.deliver_bcp_response(
                session_pid,
                query.id,
                query.category,
@@ -291,24 +291,24 @@ defmodule TriOnyx.BCTP.Channel do
              ) do
           :ok ->
             Logger.info(
-              "BCTP.Channel: delivered validated response for query #{query.id} " <>
-                "to controller #{query.from} (channel_mode: :bctp)"
+              "BCP.Channel: delivered validated response for query #{query.id} " <>
+                "to controller #{query.from} (channel_mode: :bcp)"
             )
 
           {:error, reason} ->
             Logger.warning(
-              "BCTP.Channel: controller #{query.from} rejected delivery: #{inspect(reason)}"
+              "BCP.Channel: controller #{query.from} rejected delivery: #{inspect(reason)}"
             )
         end
 
       :error ->
-        Logger.warning("BCTP.Channel: controller #{query.from} not running, cannot deliver")
+        Logger.warning("BCP.Channel: controller #{query.from} not running, cannot deliver")
     end
 
     :ok
   rescue
     _ ->
-      Logger.warning("BCTP.Channel: failed to deliver to controller #{query.from}")
+      Logger.warning("BCP.Channel: failed to deliver to controller #{query.from}")
       :ok
   end
 

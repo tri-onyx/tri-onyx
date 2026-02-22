@@ -13,7 +13,7 @@ defmodule TriOnyx.ToolRegistry do
 
   @known_tools ~w(
     Read Grep Glob Write Edit NotebookEdit SendMessage
-    BCTPQuery BCTPRespond RestartAgent Bash WebFetch WebSearch
+    BCPQuery BCPRespond RestartAgent Bash WebFetch WebSearch
     SendEmail MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
   )
@@ -35,8 +35,8 @@ defmodule TriOnyx.ToolRegistry do
     "Edit" => %{requires_auth: false, capability_level: :low},
     "NotebookEdit" => %{requires_auth: false, capability_level: :low},
     "SendMessage" => %{requires_auth: false, capability_level: :low},
-    "BCTPQuery" => %{requires_auth: false, capability_level: :low},
-    "BCTPRespond" => %{requires_auth: false, capability_level: :low},
+    "BCPQuery" => %{requires_auth: false, capability_level: :low},
+    "BCPRespond" => %{requires_auth: false, capability_level: :low},
     "RestartAgent" => %{requires_auth: false, capability_level: :low},
     "Bash" => %{requires_auth: false, capability_level: :medium},
     "WebFetch" => %{requires_auth: false, capability_level: :medium},
@@ -61,8 +61,8 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "Edit",            display: "Edit",        variant: nil, group: "Filesystem",        note: nil},
     %{key: "NotebookEdit",    display: "NotebookEdit",variant: nil, group: "Filesystem",        note: nil},
     %{key: "SendMessage",     display: "SendMessage", variant: nil, group: "Messaging",         note: nil},
-    %{key: "BCTPQuery",       display: "BCTPQuery",   variant: nil, group: "Messaging",         note: nil},
-    %{key: "BCTPRespond",     display: "BCTPRespond", variant: nil, group: "Messaging",         note: nil},
+    %{key: "BCPQuery",       display: "BCPQuery",   variant: nil, group: "Messaging",         note: nil},
+    %{key: "BCPRespond",     display: "BCPRespond", variant: nil, group: "Messaging",         note: nil},
     %{key: "Bash/isolated",   display: "Bash",        variant: "no network",    group: "Execution / Web",   note: "shell execution, container-local only"},
     %{key: "Bash/network",    display: "Bash",        variant: "with network",  group: "Execution / Web",   note: "shell + network = can exfiltrate/act externally"},
     %{key: "WebFetch",        display: "WebFetch",    variant: nil, group: "Execution / Web",   note: "fetches arbitrary external web content"},

@@ -18,7 +18,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       system_prompt: "test prompt",
       heartbeat_every: nil,
       idle_timeout: nil,
-      bctp_channels: []
+      bcp_channels: []
     }
 
     merged = Map.merge(defaults, attrs)
@@ -36,7 +36,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       system_prompt: merged.system_prompt,
       heartbeat_every: merged[:heartbeat_every],
       idle_timeout: merged[:idle_timeout],
-      bctp_channels: merged.bctp_channels
+      bcp_channels: merged.bcp_channels
     }
   end
 
@@ -538,33 +538,33 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert :low = GraphAnalyzer.worst_case_taint(agent)
     end
 
-    test "BCTP controller inherits step_down of peer taint" do
+    test "BCP controller inherits step_down of peer taint" do
       # researcher has network → high taint; controller gets step_down(high) = medium
       researcher = make_def(%{name: "researcher", network: :outbound,
-        bctp_channels: [%{peer: "main", role: :reader, max_category: 2,
+        bcp_channels: [%{peer: "main", role: :reader, max_category: 2,
           budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
       main = make_def(%{name: "main", tools: ["Read", "Bash"],
-        bctp_channels: [%{peer: "researcher", role: :controller, max_category: 2,
+        bcp_channels: [%{peer: "researcher", role: :controller, max_category: 2,
           budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
 
       all_defs = %{"main" => main, "researcher" => researcher}
       assert :medium = GraphAnalyzer.worst_case_taint(main, all_defs)
     end
 
-    test "BCTP controller with low-taint peer stays low" do
+    test "BCP controller with low-taint peer stays low" do
       # peer has no external inputs → low taint; step_down(low) = low
       peer = make_def(%{name: "helper", tools: ["Read"]})
       main = make_def(%{name: "main", tools: ["Read", "Bash"],
-        bctp_channels: [%{peer: "helper", role: :controller, max_category: 1,
+        bcp_channels: [%{peer: "helper", role: :controller, max_category: 1,
           budget_bits: 100, max_cat2_queries: 0, max_cat3_queries: 0}]})
 
       all_defs = %{"main" => main, "helper" => peer}
       assert :low = GraphAnalyzer.worst_case_taint(main, all_defs)
     end
 
-    test "BCTP without peer context falls back to low" do
+    test "BCP without peer context falls back to low" do
       main = make_def(%{name: "main",
-        bctp_channels: [%{peer: "unknown", role: :controller, max_category: 2,
+        bcp_channels: [%{peer: "unknown", role: :controller, max_category: 2,
           budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
 
       assert :low = GraphAnalyzer.worst_case_taint(main, %{})
@@ -602,12 +602,12 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
   end
 
-  describe "BCTP edges in analyze/2" do
-    test "creates bctp edge from reader to controller" do
+  describe "BCP edges in analyze/2" do
+    test "creates bcp edge from reader to controller" do
       controller = make_def(%{
         name: "controller",
         tools: ["Read", "SendMessage"],
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "reader", role: :controller, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
@@ -616,7 +616,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       reader = make_def(%{
         name: "reader",
         tools: ["Read"],
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "controller", role: :reader, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
@@ -628,18 +628,18 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert length(controller_incoming) == 1
       edge = hd(controller_incoming)
       assert edge.from == "reader"
-      assert edge.edge_type == :bctp
+      assert edge.edge_type == :bcp
       assert edge.risk_level == "medium"
 
-      # Reader has no incoming bctp edges (only controller receives)
+      # Reader has no incoming bcp edges (only controller receives)
       assert result["reader"].incoming_edges == []
     end
 
-    test "bctp edge risk level matches max_category" do
+    test "bcp edge risk level matches max_category" do
       for {cat, expected_risk} <- [{1, "low"}, {2, "medium"}, {3, "high"}] do
         controller = make_def(%{
           name: "ctrl",
-          bctp_channels: [
+          bcp_channels: [
             %{peer: "rdr", role: :controller, max_category: cat, budget_bits: 100,
               max_cat2_queries: 0, max_cat3_queries: 0}
           ]
@@ -653,10 +653,10 @@ defmodule TriOnyx.GraphAnalyzerTest do
       end
     end
 
-    test "no bctp edge when peer does not exist" do
+    test "no bcp edge when peer does not exist" do
       controller = make_def(%{
         name: "ctrl",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "nonexistent", role: :controller, max_category: 1, budget_bits: 100,
             max_cat2_queries: 0, max_cat3_queries: 0}
         ]
@@ -667,11 +667,11 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
   end
 
-  describe "validate_bctp_roles/1" do
+  describe "validate_bcp_roles/1" do
     test "returns empty list when roles are symmetric" do
       controller = make_def(%{
         name: "ctrl",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
@@ -679,27 +679,27 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
       reader = make_def(%{
         name: "rdr",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
       })
 
-      assert [] == GraphAnalyzer.validate_bctp_roles([controller, reader])
+      assert [] == GraphAnalyzer.validate_bcp_roles([controller, reader])
     end
 
     test "warns when peer does not declare reader role" do
       controller = make_def(%{
         name: "ctrl",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
       })
 
-      reader = make_def(%{name: "rdr", bctp_channels: []})
+      reader = make_def(%{name: "rdr", bcp_channels: []})
 
-      warnings = GraphAnalyzer.validate_bctp_roles([controller, reader])
+      warnings = GraphAnalyzer.validate_bcp_roles([controller, reader])
       assert length(warnings) == 1
       assert hd(warnings).agent == "ctrl"
       assert hd(warnings).peer == "rdr"
@@ -709,13 +709,13 @@ defmodule TriOnyx.GraphAnalyzerTest do
     test "warns when peer does not exist" do
       controller = make_def(%{
         name: "ctrl",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "ghost", role: :controller, max_category: 1, budget_bits: 100,
             max_cat2_queries: 0, max_cat3_queries: 0}
         ]
       })
 
-      warnings = GraphAnalyzer.validate_bctp_roles([controller])
+      warnings = GraphAnalyzer.validate_bcp_roles([controller])
       assert length(warnings) == 1
       assert hd(warnings).warning =~ "does not exist"
     end
@@ -723,13 +723,13 @@ defmodule TriOnyx.GraphAnalyzerTest do
     test "ignores reader-only declarations (no symmetry check needed)" do
       reader = make_def(%{
         name: "rdr",
-        bctp_channels: [
+        bcp_channels: [
           %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
             max_cat2_queries: 5, max_cat3_queries: 0}
         ]
       })
 
-      assert [] == GraphAnalyzer.validate_bctp_roles([reader])
+      assert [] == GraphAnalyzer.validate_bcp_roles([reader])
     end
   end
 

@@ -11,8 +11,8 @@ Gateway -> Runtime (stdin):
   shutdown               -- graceful shutdown request
   send_message_response  -- gateway response after routing an inter-agent message
   restart_agent_response -- gateway response after a restart_agent_request
-  bctp_query             -- BCTP query delivered to a Reader agent
-  bctp_response_delivery -- validated BCTP response delivered to a Controller agent
+  bcp_query             -- BCP query delivered to a Reader agent
+  bcp_response_delivery -- validated BCP response delivered to a Controller agent
 
 Runtime -> Gateway (stdout):
   ready                -- runtime initialized, awaiting configuration
@@ -24,8 +24,8 @@ Runtime -> Gateway (stdout):
   log                  -- runtime log message (level + message)
   send_message_request   -- request gateway to route a message to another agent
   restart_agent_request  -- request gateway to restart another agent
-  bctp_query_request     -- Controller requests a BCTP query to a Reader
-  bctp_response        -- Reader responds to a BCTP query
+  bcp_query_request     -- Controller requests a BCP query to a Reader
+  bcp_response        -- Reader responds to a BCP query
 """
 
 from __future__ import annotations
@@ -122,8 +122,8 @@ class SendMessageResponse:
 
 
 @dataclass
-class BCTPQueryMessage:
-    """BCTP query delivered to a Reader agent by the gateway."""
+class BCPQueryMessage:
+    """BCP query delivered to a Reader agent by the gateway."""
 
     query_id: str
     category: int
@@ -134,7 +134,7 @@ class BCTPQueryMessage:
     max_words: int | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BCTPQueryMessage:
+    def from_dict(cls, data: dict[str, Any]) -> BCPQueryMessage:
         return cls(
             query_id=data.get("query_id", ""),
             category=data.get("category", 0),
@@ -147,8 +147,8 @@ class BCTPQueryMessage:
 
 
 @dataclass
-class BCTPResponseDeliveryMessage:
-    """Validated BCTP response delivered to a Controller agent by the gateway."""
+class BCPResponseDeliveryMessage:
+    """Validated BCP response delivered to a Controller agent by the gateway."""
 
     query_id: str
     category: int
@@ -157,7 +157,7 @@ class BCTPResponseDeliveryMessage:
     bandwidth_bits: float = 0.0
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BCTPResponseDeliveryMessage:
+    def from_dict(cls, data: dict[str, Any]) -> BCPResponseDeliveryMessage:
         return cls(
             query_id=data.get("query_id", ""),
             category=data.get("category", 0),
@@ -168,15 +168,15 @@ class BCTPResponseDeliveryMessage:
 
 
 @dataclass
-class BCTPValidationResult:
-    """Result of BCTP response validation, sent back to the Reader agent."""
+class BCPValidationResult:
+    """Result of BCP response validation, sent back to the Reader agent."""
 
     query_id: str
     success: bool
     detail: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> BCTPValidationResult:
+    def from_dict(cls, data: dict[str, Any]) -> BCPValidationResult:
         return cls(
             query_id=data.get("query_id", ""),
             success=data.get("success", False),
@@ -334,8 +334,8 @@ InboundMessage = (
     | ShutdownMessage
     | MemorySaveMessage
     | SendMessageResponse
-    | BCTPQueryMessage
-    | BCTPResponseDeliveryMessage
+    | BCPQueryMessage
+    | BCPResponseDeliveryMessage
     | SendEmailResponse
     | MoveEmailResponse
     | CreateFolderResponse
@@ -352,8 +352,8 @@ _INBOUND_PARSERS: dict[str, type] = {
     "shutdown": ShutdownMessage,
     "memory_save": MemorySaveMessage,
     "send_message_response": SendMessageResponse,
-    "bctp_query": BCTPQueryMessage,
-    "bctp_response_delivery": BCTPResponseDeliveryMessage,
+    "bcp_query": BCPQueryMessage,
+    "bcp_response_delivery": BCPResponseDeliveryMessage,
     "send_email_response": SendEmailResponse,
     "move_email_response": MoveEmailResponse,
     "create_folder_response": CreateFolderResponse,
@@ -468,19 +468,19 @@ def emit_send_message_request(
     })
 
 
-def emit_bctp_query_request(
+def emit_bcp_query_request(
     request_id: str,
     to: str,
     category: int,
     spec: dict[str, Any],
 ) -> None:
-    """Request the gateway to send a BCTP query to a Reader agent.
+    """Request the gateway to send a BCP query to a Reader agent.
 
     Emitted by a Controller agent's runtime.  The gateway validates the
     query against bandwidth constraints and routes it to the target Reader.
     """
     _emit({
-        "type": "bctp_query_request",
+        "type": "bcp_query_request",
         "request_id": request_id,
         "to": to,
         "category": category,
@@ -592,18 +592,18 @@ def emit_restart_agent_request(
     })
 
 
-def emit_bctp_response(
+def emit_bcp_response(
     query_id: str,
     response: dict[str, Any],
 ) -> None:
-    """Respond to a BCTP query received from the gateway.
+    """Respond to a BCP query received from the gateway.
 
     Emitted by a Reader agent's runtime after the LLM has produced a
     response to the query.  The gateway validates the response against
     bandwidth constraints before delivering it to the requesting Controller.
     """
     _emit({
-        "type": "bctp_response",
+        "type": "bcp_response",
         "query_id": query_id,
         "response": response,
     })

@@ -48,7 +48,7 @@ Where capability is derived from `(tools, network_policy)`:
 | SendEmail / MoveEmail / CreateFolder | **Medium** | Externally visible, gateway-mediated |
 | WebFetch / WebSearch (no Bash) | **Medium** | Outbound network, gateway-mediated |
 | Read / Write / Edit / Grep / Glob / NotebookEdit | **Low** | Internal filesystem only |
-| SendMessage / BCTPQuery / BCTPRespond / RestartAgent | **Low** | Internal inter-agent effects |
+| SendMessage / BCPQuery / BCPRespond / RestartAgent | **Low** | Internal inter-agent effects |
 
 Key insight: Bash is the only tool that executes **unmediated by the gateway**. All other external tools (email, web) go through the gateway which can inspect, throttle, and block. This is why Bash is treated differently — its base capability is medium, promoted to high when the agent has network access.
 

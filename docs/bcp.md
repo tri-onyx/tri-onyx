@@ -1,4 +1,4 @@
-# Bandwidth-Constrained Trust Protocol (BCTP)
+# Bandwidth-Constrained Trust Protocol (BCP)
 
 Protocol specification for secure communication between tainted and untainted agents in TriOnyx.
 
@@ -10,7 +10,7 @@ For the security rationale behind this protocol, see [ADR-001: Information Is th
 
 **Controller (Untainted Agent):** Orchestrates the task. Determines what information is needed, selects the query category, sends queries, validates responses, and takes actions. Never directly exposed to untrusted content.
 
-**Reader (Tainted Agent):** Processes untrusted content. Receives queries from the Controller and responds within the specified constraints. Has no tool access beyond responding to BCTP queries, no ability to initiate communication, and no influence over the protocol's structure.
+**Reader (Tainted Agent):** Processes untrusted content. Receives queries from the Controller and responds within the specified constraints. Has no tool access beyond responding to BCP queries, no ability to initiate communication, and no influence over the protocol's structure.
 
 The Controller is always the initiator. The Reader is always the responder. The entity exposed to adversarial content never controls the dialogue structure.
 
@@ -31,7 +31,7 @@ Once tainted, the agent's outputs are treated as potentially adversarial. The at
 
 ### Attacker Capabilities
 
-The attacker can embed arbitrary text within the untrusted content that the tainted agent processes. The attacker does not have direct access to the untainted agent, the protocol implementation, or system prompts. The attacker's only influence on the untainted agent is through what passes through the BCTP channel.
+The attacker can embed arbitrary text within the untrusted content that the tainted agent processes. The attacker does not have direct access to the untainted agent, the protocol implementation, or system prompts. The attacker's only influence on the untainted agent is through what passes through the BCP channel.
 
 ---
 
@@ -222,11 +222,11 @@ Limited deterministic checks, relying primarily on human judgment.
 
 ## Gateway Integration
 
-BCTP is implemented as inter-agent message types in the TriOnyx gateway. See [protocol.md](protocol.md) for the full message format specification.
+BCP is implemented as inter-agent message types in the TriOnyx gateway. See [protocol.md](protocol.md) for the full message format specification.
 
 ### Outbound (Controller → Gateway → Reader)
 
-The Controller agent calls the `BCTPQuery` MCP tool with:
+The Controller agent calls the `BCPQuery` MCP tool with:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -237,11 +237,11 @@ The Controller agent calls the `BCTPQuery` MCP tool with:
 | `directive` | string | Category 3: summary instruction |
 | `max_words` | integer | Category 2/3: word limit per answer/summary |
 
-The gateway routes this as a `bctp_query` message to the Reader's session via stdin.
+The gateway routes this as a `bcp_query` message to the Reader's session via stdin.
 
 ### Inbound (Reader → Gateway → Controller)
 
-The Reader agent calls the `BCTPRespond` MCP tool with:
+The Reader agent calls the `BCPRespond` MCP tool with:
 
 | Field | Type | Description |
 |-------|------|-------------|
@@ -256,11 +256,11 @@ The gateway validates the response:
 2. **Category 2:** Length enforcement, format checking. Invalid → reject, increment retry counter.
 3. **Category 3:** Length enforcement, then route to human approval queue.
 
-Validated responses are delivered to the Controller as `bctp_response_delivery` messages with taint stepped down one level from the Reader's current taint.
+Validated responses are delivered to the Controller as `bcp_response_delivery` messages with taint stepped down one level from the Reader's current taint.
 
 ### Taint Step-Down
 
-| Reader's taint | Response taint after BCTP validation |
+| Reader's taint | Response taint after BCP validation |
 |----------------|--------------------------------------|
 | High           | Medium                               |
 | Medium         | Low                                  |

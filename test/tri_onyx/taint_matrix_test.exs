@@ -27,8 +27,8 @@ defmodule TriOnyx.TaintMatrixTest do
 
     test "messaging tools are low taint" do
       assert :low = TaintMatrix.tool_taint("SendMessage")
-      assert :low = TaintMatrix.tool_taint("BCTPQuery")
-      assert :low = TaintMatrix.tool_taint("BCTPRespond")
+      assert :low = TaintMatrix.tool_taint("BCPQuery")
+      assert :low = TaintMatrix.tool_taint("BCPRespond")
     end
 
     test "control tools are low taint" do

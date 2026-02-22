@@ -35,7 +35,7 @@ UV replaces pip, venv, and virtualenv. It resolves and installs dependencies det
 
 ### asyncio supports concurrent message handling within the runtime
 
-The agent runner uses `asyncio` to multiplex stdin reading, SDK response streaming, and inter-agent message routing (SendMessage, BCTP queries) without threads. The `InboundDispatcher` decouples the stdin reader from message handlers using `asyncio.Queue`, allowing the runtime to block on a SendMessage response while continuing to process control messages.
+The agent runner uses `asyncio` to multiplex stdin reading, SDK response streaming, and inter-agent message routing (SendMessage, BCP queries) without threads. The `InboundDispatcher` decouples the stdin reader from message handlers using `asyncio.Queue`, allowing the runtime to block on a SendMessage response while continuing to process control messages.
 
 ### The connector is I/O-bound glue code
 
@@ -59,11 +59,11 @@ AgentSession (Elixir GenServer)
 
 Communication uses JSON Lines over stdin/stdout:
 
-- **stdin** (gateway → runtime): `start`, `prompt`, `shutdown`, `send_message_response`, `bctp_query`, `bctp_response_delivery`
-- **stdout** (runtime → gateway): `ready`, `text`, `tool_use`, `tool_result`, `result`, `error`, `send_message_request`, `bctp_query_request`, `bctp_response`
+- **stdin** (gateway → runtime): `start`, `prompt`, `shutdown`, `send_message_response`, `bcp_query`, `bcp_response_delivery`
+- **stdout** (runtime → gateway): `ready`, `text`, `tool_use`, `tool_result`, `result`, `error`, `send_message_request`, `bcp_query_request`, `bcp_response`
 - **stderr**: diagnostic logging only, plus FUSE write events from the filesystem driver
 
-The runtime creates a `ClaudeSDKClient` on `start`, drives it with prompts, and streams every response block back as a protocol message. Inter-agent tools (SendMessage, BCTPQuery, BCTPRespond) are hosted as in-process MCP tools via the SDK's `@tool()` decorator — no external MCP server process.
+The runtime creates a `ClaudeSDKClient` on `start`, drives it with prompts, and streams every response block back as a protocol message. Inter-agent tools (SendMessage, BCPQuery, BCPRespond) are hosted as in-process MCP tools via the SDK's `@tool()` decorator — no external MCP server process.
 
 ### Connector
 

@@ -19,9 +19,9 @@ defmodule TriOnyx.Router do
   - `PUT /webhook-endpoints/:id` — update webhook endpoint
   - `DELETE /webhook-endpoints/:id` — delete webhook endpoint
   - `POST /webhook-endpoints/:id/rotate-secret` — rotate signing secret
-  - `GET /bctp/approvals` — list pending BCTP approval items
-  - `POST /bctp/approvals/:id/approve` — approve a pending BCTP item
-  - `POST /bctp/approvals/:id/reject` — reject a pending BCTP item with reason
+  - `GET /bcp/approvals` — list pending BCP approval items
+  - `POST /bcp/approvals/:id/approve` — approve a pending BCP item
+  - `POST /bcp/approvals/:id/reject` — reject a pending BCP item with reason
   - `GET /api/matrix` — classification matrix (taint, sensitivity, risk)
   - `GET /connectors/ws` — WebSocket upgrade for external connectors
   - `GET /connectors` — list active connectors
@@ -50,7 +50,7 @@ defmodule TriOnyx.Router do
   alias TriOnyx.Triggers.ExternalMessage
   alias TriOnyx.Workspace
   alias TriOnyx.Triggers.Scheduler
-  alias TriOnyx.BCTP.ApprovalQueue
+  alias TriOnyx.BCP.ApprovalQueue
   alias TriOnyx.Triggers.Webhook
   alias TriOnyx.WebhookEndpoint
   alias TriOnyx.WebhookReceiver
@@ -176,7 +176,7 @@ defmodule TriOnyx.Router do
           "fs_write" => definition.fs_write,
           "send_to" => definition.send_to,
           "receive_from" => definition.receive_from,
-          "bctp_channels" => serialize_bctp_channels(definition.bctp_channels),
+          "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
           "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network))
         }
 
@@ -531,9 +531,9 @@ defmodule TriOnyx.Router do
     end
   end
 
-  # --- BCTP Approval Queue ---
+  # --- BCP Approval Queue ---
 
-  get "/bctp/approvals" do
+  get "/bcp/approvals" do
     items = ApprovalQueue.list_pending()
 
     serialized =
@@ -553,7 +553,7 @@ defmodule TriOnyx.Router do
     |> send_resp(200, Jason.encode!(%{"approvals" => serialized}))
   end
 
-  post "/bctp/approvals/:id/approve" do
+  post "/bcp/approvals/:id/approve" do
     case ApprovalQueue.approve(id) do
       {:ok, item} ->
         conn
@@ -575,7 +575,7 @@ defmodule TriOnyx.Router do
     end
   end
 
-  post "/bctp/approvals/:id/reject" do
+  post "/bcp/approvals/:id/reject" do
     body = conn.assigns[:raw_body] || ""
 
     reason =
@@ -1080,8 +1080,8 @@ defmodule TriOnyx.Router do
     end)
   end
 
-  @spec serialize_bctp_channels([TriOnyx.AgentDefinition.bctp_channel()]) :: [map()]
-  defp serialize_bctp_channels(channels) do
+  @spec serialize_bcp_channels([TriOnyx.AgentDefinition.bcp_channel()]) :: [map()]
+  defp serialize_bcp_channels(channels) do
     Enum.map(channels, fn ch ->
       %{
         "peer" => ch.peer,

@@ -20,7 +20,7 @@ TriOnyx needs a mechanism that allows information to flow from tainted agents to
 
 ## Decision
 
-Adopt the **Bandwidth-Constrained Trust Protocol (BCTP)**: a communication protocol between tainted and untainted agents where security is achieved by restricting the bandwidth — measured in bits — of the channel through which tainted output reaches a clean agent. The untainted agent controls the dialogue structure, the tainted agent can only respond within constraints it did not choose, and every response is validated by deterministic code before the untainted agent processes it.
+Adopt the **Bandwidth-Constrained Trust Protocol (BCP)**: a communication protocol between tainted and untainted agents where security is achieved by restricting the bandwidth — measured in bits — of the channel through which tainted output reaches a clean agent. The untainted agent controls the dialogue structure, the tainted agent can only respond within constraints it did not choose, and every response is validated by deterministic code before the untainted agent processes it.
 
 ## Rationale
 
@@ -34,7 +34,7 @@ This reframes the defense from "detect the attack" to "make the attack inexpress
 
 ### Three query categories create a graduated bandwidth spectrum
 
-BCTP defines three categories, each with different bandwidth characteristics and security properties:
+BCP defines three categories, each with different bandwidth characteristics and security properties:
 
 **Category 1 — Structured Primitives** (~1-10 bits per query)
 
@@ -56,7 +56,7 @@ This prevents a class of attacks where the tainted agent manipulates the dialogu
 
 ### Escalation is expensive by design
 
-Moving from Category 1 to Category 2 to Category 3 widens the channel and weakens the security guarantees. BCTP makes this escalation structurally expensive:
+Moving from Category 1 to Category 2 to Category 3 widens the channel and weakens the security guarantees. BCP makes this escalation structurally expensive:
 
 - Each task has a fixed **escalation budget**. Once exhausted, the task fails rather than escalating further.
 - Escalation requires the controller to log a justification based on its own analysis, not the reader's claims.
@@ -67,40 +67,40 @@ This prevents an attacker from inducing escalation by having the tainted agent r
 
 ### Bandwidth is auditable and measurable
 
-Every BCTP query carries a theoretical maximum bandwidth in bits. The system maintains a running total per task. This gives operators a quantitative measure of how much attacker-controllable information has entered clean agent contexts — not a qualitative "seems safe" assessment, but a number: "this task exposed the controller to 47 bits from tainted sources, of which 6.9 were Category 1 (deterministically validated) and 40 were Category 2 (format-validated)."
+Every BCP query carries a theoretical maximum bandwidth in bits. The system maintains a running total per task. This gives operators a quantitative measure of how much attacker-controllable information has entered clean agent contexts — not a qualitative "seems safe" assessment, but a number: "this task exposed the controller to 47 bits from tainted sources, of which 6.9 were Category 1 (deterministically validated) and 40 were Category 2 (format-validated)."
 
 Anomalous bandwidth consumption triggers alerts. A task that normally runs at 20 bits suddenly consuming 2,000 bits indicates either a workflow change or an escalation attack.
 
-### Taint steps down through BCTP, not through sanitization heuristics
+### Taint steps down through BCP, not through sanitization heuristics
 
-In TriOnyx's taint model, BCTP is the mechanism by which taint is reduced in transit. When a message passes through the BCTP protocol (the controller queries the reader and validates the response), the output's taint steps down one level:
+In TriOnyx's taint model, BCP is the mechanism by which taint is reduced in transit. When a message passes through the BCP protocol (the controller queries the reader and validates the response), the output's taint steps down one level:
 
-- High → Medium (reader processed raw internet data; validated BCTP response is medium-taint)
-- Medium → Low (reader processed medium-taint data; validated BCTP response is low-taint)
+- High → Medium (reader processed raw internet data; validated BCP response is medium-taint)
+- Medium → Low (reader processed medium-taint data; validated BCP response is low-taint)
 
 This step-down is not based on content inspection. It is based on the structural bandwidth constraint and deterministic validation. The taint reduction is a property of the protocol, not a judgment about the content.
 
 ### Hidden channels are acknowledged and mitigated
 
-Even within constrained schemas, unintended bandwidth exists: response latency, field ordering, capitalization, whitespace, presence/absence of optional fields. BCTP addresses these by normalizing responses (lowercase, strip whitespace, enforce field ordering) before the controller processes them. The controller receives only the normalized, validated response — never the raw output. This does not eliminate all covert channels, but it reduces them to levels below what is needed for a coherent attack.
+Even within constrained schemas, unintended bandwidth exists: response latency, field ordering, capitalization, whitespace, presence/absence of optional fields. BCP addresses these by normalizing responses (lowercase, strip whitespace, enforce field ordering) before the controller processes them. The controller receives only the normalized, validated response — never the raw output. This does not eliminate all covert channels, but it reduces them to levels below what is needed for a coherent attack.
 
 ## Integration with TriOnyx
 
-BCTP is implemented as an inter-agent communication mode in the gateway:
+BCP is implemented as an inter-agent communication mode in the gateway:
 
-1. The controller agent calls the `BCTPQuery` tool with a category, fields/questions, and the target reader agent
+1. The controller agent calls the `BCPQuery` tool with a category, fields/questions, and the target reader agent
 2. The gateway routes the query to the reader agent's session
 3. The reader agent processes the untrusted content and responds within constraints
 4. The gateway validates the response deterministically (Category 1/2) or routes to human approval (Category 3)
 5. The validated response is delivered to the controller with taint stepped down one level
 
-The gateway enforces the protocol — agents cannot bypass BCTP by using regular `SendMessage` to communicate with tainted agents, because the gateway checks taint levels on all messages and blocks direct communication that would violate Biba integrity constraints.
+The gateway enforces the protocol — agents cannot bypass BCP by using regular `SendMessage` to communicate with tainted agents, because the gateway checks taint levels on all messages and blocks direct communication that would violate Biba integrity constraints.
 
 ## Alternatives Considered
 
 ### Content filtering and injection detection
 
-Train a classifier to detect prompt injection in tainted outputs. Fundamentally an arms race: the classifier must catch every possible encoding of adversarial instructions, while the attacker needs only one that passes. No classifier achieves zero false negatives against adversarial inputs. Useful as a supplementary layer (BCTP Category 2 uses anomaly detection for instruction-like language), but not viable as a primary defense.
+Train a classifier to detect prompt injection in tainted outputs. Fundamentally an arms race: the classifier must catch every possible encoding of adversarial instructions, while the attacker needs only one that passes. No classifier achieves zero false negatives against adversarial inputs. Useful as a supplementary layer (BCP Category 2 uses anomaly detection for instruction-like language), but not viable as a primary defense.
 
 ### LLM-based output sanitization
 
@@ -108,15 +108,15 @@ Use a second LLM to "clean" the tainted agent's output before the controller see
 
 ### Complete isolation with human intermediary
 
-All information from tainted agents passes through a human. Secure but does not scale. A human reviewing every piece of extracted data becomes the bottleneck. BCTP achieves a practical balance: Category 1 and 2 queries flow without human involvement (deterministic validation is sufficient), and only Category 3 requires human review.
+All information from tainted agents passes through a human. Secure but does not scale. A human reviewing every piece of extracted data becomes the bottleneck. BCP achieves a practical balance: Category 1 and 2 queries flow without human involvement (deterministic validation is sufficient), and only Category 3 requires human review.
 
 ## Consequences
 
 - **Positive:** The attack surface is quantifiable in bits rather than assessed by heuristics. Operators can set bandwidth budgets per task and audit actual consumption.
 - **Positive:** Category 1 queries provide structural immunity to prompt injection — not probabilistic detection, but information-theoretic impossibility at the given bandwidth.
 - **Positive:** The protocol degrades gracefully: even if Category 2 validation misses something, the constrained bandwidth limits the expressiveness of any attack that gets through.
-- **Positive:** Taint step-down through BCTP gives the system a principled mechanism for allowing information to flow from untrusted to trusted contexts without treating the output as fully tainted.
-- **Negative:** BCTP adds complexity to agent workflow design. Controllers must decompose information needs into specific queries rather than asking open-ended questions. This requires more deliberate workflow architecture.
+- **Positive:** Taint step-down through BCP gives the system a principled mechanism for allowing information to flow from untrusted to trusted contexts without treating the output as fully tainted.
+- **Negative:** BCP adds complexity to agent workflow design. Controllers must decompose information needs into specific queries rather than asking open-ended questions. This requires more deliberate workflow architecture.
 - **Negative:** Category 3 (free-text summaries) requires human-in-the-loop approval, which introduces latency and does not scale to high-throughput workflows. Systems that frequently need Category 3 should redesign their information extraction to use Category 1/2.
 - **Negative:** The protocol assumes the controller agent correctly selects the minimum category. A poorly designed controller that defaults to Category 3 undermines the bandwidth constraints. Mitigated by escalation budgets and mandatory logging.
-- **Accepted trade-off:** BCTP restricts the expressiveness of inter-agent communication in exchange for quantifiable security. Tasks that genuinely require high-bandwidth tainted-to-clean information flow (e.g., "summarize this 50-page document in full detail") cannot be made safe by any mechanism — the bandwidth needed for the task is the same bandwidth an attacker would use. BCTP makes this trade-off explicit rather than hiding it behind a false sense of security.
+- **Accepted trade-off:** BCP restricts the expressiveness of inter-agent communication in exchange for quantifiable security. Tasks that genuinely require high-bandwidth tainted-to-clean information flow (e.g., "summarize this 50-page document in full detail") cannot be made safe by any mechanism — the bandwidth needed for the task is the same bandwidth an attacker would use. BCP makes this trade-off explicit rather than hiding it behind a false sense of security.

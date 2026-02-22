@@ -26,10 +26,10 @@ defmodule TriOnyx.AuditLog do
           | :inter_agent_message
           | :messaging_policy_rejection
           | :trigger
-          | :bctp_query
-          | :bctp_response
-          | :bctp_validation
-          | :bctp_escalation
+          | :bcp_query
+          | :bcp_response
+          | :bcp_validation
+          | :bcp_escalation
 
   @type event :: %{atom() => term()}
 
@@ -178,12 +178,12 @@ defmodule TriOnyx.AuditLog do
   end
 
   @doc """
-  Logs a BCTP query initiation event.
+  Logs a BCP query initiation event.
   """
-  @spec log_bctp_query(GenServer.server(), String.t(), String.t(), atom(), map()) :: :ok
-  def log_bctp_query(server \\ __MODULE__, from_agent, to_agent, category, query_spec) do
+  @spec log_bcp_query(GenServer.server(), String.t(), String.t(), atom(), map()) :: :ok
+  def log_bcp_query(server \\ __MODULE__, from_agent, to_agent, category, query_spec) do
     GenServer.cast(server, {:log, %{
-      type: :bctp_query,
+      type: :bcp_query,
       from_agent: from_agent,
       to_agent: to_agent,
       category: category,
@@ -192,12 +192,12 @@ defmodule TriOnyx.AuditLog do
   end
 
   @doc """
-  Logs a BCTP validated response event.
+  Logs a BCP validated response event.
   """
-  @spec log_bctp_response(GenServer.server(), String.t(), term(), map()) :: :ok
-  def log_bctp_response(server \\ __MODULE__, query_id, raw_response, validation_result) do
+  @spec log_bcp_response(GenServer.server(), String.t(), term(), map()) :: :ok
+  def log_bcp_response(server \\ __MODULE__, query_id, raw_response, validation_result) do
     GenServer.cast(server, {:log, %{
-      type: :bctp_response,
+      type: :bcp_response,
       query_id: query_id,
       raw_response: raw_response,
       validation_result: validation_result,
@@ -206,12 +206,12 @@ defmodule TriOnyx.AuditLog do
   end
 
   @doc """
-  Logs a BCTP validation outcome event.
+  Logs a BCP validation outcome event.
   """
-  @spec log_bctp_validation(GenServer.server(), String.t(), atom(), map()) :: :ok
-  def log_bctp_validation(server \\ __MODULE__, query_id, category, validation_details) do
+  @spec log_bcp_validation(GenServer.server(), String.t(), atom(), map()) :: :ok
+  def log_bcp_validation(server \\ __MODULE__, query_id, category, validation_details) do
     GenServer.cast(server, {:log, %{
-      type: :bctp_validation,
+      type: :bcp_validation,
       query_id: query_id,
       category: category,
       pass: validation_details[:pass],
@@ -222,12 +222,12 @@ defmodule TriOnyx.AuditLog do
   end
 
   @doc """
-  Logs a BCTP category escalation event.
+  Logs a BCP category escalation event.
   """
-  @spec log_bctp_escalation(GenServer.server(), String.t(), String.t(), atom(), atom()) :: :ok
-  def log_bctp_escalation(server \\ __MODULE__, from_agent, to_agent, old_category, new_category) do
+  @spec log_bcp_escalation(GenServer.server(), String.t(), String.t(), atom(), atom()) :: :ok
+  def log_bcp_escalation(server \\ __MODULE__, from_agent, to_agent, old_category, new_category) do
     GenServer.cast(server, {:log, %{
-      type: :bctp_escalation,
+      type: :bcp_escalation,
       from_agent: from_agent,
       to_agent: to_agent,
       old_category: old_category,

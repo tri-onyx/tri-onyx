@@ -1,40 +1,40 @@
-defmodule TriOnyx.Integration.BCTPTaintTest do
+defmodule TriOnyx.Integration.BCPTaintTest do
   @moduledoc """
-  Integration tests for BCTP taint-neutral delivery.
+  Integration tests for BCP taint-neutral delivery.
 
   Verifies the core security property of the Bandwidth-Constrained Trust
-  Protocol: BCTP responses are always classified as low taint regardless of
+  Protocol: BCP responses are always classified as low taint regardless of
   sender taint level, while free-text inter-agent messages propagate the
   sender's taint without step-down.
 
   Tests cover:
-  - BCTP taint classification across all categories
+  - BCP taint classification across all categories
   - Free-text taint propagation (no step-down for sanitized messages)
   - Category-1 deterministic validation (boolean, enum, integer)
   - Category-2 word-limit enforcement
   - Bandwidth budget tracking and enforcement
-  - Contrast between BCTP and free-text taint semantics
+  - Contrast between BCP and free-text taint semantics
   """
   use ExUnit.Case, async: true
 
   alias TriOnyx.AgentDefinition
-  alias TriOnyx.BCTP.Bandwidth
-  alias TriOnyx.BCTP.Query
-  alias TriOnyx.BCTP.Validator
+  alias TriOnyx.BCP.Bandwidth
+  alias TriOnyx.BCP.Query
+  alias TriOnyx.BCP.Validator
   alias TriOnyx.InformationClassifier
 
   @controller_def %AgentDefinition{
-    name: "bctp-controller",
-    description: "Controller agent for BCTP tests",
+    name: "bcp-controller",
+    description: "Controller agent for BCP tests",
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Grep"],
     network: :none,
     fs_read: [],
     fs_write: [],
-    system_prompt: "BCTP controller test agent.",
-    bctp_channels: [
+    system_prompt: "BCP controller test agent.",
+    bcp_channels: [
       %{
-        peer: "bctp-reader",
+        peer: "bcp-reader",
         role: :controller,
         max_category: 2,
         budget_bits: 100.0,
@@ -45,17 +45,17 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
   }
 
   @reader_def %AgentDefinition{
-    name: "bctp-reader",
-    description: "Reader agent for BCTP tests",
+    name: "bcp-reader",
+    description: "Reader agent for BCP tests",
     model: "claude-haiku-4-5",
     tools: ["Read", "WebFetch"],
     network: :outbound,
     fs_read: [],
     fs_write: [],
-    system_prompt: "BCTP reader test agent.",
-    bctp_channels: [
+    system_prompt: "BCP reader test agent.",
+    bcp_channels: [
       %{
-        peer: "bctp-controller",
+        peer: "bcp-controller",
         role: :reader,
         max_category: 2,
         budget_bits: 100.0,
@@ -65,34 +65,34 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
     ]
   }
 
-  # ── BCTP taint classification ──────────────────────────────────────────
+  # ── BCP taint classification ──────────────────────────────────────────
 
-  describe "BCTP taint classification" do
-    test "classify_bctp steps down sender taint by one level" do
-      assert %{taint: :low} = InformationClassifier.classify_bctp(1, 3.0, :low)
-      assert %{taint: :low} = InformationClassifier.classify_bctp(1, 3.0, :medium)
-      assert %{taint: :medium} = InformationClassifier.classify_bctp(1, 3.0, :high)
+  describe "BCP taint classification" do
+    test "classify_bcp steps down sender taint by one level" do
+      assert %{taint: :low} = InformationClassifier.classify_bcp(1, 3.0, :low)
+      assert %{taint: :low} = InformationClassifier.classify_bcp(1, 3.0, :medium)
+      assert %{taint: :medium} = InformationClassifier.classify_bcp(1, 3.0, :high)
     end
 
-    test "classify_bctp defaults to low sender taint (backward compat)" do
-      result = InformationClassifier.classify_bctp(1, 3.0)
+    test "classify_bcp defaults to low sender taint (backward compat)" do
+      result = InformationClassifier.classify_bcp(1, 3.0)
       assert %{taint: :low, sensitivity: :low} = result
     end
 
-    test "classify_bctp reason includes category and sender taint" do
-      result = InformationClassifier.classify_bctp(2, 55.0, :high)
-      assert result.reason =~ "BCTP cat-2"
+    test "classify_bcp reason includes category and sender taint" do
+      result = InformationClassifier.classify_bcp(2, 55.0, :high)
+      assert result.reason =~ "BCP cat-2"
       assert result.reason =~ "sender taint: high"
     end
 
-    test "classify_bctp includes bandwidth bits in reason" do
-      result = InformationClassifier.classify_bctp(1, 7.5)
+    test "classify_bcp includes bandwidth bits in reason" do
+      result = InformationClassifier.classify_bcp(1, 7.5)
       assert result.reason =~ "7.5 bits"
     end
 
-    test "classify_bctp sensitivity is always low" do
+    test "classify_bcp sensitivity is always low" do
       for category <- [1, 2, 3], sender <- [:low, :medium, :high] do
-        result = InformationClassifier.classify_bctp(category, 100.0, sender)
+        result = InformationClassifier.classify_bcp(category, 100.0, sender)
         assert result.sensitivity == :low, "expected :low sensitivity for cat-#{category} sender #{sender}"
       end
     end
@@ -145,8 +145,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-bool",
           fields: [
             %{name: "is_malicious", type: :boolean, options: nil, min: nil, max: nil}
@@ -164,8 +164,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-enum",
           fields: [
             %{
@@ -188,8 +188,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-int",
           fields: [
             %{name: "confidence", type: :integer, options: nil, min: 0, max: 100}
@@ -206,8 +206,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-bad-enum",
           fields: [
             %{
@@ -230,8 +230,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-bad-int",
           fields: [
             %{name: "score", type: :integer, options: nil, min: 1, max: 10}
@@ -253,8 +253,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-bad-bool",
           fields: [
             %{name: "is_valid", type: :boolean, options: nil, min: nil, max: nil}
@@ -271,8 +271,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat1-multi",
           fields: [
             %{name: "is_malicious", type: :boolean, options: nil, min: nil, max: nil},
@@ -302,8 +302,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat2-ok",
           questions: [
             %{name: "author", format: :person_name, max_words: 5}
@@ -319,8 +319,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat2-exceed",
           questions: [
             %{name: "author", format: :person_name, max_words: 3}
@@ -338,8 +338,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat2-exact",
           questions: [
             %{name: "name", format: :person_name, max_words: 3}
@@ -354,8 +354,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat2-date",
           questions: [
             %{name: "published", format: :date, max_words: 1}
@@ -370,8 +370,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-cat2-email",
           questions: [
             %{name: "contact", format: :email, max_words: 1}
@@ -422,8 +422,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-bw-charge",
           fields: [
             %{name: "flag", type: :boolean, options: nil, min: nil, max: nil}
@@ -449,8 +449,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-bw-exceed",
           fields: [
             %{
@@ -486,8 +486,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 2,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-bw-cat2",
           questions: [
             %{name: "name", format: :short_text, max_words: 3}
@@ -511,8 +511,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 3,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-bw-cat3",
           directive: "Summarize the document",
           max_words: 20
@@ -535,8 +535,8 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       {:ok, query} =
         Query.new(%{
           category: 1,
-          from: "bctp-controller",
-          to: "bctp-reader",
+          from: "bcp-controller",
+          to: "bcp-reader",
           session_id: "test-session-bw-cumul",
           fields: [
             %{name: "flag", type: :boolean, options: nil, min: nil, max: nil}
@@ -554,20 +554,20 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
     end
   end
 
-  # ── BCTP vs free-text contrast ────────────────────────────────────────
+  # ── BCP vs free-text contrast ────────────────────────────────────────
 
-  describe "BCTP vs free-text taint contrast" do
-    test "BCTP reduces high sender taint to medium, free-text passes it through" do
-      bctp_result = InformationClassifier.classify_bctp(1, 3.0, :high)
-      assert bctp_result.taint == :medium
+  describe "BCP vs free-text taint contrast" do
+    test "BCP reduces high sender taint to medium, free-text passes it through" do
+      bcp_result = InformationClassifier.classify_bcp(1, 3.0, :high)
+      assert bcp_result.taint == :medium
 
       freetext_result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: :high, sensitivity: :low})
       assert freetext_result.taint == :high
     end
 
-    test "BCTP reduces medium sender taint to low, free-text passes it through" do
-      bctp_result = InformationClassifier.classify_bctp(2, 55.0, :medium)
-      assert bctp_result.taint == :low
+    test "BCP reduces medium sender taint to low, free-text passes it through" do
+      bcp_result = InformationClassifier.classify_bcp(2, 55.0, :medium)
+      assert bcp_result.taint == :low
 
       freetext_result =
         InformationClassifier.classify_inter_agent(:sanitized, %{taint: :medium, sensitivity: :low})
@@ -582,14 +582,14 @@ defmodule TriOnyx.Integration.BCTPTaintTest do
       assert InformationClassifier.higher_level(:low, :low) == :low
     end
 
-    test "BCTP taint is always strictly lower than free-text for same sender" do
+    test "BCP taint is always strictly lower than free-text for same sender" do
       for sender_taint <- [:medium, :high] do
-        bctp = InformationClassifier.classify_bctp(1, 1.0, sender_taint)
+        bcp = InformationClassifier.classify_bcp(1, 1.0, sender_taint)
         freetext = InformationClassifier.classify_inter_agent(:sanitized, %{taint: sender_taint, sensitivity: :low})
 
-        bctp_rank = %{low: 0, medium: 1, high: 2}
-        assert bctp_rank[bctp.taint] < bctp_rank[freetext.taint],
-          "BCTP taint #{bctp.taint} should be lower than free-text taint #{freetext.taint} for sender #{sender_taint}"
+        bcp_rank = %{low: 0, medium: 1, high: 2}
+        assert bcp_rank[bcp.taint] < bcp_rank[freetext.taint],
+          "BCP taint #{bcp.taint} should be lower than free-text taint #{freetext.taint} for sender #{sender_taint}"
       end
     end
   end
