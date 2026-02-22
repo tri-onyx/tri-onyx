@@ -115,12 +115,12 @@
   }
   .tooltip .header-info { flex: 1; min-width: 0; }
   .tooltip .risk-square {
-    width: 52px; height: 52px; border-radius: 6px; flex-shrink: 0;
+    width: 64px; height: 64px; border-radius: 6px; flex-shrink: 0;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px;
+    font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
     line-height: 1.2;
   }
-  .tooltip .risk-square .risk-icon { font-size: 20px; margin-bottom: 2px; }
+  .tooltip .risk-square .risk-icon { font-size: 24px; margin-bottom: 2px; }
   .tooltip .risk-square.low { background: rgba(63,185,80,0.2); color: var(--green); }
   .tooltip .risk-square.moderate { background: rgba(210,153,34,0.2); color: var(--yellow); }
   .tooltip .risk-square.high { background: rgba(219,109,40,0.2); color: var(--orange); }
@@ -1132,7 +1132,7 @@ function renderGraph() {
       </div>
 
       <div class="section">
-        <div class="section-title">Taint (integrity)</div>
+        <div class="section-title">☣️ Taint (integrity)</div>
         <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.taintDrivers)}</div></div>
         ${sourcesRow}
@@ -1140,14 +1140,14 @@ function renderGraph() {
       </div>
 
       <div class="section">
-        <div class="section-title">Sensitivity (confidentiality)</div>
+        <div class="section-title">🔒 Sensitivity (confidentiality)</div>
         <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.sensitivityDrivers)}</div></div>
         ${sourcesRow}
       </div>
 
       <div class="section">
-        <div class="section-title">Capability (blast radius)</div>
+        <div class="section-title">🦾 Capability (blast radius)</div>
         <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>
         <div class="axis-row"><span class="axis-label">Network</span><span>${formatNetwork(a.network)}</span></div>
