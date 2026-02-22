@@ -1,6 +1,6 @@
-defmodule TriOnyx.BCTP.Bandwidth do
+defmodule TriOnyx.BCP.Bandwidth do
   @moduledoc """
-  Bandwidth budget tracking for BCTP sessions.
+  Bandwidth budget tracking for BCP sessions.
 
   Each inter-agent communication channel has a bandwidth budget that limits
   the total information that can flow through it. The budget tracks:
@@ -13,7 +13,7 @@ defmodule TriOnyx.BCTP.Bandwidth do
   would be exceeded, the query is rejected.
   """
 
-  alias TriOnyx.BCTP.Query
+  alias TriOnyx.BCP.Query
 
   @type t :: %__MODULE__{
           max_bits_per_session: float(),

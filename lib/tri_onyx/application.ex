@@ -67,8 +67,8 @@ defmodule TriOnyx.Application do
       # 9. Connector registry — tracks active WebSocket connectors
       {Registry, keys: :unique, name: TriOnyx.ConnectorRegistry},
 
-      # 9. BCTP approval queue — human approval for Cat-3 queries/escalations
-      TriOnyx.BCTP.ApprovalQueue,
+      # 9. BCP approval queue — human approval for Cat-3 queries/escalations
+      TriOnyx.BCP.ApprovalQueue,
 
       # 10. HTTP server
       {Bandit, plug: TriOnyx.Router, port: port}
@@ -98,9 +98,9 @@ defmodule TriOnyx.Application do
 
     case Supervisor.start_link(children, opts) do
       {:ok, pid} ->
-        # Create BCTP pending queries table owned by the Application process
+        # Create BCP pending queries table owned by the Application process
         # (long-lived) so it survives across Task processes that insert/pop queries
-        TriOnyx.BCTP.Channel.ensure_table()
+        TriOnyx.BCP.Channel.ensure_table()
 
         load_and_display_agents()
         TriOnyx.Workspace.ensure_initialized()

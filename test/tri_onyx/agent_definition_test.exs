@@ -418,13 +418,13 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
-  describe "bctp_channels parsing" do
-    test "parses valid bctp_channels" do
+  describe "bcp_channels parsing" do
+    test "parses valid bcp_channels" do
       content = """
       ---
       name: controller-agent
       tools: Read, SendMessage
-      bctp_channels:
+      bcp_channels:
         - peer: researcher
           role: controller
           max_category: 2
@@ -437,9 +437,9 @@ defmodule TriOnyx.AgentDefinitionTest do
       """
 
       assert {:ok, def} = AgentDefinition.parse(content)
-      assert length(def.bctp_channels) == 1
+      assert length(def.bcp_channels) == 1
 
-      channel = hd(def.bctp_channels)
+      channel = hd(def.bcp_channels)
       assert channel.peer == "researcher"
       assert channel.role == :controller
       assert channel.max_category == 2
@@ -448,9 +448,9 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert channel.max_cat3_queries == 0
     end
 
-    test "defaults bctp_channels to empty list" do
+    test "defaults bcp_channels to empty list" do
       assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
-      assert def.bctp_channels == []
+      assert def.bcp_channels == []
     end
 
     test "parses multiple channels" do
@@ -458,7 +458,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: orchestrator
       tools: Read, SendMessage
-      bctp_channels:
+      bcp_channels:
         - peer: researcher
           role: controller
           max_category: 2
@@ -475,10 +475,10 @@ defmodule TriOnyx.AgentDefinitionTest do
       """
 
       assert {:ok, def} = AgentDefinition.parse(content)
-      assert length(def.bctp_channels) == 2
-      assert Enum.at(def.bctp_channels, 0).peer == "researcher"
-      assert Enum.at(def.bctp_channels, 1).peer == "scanner"
-      assert Enum.at(def.bctp_channels, 1).role == :reader
+      assert length(def.bcp_channels) == 2
+      assert Enum.at(def.bcp_channels, 0).peer == "researcher"
+      assert Enum.at(def.bcp_channels, 1).peer == "scanner"
+      assert Enum.at(def.bcp_channels, 1).role == :reader
     end
 
     test "defaults max_cat2_queries and max_cat3_queries to 0" do
@@ -486,7 +486,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: agent
       tools: Read
-      bctp_channels:
+      bcp_channels:
         - peer: other
           role: controller
           max_category: 1
@@ -497,7 +497,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       """
 
       assert {:ok, def} = AgentDefinition.parse(content)
-      channel = hd(def.bctp_channels)
+      channel = hd(def.bcp_channels)
       assert channel.max_cat2_queries == 0
       assert channel.max_cat3_queries == 0
     end
@@ -507,7 +507,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: agent
       tools: Read
-      bctp_channels:
+      bcp_channels:
         - peer: other
           role: supervisor
           max_category: 1
@@ -517,7 +517,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       Agent.
       """
 
-      assert {:error, {:invalid_bctp_role, 0, "supervisor", _}} = AgentDefinition.parse(content)
+      assert {:error, {:invalid_bcp_role, 0, "supervisor", _}} = AgentDefinition.parse(content)
     end
 
     test "rejects invalid max_category" do
@@ -525,7 +525,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: agent
       tools: Read
-      bctp_channels:
+      bcp_channels:
         - peer: other
           role: controller
           max_category: 5
@@ -535,7 +535,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       Agent.
       """
 
-      assert {:error, {:invalid_bctp_max_category, 0, 5, _}} = AgentDefinition.parse(content)
+      assert {:error, {:invalid_bcp_max_category, 0, 5, _}} = AgentDefinition.parse(content)
     end
 
     test "rejects missing peer field" do
@@ -543,7 +543,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: agent
       tools: Read
-      bctp_channels:
+      bcp_channels:
         - role: controller
           max_category: 1
           budget_bits: 100
@@ -552,7 +552,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       Agent.
       """
 
-      assert {:error, {:missing_bctp_channel_field, 0, "peer"}} = AgentDefinition.parse(content)
+      assert {:error, {:missing_bcp_channel_field, 0, "peer"}} = AgentDefinition.parse(content)
     end
 
     test "rejects zero budget_bits" do
@@ -560,7 +560,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       ---
       name: agent
       tools: Read
-      bctp_channels:
+      bcp_channels:
         - peer: other
           role: controller
           max_category: 1
@@ -570,7 +570,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       Agent.
       """
 
-      assert {:error, {:invalid_bctp_channel_field, 0, "budget_bits", :must_be_positive}} =
+      assert {:error, {:invalid_bcp_channel_field, 0, "budget_bits", :must_be_positive}} =
                AgentDefinition.parse(content)
     end
   end

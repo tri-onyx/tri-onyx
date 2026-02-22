@@ -25,7 +25,7 @@ defmodule TriOnyx.AgentSession do
   alias TriOnyx.RiskScorer
   alias TriOnyx.SessionLogger
   alias TriOnyx.ToolRegistry
-  alias TriOnyx.BCTP
+  alias TriOnyx.BCP
   alias TriOnyx.SystemCommand
   alias TriOnyx.Triggers.InterAgent
   alias TriOnyx.Workspace
@@ -87,29 +87,29 @@ defmodule TriOnyx.AgentSession do
   end
 
   @doc """
-  Delivers a BCTP query to this agent's runtime via the port.
+  Delivers a BCP query to this agent's runtime via the port.
 
   If the session is still starting, the query is queued and flushed when
   the port becomes ready.  Returns `:ok` if accepted, `{:error, :not_ready}`
   if the session is in a state that can't accept queries.
   """
-  @spec deliver_bctp_query(GenServer.server(), String.t(), integer(), String.t(), map()) ::
+  @spec deliver_bcp_query(GenServer.server(), String.t(), integer(), String.t(), map()) ::
           :ok | {:error, :not_ready}
-  def deliver_bctp_query(server, query_id, category, from_agent, spec) do
-    GenServer.call(server, {:bctp_query, query_id, category, from_agent, spec})
+  def deliver_bcp_query(server, query_id, category, from_agent, spec) do
+    GenServer.call(server, {:bcp_query, query_id, category, from_agent, spec})
   end
 
   @doc """
-  Delivers a validated BCTP response to this agent's runtime via the port.
+  Delivers a validated BCP response to this agent's runtime via the port.
 
-  Called by `BCTP.Channel` when a reader's response passes gateway validation.
-  The response is delivered with `channel_mode: :bctp` metadata so the session
+  Called by `BCP.Channel` when a reader's response passes gateway validation.
+  The response is delivered with `channel_mode: :bcp` metadata so the session
   knows to skip taint elevation.
   """
-  @spec deliver_bctp_response(GenServer.server(), String.t(), integer(), String.t(), map(), float()) ::
+  @spec deliver_bcp_response(GenServer.server(), String.t(), integer(), String.t(), map(), float()) ::
           :ok | {:error, :not_ready}
-  def deliver_bctp_response(server, query_id, category, from_agent, response, bandwidth_bits) do
-    GenServer.call(server, {:bctp_response_delivery, query_id, category, from_agent, response, bandwidth_bits})
+  def deliver_bcp_response(server, query_id, category, from_agent, response, bandwidth_bits) do
+    GenServer.call(server, {:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits})
   end
 
   @doc """
@@ -244,32 +244,32 @@ defmodule TriOnyx.AgentSession do
     {:reply, {:error, :not_ready}, state}
   end
 
-  # BCTP query delivery — send directly to port when ready/running, queue when starting
-  def handle_call({:bctp_query, query_id, category, from_agent, spec}, _from, %{status: status, port: port} = state)
+  # BCP query delivery — send directly to port when ready/running, queue when starting
+  def handle_call({:bcp_query, query_id, category, from_agent, spec}, _from, %{status: status, port: port} = state)
       when status in [:ready, :running] and port != nil do
-    AgentPort.send_bctp_query(port, query_id, category, from_agent, spec)
+    AgentPort.send_bcp_query(port, query_id, category, from_agent, spec)
     {:reply, :ok, state}
   end
 
-  def handle_call({:bctp_query, query_id, category, from_agent, spec}, _from, %{status: :starting} = state) do
-    Logger.info("AgentSession #{state.id}: queuing BCTP query #{query_id} (starting)")
-    pending = Map.get(state, :pending_bctp_queries, [])
-    {:reply, :ok, Map.put(state, :pending_bctp_queries, pending ++ [{query_id, category, from_agent, spec}])}
+  def handle_call({:bcp_query, query_id, category, from_agent, spec}, _from, %{status: :starting} = state) do
+    Logger.info("AgentSession #{state.id}: queuing BCP query #{query_id} (starting)")
+    pending = Map.get(state, :pending_bcp_queries, [])
+    {:reply, :ok, Map.put(state, :pending_bcp_queries, pending ++ [{query_id, category, from_agent, spec}])}
   end
 
-  def handle_call({:bctp_query, _query_id, _category, _from_agent, _spec}, _from, state) do
+  def handle_call({:bcp_query, _query_id, _category, _from_agent, _spec}, _from, state) do
     {:reply, {:error, :not_ready}, state}
   end
 
-  # BCTP response delivery — send to port when ready (controller is always running)
-  def handle_call({:bctp_response_delivery, query_id, category, from_agent, response, bandwidth_bits}, _from,
+  # BCP response delivery — send to port when ready (controller is always running)
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits}, _from,
                   %{status: status, port: port} = state)
       when status in [:ready, :running] and port != nil do
-    AgentPort.send_bctp_response_delivery(port, query_id, category, from_agent, response, bandwidth_bits)
+    AgentPort.send_bcp_response_delivery(port, query_id, category, from_agent, response, bandwidth_bits)
     {:reply, :ok, state}
   end
 
-  def handle_call({:bctp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits}, _from, state) do
+  def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits}, _from, state) do
     {:reply, {:error, :not_ready}, state}
   end
 
@@ -361,16 +361,16 @@ defmodule TriOnyx.AgentSession do
 
     state = %{state | status: :ready}
 
-    # Flush any BCTP queries that arrived while the runtime was starting
+    # Flush any BCP queries that arrived while the runtime was starting
     state =
-      case Map.get(state, :pending_bctp_queries, []) do
+      case Map.get(state, :pending_bcp_queries, []) do
         [] -> state
         queries ->
           Enum.each(queries, fn {query_id, category, from_agent, spec} ->
-            Logger.info("AgentSession #{state.id}: flushing queued BCTP query #{query_id}")
-            AgentPort.send_bctp_query(state.port, query_id, category, from_agent, spec)
+            Logger.info("AgentSession #{state.id}: flushing queued BCP query #{query_id}")
+            AgentPort.send_bcp_query(state.port, query_id, category, from_agent, spec)
           end)
-          Map.delete(state, :pending_bctp_queries)
+          Map.delete(state, :pending_bcp_queries)
       end
 
     # Flush any prompt that arrived while the runtime was starting
@@ -480,9 +480,9 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
-  defp handle_agent_event({:bctp_query_request, req_id, to, category, spec}, state) do
+  defp handle_agent_event({:bcp_query_request, req_id, to, category, spec}, state) do
     Logger.info(
-      "AgentSession #{state.id}: bctp_query_request to=#{to} cat=#{category} req_id=#{req_id}"
+      "AgentSession #{state.id}: bcp_query_request to=#{to} cat=#{category} req_id=#{req_id}"
     )
 
     # Route asynchronously to avoid GenServer deadlock (same pattern as :send_message_request)
@@ -493,17 +493,17 @@ defmodule TriOnyx.AgentSession do
       # matches what the controller's runtime is waiting for
       query_spec = Map.merge(spec, %{category: category, session_id: state.id, id: req_id})
 
-      case BCTP.Channel.send_query(from_name, to, query_spec) do
+      case BCP.Channel.send_query(from_name, to, query_spec) do
         {:ok, query} ->
-          Logger.info("AgentSession: BCTP query #{query.id} dispatched to #{to}")
+          Logger.info("AgentSession: BCP query #{query.id} dispatched to #{to}")
 
         {:error, reason} ->
-          Logger.warning("AgentSession: BCTP query to #{to} failed: #{inspect(reason)}")
+          Logger.warning("AgentSession: BCP query to #{to} failed: #{inspect(reason)}")
       end
     end)
 
     broadcast_event(state, %{
-      "type" => "bctp_query",
+      "type" => "bcp_query",
       "from" => state.definition.name,
       "to" => to,
       "category" => category,
@@ -513,37 +513,37 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
-  defp handle_agent_event({:bctp_response, query_id, response}, state) do
+  defp handle_agent_event({:bcp_response, query_id, response}, state) do
     Logger.info(
-      "AgentSession #{state.id}: bctp_response for query=#{query_id}"
+      "AgentSession #{state.id}: bcp_response for query=#{query_id}"
     )
 
     # Look up the pending query and route through the channel for validation
     # and delivery to the controller.  Send validation result back to the
-    # reader's runtime so BCTPRespond can give the agent feedback.
+    # reader's runtime so BCPRespond can give the agent feedback.
     port = state.port
 
     Task.start(fn ->
-      case BCTP.Channel.pop_query(query_id) do
+      case BCP.Channel.pop_query(query_id) do
         {:ok, query} ->
-          case BCTP.Channel.receive_response(query, response) do
+          case BCP.Channel.receive_response(query, response) do
             {:ok, _validated} ->
-              Logger.info("AgentSession: BCTP response for query #{query_id} validated and delivered")
-              AgentPort.send_bctp_validation_result(port, query_id, true, "validated and delivered")
+              Logger.info("AgentSession: BCP response for query #{query_id} validated and delivered")
+              AgentPort.send_bcp_validation_result(port, query_id, true, "validated and delivered")
 
             {:error, reason} ->
-              Logger.warning("AgentSession: BCTP response for query #{query_id} rejected: #{inspect(reason)}")
-              AgentPort.send_bctp_validation_result(port, query_id, false, inspect(reason))
+              Logger.warning("AgentSession: BCP response for query #{query_id} rejected: #{inspect(reason)}")
+              AgentPort.send_bcp_validation_result(port, query_id, false, inspect(reason))
           end
 
         :error ->
-          Logger.warning("AgentSession: BCTP response for unknown query #{query_id} (not in pending queries)")
-          AgentPort.send_bctp_validation_result(port, query_id, false, "unknown query_id")
+          Logger.warning("AgentSession: BCP response for unknown query #{query_id} (not in pending queries)")
+          AgentPort.send_bcp_validation_result(port, query_id, false, "unknown query_id")
       end
     end)
 
     broadcast_event(state, %{
-      "type" => "bctp_response",
+      "type" => "bcp_response",
       "query_id" => query_id,
       "status" => "validating"
     })
@@ -1108,12 +1108,12 @@ defmodule TriOnyx.AgentSession do
   # routing) and elevates the session's risk accordingly.
   @spec maybe_elevate_from_metadata(t(), map()) :: t()
   defp maybe_elevate_from_metadata(state, metadata) when is_map(metadata) do
-    # BCTP taint-neutral delivery: skip elevation when channel_mode is :bctp.
+    # BCP taint-neutral delivery: skip elevation when channel_mode is :bcp.
     # Gateway-validated structured responses carry bounded bandwidth and are
     # safe to deliver without tainting the receiving agent.
-    if Map.get(metadata, :channel_mode) == :bctp do
+    if Map.get(metadata, :channel_mode) == :bcp do
       Logger.info(
-        "AgentSession #{state.id}: BCTP taint-neutral delivery (channel_mode: :bctp)"
+        "AgentSession #{state.id}: BCP taint-neutral delivery (channel_mode: :bcp)"
       )
 
       state

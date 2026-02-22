@@ -1,6 +1,6 @@
-defmodule TriOnyx.BCTP.Validator do
+defmodule TriOnyx.BCP.Validator do
   @moduledoc """
-  Validates agent responses against BCTP query definitions.
+  Validates agent responses against BCP query definitions.
 
   This module is the core security mechanism of the protocol. It runs entirely
   in the gateway (Elixir) with zero LLM involvement. Each category has
@@ -12,7 +12,7 @@ defmodule TriOnyx.BCTP.Validator do
     requires human approval.
   """
 
-  alias TriOnyx.BCTP.Query
+  alias TriOnyx.BCP.Query
 
   @type anomaly :: %{field: String.t(), reason: String.t()}
 

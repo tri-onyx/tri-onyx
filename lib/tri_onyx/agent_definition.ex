@@ -32,7 +32,7 @@ defmodule TriOnyx.AgentDefinition do
 
   @type network_policy :: :none | :outbound | [String.t()]
 
-  @type bctp_channel :: %{
+  @type bcp_channel :: %{
           peer: String.t(),
           role: :controller | :reader,
           max_category: 1..3,
@@ -61,7 +61,7 @@ defmodule TriOnyx.AgentDefinition do
           system_prompt: String.t(),
           heartbeat_every: pos_integer() | nil,
           idle_timeout: pos_integer() | nil,
-          bctp_channels: [bctp_channel()],
+          bcp_channels: [bcp_channel()],
           cron_schedules: [cron_schedule()],
           skills: [String.t()],
           base_taint: :low | :medium | :high
@@ -82,7 +82,7 @@ defmodule TriOnyx.AgentDefinition do
     restart_targets: [],
     heartbeat_every: nil,
     idle_timeout: nil,
-    bctp_channels: [],
+    bcp_channels: [],
     cron_schedules: [],
     skills: [],
     base_taint: :low
@@ -158,7 +158,7 @@ defmodule TriOnyx.AgentDefinition do
          :ok <- ToolRegistry.validate_tools(tools),
          {:ok, heartbeat_every} <- parse_heartbeat_every(yaml),
          {:ok, idle_timeout} <- parse_idle_timeout(yaml),
-         {:ok, bctp_channels} <- parse_bctp_channels(yaml),
+         {:ok, bcp_channels} <- parse_bcp_channels(yaml),
          {:ok, cron_schedules} <- parse_cron_schedules(yaml),
          {:ok, skills} <- parse_string_list(yaml, "skills"),
          {:ok, base_taint} <- parse_base_taint(yaml) do
@@ -191,7 +191,7 @@ defmodule TriOnyx.AgentDefinition do
          system_prompt: body,
          heartbeat_every: heartbeat_every,
          idle_timeout: idle_timeout,
-         bctp_channels: bctp_channels,
+         bcp_channels: bcp_channels,
          cron_schedules: cron_schedules,
          skills: skills,
          base_taint: base_taint
@@ -320,12 +320,12 @@ defmodule TriOnyx.AgentDefinition do
     end
   end
 
-  @valid_bctp_roles ~w(controller reader)
+  @valid_bcp_roles ~w(controller reader)
   @valid_max_categories [1, 2, 3]
 
-  @spec parse_bctp_channels(map()) :: {:ok, [bctp_channel()]} | {:error, term()}
-  defp parse_bctp_channels(yaml) do
-    case Map.get(yaml, "bctp_channels") do
+  @spec parse_bcp_channels(map()) :: {:ok, [bcp_channel()]} | {:error, term()}
+  defp parse_bcp_channels(yaml) do
+    case Map.get(yaml, "bcp_channels") do
       nil ->
         {:ok, []}
 
@@ -333,7 +333,7 @@ defmodule TriOnyx.AgentDefinition do
         channels
         |> Enum.with_index()
         |> Enum.reduce_while({:ok, []}, fn {channel, idx}, {:ok, acc} ->
-          case parse_single_bctp_channel(channel, idx) do
+          case parse_single_bcp_channel(channel, idx) do
             {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
             {:error, _} = err -> {:halt, err}
           end
@@ -344,22 +344,22 @@ defmodule TriOnyx.AgentDefinition do
         end
 
       _other ->
-        {:error, {:invalid_field_type, "bctp_channels", :expected_list}}
+        {:error, {:invalid_field_type, "bcp_channels", :expected_list}}
     end
   end
 
-  @spec parse_single_bctp_channel(map(), non_neg_integer()) :: {:ok, bctp_channel()} | {:error, term()}
-  defp parse_single_bctp_channel(channel, idx) when is_map(channel) do
-    with {:ok, peer} <- require_bctp_field(channel, "peer", idx, &is_binary/1, :string),
-         {:ok, role_str} <- require_bctp_field(channel, "role", idx, &is_binary/1, :string),
-         {:ok, role} <- validate_bctp_role(role_str, idx),
-         {:ok, max_cat} <- require_bctp_field(channel, "max_category", idx, &is_integer/1, :integer),
+  @spec parse_single_bcp_channel(map(), non_neg_integer()) :: {:ok, bcp_channel()} | {:error, term()}
+  defp parse_single_bcp_channel(channel, idx) when is_map(channel) do
+    with {:ok, peer} <- require_bcp_field(channel, "peer", idx, &is_binary/1, :string),
+         {:ok, role_str} <- require_bcp_field(channel, "role", idx, &is_binary/1, :string),
+         {:ok, role} <- validate_bcp_role(role_str, idx),
+         {:ok, max_cat} <- require_bcp_field(channel, "max_category", idx, &is_integer/1, :integer),
          :ok <- validate_max_category(max_cat, idx),
-         {:ok, budget_bits} <- require_bctp_field(channel, "budget_bits", idx, &is_integer/1, :integer),
+         {:ok, budget_bits} <- require_bcp_field(channel, "budget_bits", idx, &is_integer/1, :integer),
          :ok <- validate_positive(budget_bits, "budget_bits", idx),
-         {:ok, max_cat2} <- get_bctp_field(channel, "max_cat2_queries", idx, &is_integer/1, :integer, 0),
+         {:ok, max_cat2} <- get_bcp_field(channel, "max_cat2_queries", idx, &is_integer/1, :integer, 0),
          :ok <- validate_non_negative(max_cat2, "max_cat2_queries", idx),
-         {:ok, max_cat3} <- get_bctp_field(channel, "max_cat3_queries", idx, &is_integer/1, :integer, 0),
+         {:ok, max_cat3} <- get_bcp_field(channel, "max_cat3_queries", idx, &is_integer/1, :integer, 0),
          :ok <- validate_non_negative(max_cat3, "max_cat3_queries", idx) do
       {:ok,
        %{
@@ -373,42 +373,42 @@ defmodule TriOnyx.AgentDefinition do
     end
   end
 
-  defp parse_single_bctp_channel(_channel, idx) do
-    {:error, {:invalid_bctp_channel, idx, :expected_map}}
+  defp parse_single_bcp_channel(_channel, idx) do
+    {:error, {:invalid_bcp_channel, idx, :expected_map}}
   end
 
-  defp require_bctp_field(channel, key, idx, validator, expected_type) do
+  defp require_bcp_field(channel, key, idx, validator, expected_type) do
     case Map.get(channel, key) do
-      nil -> {:error, {:missing_bctp_channel_field, idx, key}}
-      value -> if validator.(value), do: {:ok, value}, else: {:error, {:invalid_bctp_channel_field, idx, key, expected_type}}
+      nil -> {:error, {:missing_bcp_channel_field, idx, key}}
+      value -> if validator.(value), do: {:ok, value}, else: {:error, {:invalid_bcp_channel_field, idx, key, expected_type}}
     end
   end
 
-  defp get_bctp_field(channel, key, idx, validator, expected_type, default) do
+  defp get_bcp_field(channel, key, idx, validator, expected_type, default) do
     case Map.get(channel, key) do
       nil -> {:ok, default}
-      value -> if validator.(value), do: {:ok, value}, else: {:error, {:invalid_bctp_channel_field, idx, key, expected_type}}
+      value -> if validator.(value), do: {:ok, value}, else: {:error, {:invalid_bcp_channel_field, idx, key, expected_type}}
     end
   end
 
-  defp validate_bctp_role("controller", _idx), do: {:ok, :controller}
-  defp validate_bctp_role("reader", _idx), do: {:ok, :reader}
+  defp validate_bcp_role("controller", _idx), do: {:ok, :controller}
+  defp validate_bcp_role("reader", _idx), do: {:ok, :reader}
 
-  defp validate_bctp_role(role, idx) do
-    {:error, {:invalid_bctp_role, idx, role, @valid_bctp_roles}}
+  defp validate_bcp_role(role, idx) do
+    {:error, {:invalid_bcp_role, idx, role, @valid_bcp_roles}}
   end
 
   defp validate_max_category(cat, _idx) when cat in @valid_max_categories, do: :ok
 
   defp validate_max_category(cat, idx) do
-    {:error, {:invalid_bctp_max_category, idx, cat, @valid_max_categories}}
+    {:error, {:invalid_bcp_max_category, idx, cat, @valid_max_categories}}
   end
 
   defp validate_positive(val, _field, _idx) when is_integer(val) and val > 0, do: :ok
-  defp validate_positive(_val, field, idx), do: {:error, {:invalid_bctp_channel_field, idx, field, :must_be_positive}}
+  defp validate_positive(_val, field, idx), do: {:error, {:invalid_bcp_channel_field, idx, field, :must_be_positive}}
 
   defp validate_non_negative(val, _field, _idx) when is_integer(val) and val >= 0, do: :ok
-  defp validate_non_negative(_val, field, idx), do: {:error, {:invalid_bctp_channel_field, idx, field, :must_be_non_negative}}
+  defp validate_non_negative(_val, field, idx), do: {:error, {:invalid_bcp_channel_field, idx, field, :must_be_non_negative}}
 
   @spec parse_cron_schedules(map()) :: {:ok, [cron_schedule()]} | {:error, term()}
   defp parse_cron_schedules(yaml) do

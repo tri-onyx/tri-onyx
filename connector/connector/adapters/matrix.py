@@ -1070,7 +1070,7 @@ class MatrixAdapter(BaseAdapter):
         anomalies: list[dict[str, Any]],
         channel: dict[str, Any] | None = None,
     ) -> None:
-        """Send a BCTP Cat-3 approval request to Matrix with attachment."""
+        """Send a BCP Cat-3 approval request to Matrix with attachment."""
         assert self._client is not None
 
         # Determine target room: use channel if provided, otherwise look up
@@ -1103,7 +1103,7 @@ class MatrixAdapter(BaseAdapter):
             anomaly_text = "\nAnomalies:\n" + "\n".join(anomaly_lines) + "\n"
 
         file_content = (
-            f"BCTP Cat-{category} Review\n"
+            f"BCP Cat-{category} Review\n"
             f"{'=' * 40}\n"
             f"From: {from_agent}\n"
             f"To: {to_agent}\n"
@@ -1114,7 +1114,7 @@ class MatrixAdapter(BaseAdapter):
         )
 
         # Upload as text file attachment
-        filename = f"bctp-review-{approval_id[:8]}.txt"
+        filename = f"bcp-review-{approval_id[:8]}.txt"
         target_channel = {"platform": "matrix", "room_id": room_id}
         await self.send_file(
             target_channel,
@@ -1125,7 +1125,7 @@ class MatrixAdapter(BaseAdapter):
 
         # Send the short approval message that users react to
         body = (
-            f"**BCTP Cat-{category} Approval Required**\n"
+            f"**BCP Cat-{category} Approval Required**\n"
             f"From: {from_agent} → To: {to_agent}\n"
             f"React with 👍 to approve or 👎 to reject."
         )

@@ -45,8 +45,8 @@ defmodule TriOnyx.AgentPort do
           | {:error, String.t()}
           | {:fuse_write, String.t(), String.t()}
           | {:send_message_request, String.t(), String.t(), String.t(), map()}
-          | {:bctp_query_request, String.t(), String.t(), integer(), map()}
-          | {:bctp_response, String.t(), map()}
+          | {:bcp_query_request, String.t(), String.t(), integer(), map()}
+          | {:bcp_response, String.t(), map()}
           | {:send_email_request, String.t(), String.t()}
           | {:move_email_request, String.t(), String.t(), String.t(), String.t()}
           | {:create_folder_request, String.t(), String.t()}
@@ -156,16 +156,16 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
-  Sends a `bctp_query` message to the runtime, delivering an incoming BCTP query
+  Sends a `bcp_query` message to the runtime, delivering an incoming BCP query
   from a Controller agent to a Reader agent's runtime.
   """
-  @spec send_bctp_query(GenServer.server(), String.t(), integer(), String.t(), map()) :: :ok
-  def send_bctp_query(server, query_id, category, from_agent, spec) do
+  @spec send_bcp_query(GenServer.server(), String.t(), integer(), String.t(), map()) :: :ok
+  def send_bcp_query(server, query_id, category, from_agent, spec) do
     GenServer.cast(
       server,
       {:send,
        %{
-         "type" => "bctp_query",
+         "type" => "bcp_query",
          "query_id" => query_id,
          "category" => category,
          "from_agent" => from_agent
@@ -175,16 +175,16 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
-  Sends a `bctp_validation_result` message to the runtime, informing the Reader
-  agent whether its BCTP response passed validation.
+  Sends a `bcp_validation_result` message to the runtime, informing the Reader
+  agent whether its BCP response passed validation.
   """
-  @spec send_bctp_validation_result(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
-  def send_bctp_validation_result(server, query_id, success, detail \\ "") do
+  @spec send_bcp_validation_result(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_bcp_validation_result(server, query_id, success, detail \\ "") do
     GenServer.cast(
       server,
       {:send,
        %{
-         "type" => "bctp_validation_result",
+         "type" => "bcp_validation_result",
          "query_id" => query_id,
          "success" => success,
          "detail" => detail
@@ -193,10 +193,10 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
-  Sends a `bctp_response_delivery` message to the runtime, delivering a validated
-  BCTP response from a Reader agent back to a Controller agent's runtime.
+  Sends a `bcp_response_delivery` message to the runtime, delivering a validated
+  BCP response from a Reader agent back to a Controller agent's runtime.
   """
-  @spec send_bctp_response_delivery(
+  @spec send_bcp_response_delivery(
           GenServer.server(),
           String.t(),
           integer(),
@@ -204,12 +204,12 @@ defmodule TriOnyx.AgentPort do
           map(),
           float()
         ) :: :ok
-  def send_bctp_response_delivery(server, query_id, category, from_agent, response, bandwidth_bits) do
+  def send_bcp_response_delivery(server, query_id, category, from_agent, response, bandwidth_bits) do
     GenServer.cast(
       server,
       {:send,
        %{
-         "type" => "bctp_response_delivery",
+         "type" => "bcp_response_delivery",
          "query_id" => query_id,
          "category" => category,
          "from_agent" => from_agent,
@@ -585,23 +585,23 @@ defmodule TriOnyx.AgentPort do
 
       {:ok,
        %{
-         "type" => "bctp_query_request",
+         "type" => "bcp_query_request",
          "request_id" => req_id,
          "to" => to,
          "category" => category,
          "spec" => spec
        }}
       when is_binary(req_id) and is_binary(to) and is_integer(category) and is_map(spec) ->
-        {:ok, {:bctp_query_request, req_id, to, category, spec}}
+        {:ok, {:bcp_query_request, req_id, to, category, spec}}
 
       {:ok,
        %{
-         "type" => "bctp_response",
+         "type" => "bcp_response",
          "query_id" => query_id,
          "response" => response
        }}
       when is_binary(query_id) and is_map(response) ->
-        {:ok, {:bctp_response, query_id, response}}
+        {:ok, {:bcp_response, query_id, response}}
 
       {:ok,
        %{

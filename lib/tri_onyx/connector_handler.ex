@@ -41,7 +41,7 @@ defmodule TriOnyx.ConnectorHandler do
   require Logger
 
   alias TriOnyx.AgentSupervisor
-  alias TriOnyx.BCTP.ApprovalQueue
+  alias TriOnyx.BCP.ApprovalQueue
   alias TriOnyx.EventBus
   alias TriOnyx.SystemCommand
   alias TriOnyx.TriggerRouter
@@ -287,7 +287,7 @@ defmodule TriOnyx.ConnectorHandler do
     trust = Map.get(frame, "trust", %{})
 
     cond do
-      # BCTP approval reaction — approval_id is present
+      # BCP approval reaction — approval_id is present
       is_binary(approval_id) and approval_id != "" ->
         Logger.info(
           "ConnectorHandler: approval reaction from #{sender} " <>

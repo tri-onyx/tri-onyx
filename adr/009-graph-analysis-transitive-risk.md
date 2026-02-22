@@ -14,7 +14,7 @@ Without transitive analysis, multi-hop information laundering bypasses pairwise 
 
 ## Decision
 
-Implement a **graph analyzer** that builds a directed graph of all information flows between agents (filesystem, messaging, and BCTP channels), computes transitive risk propagation via depth-first traversal, and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently.
+Implement a **graph analyzer** that builds a directed graph of all information flows between agents (filesystem, messaging, and BCP channels), computes transitive risk propagation via depth-first traversal, and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently.
 
 ## Rationale
 
@@ -24,13 +24,13 @@ Every information flow between agents creates a directed edge:
 
 1. **Filesystem edges:** Agent A's `fs_write` patterns overlap with Agent B's `fs_read` patterns → edge A → B
 2. **Messaging edges:** Agent A declares `send_to: [B]` and Agent B declares `receive_from: [A]` → edge A → B
-3. **BCTP edges:** Agent A (controller) queries Agent B (reader) via BCTP → edge B → A (data flows from reader to controller), with taint stepped down one level
+3. **BCP edges:** Agent A (controller) queries Agent B (reader) via BCP → edge B → A (data flows from reader to controller), with taint stepped down one level
 
 Each edge carries the risk level of the data in transit — the writer's taint and sensitivity at the time of writing (from the risk manifest) or worst-case levels from the agent definition.
 
 ### Transitive propagation catches multi-hop laundering
 
-The analyzer performs depth-first traversal from each agent, accumulating risk along paths. At each hop, the accumulated risk is merged with the edge risk via `max()` — risk can only increase along a path, never decrease (except through BCTP, which explicitly steps taint down one level).
+The analyzer performs depth-first traversal from each agent, accumulating risk along paths. At each hop, the accumulated risk is merged with the edge risk via `max()` — risk can only increase along a path, never decrease (except through BCP, which explicitly steps taint down one level).
 
 For the A → B → C example:
 
@@ -48,7 +48,7 @@ An agent's worst-case taint is determined by what data it *could* ingest, not wh
 |---|---|
 | Network access (WebFetch, WebSearch) | High — raw internet data |
 | Free-text messages from peers (`receive_from`) | Medium — peer output, possibly tainted |
-| BCTP responses | `step_down(peer_taint)` — bandwidth-constrained |
+| BCP responses | `step_down(peer_taint)` — bandwidth-constrained |
 | No external input | Low — only sees trusted data |
 
 Capability (whether the agent can write files or execute shell commands) does **not** affect taint. An agent with Bash access but no external input sources has low taint. An agent with only Read access but WebFetch input has high taint. This is the core principle from [ADR-001](001-information-is-the-threat.md): information is the threat, not capability.
@@ -81,7 +81,7 @@ The graph analysis powers a visualization (`graph.html`) that renders:
 
 - **Nodes** as split circles: left half colored by taint, right half by sensitivity
 - **Node size** proportional to effective risk (low/moderate/high/critical)
-- **Edges** as directed arrows colored by type (filesystem, messaging, BCTP)
+- **Edges** as directed arrows colored by type (filesystem, messaging, BCP)
 - **Violation overlays** that highlight Biba violations (taint axis) or BLP violations (sensitivity axis) as toggleable layers
 - **A matrix panel** showing all (writer, reader) pairs and which violate each policy
 
@@ -103,7 +103,7 @@ Analyze transitive risk up to N hops to limit computational cost. Arbitrary and 
 
 ### Probabilistic risk decay over hops
 
-Reduce risk by some factor at each hop (e.g., high → medium after 2 hops). Tempting but unsound. A prompt injection embedded by agent A and faithfully reproduced by agents B and C is just as dangerous when it reaches agent D. Information does not lose its adversarial potential through reproduction. The only mechanism that legitimately reduces taint in transit is BCTP's bandwidth-constrained validation ([ADR-005](005-bandwidth-constrained-trust.md)).
+Reduce risk by some factor at each hop (e.g., high → medium after 2 hops). Tempting but unsound. A prompt injection embedded by agent A and faithfully reproduced by agents B and C is just as dangerous when it reaches agent D. Information does not lose its adversarial potential through reproduction. The only mechanism that legitimately reduces taint in transit is BCP's bandwidth-constrained validation ([ADR-005](005-bandwidth-constrained-trust.md)).
 
 ## Consequences
 

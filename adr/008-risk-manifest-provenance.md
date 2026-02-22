@@ -118,7 +118,7 @@ Use the writing agent's worst-case taint and sensitivity (from its definition) r
 
 - **Positive:** The FUSE driver, graph analyzer, and violation detector share a single source of truth for per-file risk metadata. No divergence between components.
 - **Positive:** Git commit trailers create a tamper-evident audit trail of risk provenance without additional infrastructure.
-- **Positive:** Human review provides a principled mechanism for taint reduction that preserves sensitivity — the only way to make tainted data safe for clean agents without BCTP.
+- **Positive:** Human review provides a principled mechanism for taint reduction that preserves sensitivity — the only way to make tainted data safe for clean agents without BCP.
 - **Negative:** The JSON manifest is a single file modified by every session completion. Concurrent sessions writing to the same workspace could race on manifest updates. Mitigated by the gateway serializing workspace commits per workspace.
 - **Negative:** The manifest grows linearly with the number of unique file paths written across all sessions. For long-lived workspaces with many files, the manifest becomes large. Mitigated by periodic pruning of entries for deleted files.
 - **Accepted trade-off:** The manifest records session-level taint/sensitivity per file, not per-line or per-block. An agent that is high-taint due to one tool call has all its file writes tagged as high-taint, even files unrelated to the tainted data. This is the conservative consequence of total taint propagation within LLM contexts — there is no way to know which outputs were influenced by which inputs.

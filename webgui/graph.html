@@ -212,7 +212,7 @@
     </div>
     <label><input type="checkbox" id="toggle-fs" checked> Filesystem flow</label>
     <label><input type="checkbox" id="toggle-msg" checked> Messaging flow</label>
-    <label><input type="checkbox" id="toggle-bctp" checked> BCTP flow</label>
+    <label><input type="checkbox" id="toggle-bcp" checked> BCP flow</label>
     <label><input type="checkbox" id="toggle-labels" checked> Labels</label>
     <label><input type="checkbox" id="toggle-matrix"> Matrix</label>
     <label>Gateway:</label>
@@ -291,7 +291,7 @@
       <div class="legend-item"><div class="legend-line" style="background:#d29922"></div> Warning</div>
       <div class="legend-item"><div class="legend-line" style="background:#f85149"></div> Violation</div>
       <div class="legend-item"><div class="legend-line" style="background:#58a6ff;background-image:repeating-linear-gradient(90deg,#58a6ff 0,#58a6ff 6px,transparent 6px,transparent 10px);background-color:transparent;height:2px;"></div> Messaging</div>
-      <div class="legend-item"><div class="legend-line" style="background:#bc8cff;background-image:repeating-linear-gradient(90deg,#bc8cff 0,#bc8cff 3px,transparent 3px,transparent 6px);background-color:transparent;height:2px;"></div> BCTP (bandwidth-constrained)</div>
+      <div class="legend-item"><div class="legend-line" style="background:#bc8cff;background-image:repeating-linear-gradient(90deg,#bc8cff 0,#bc8cff 3px,transparent 3px,transparent 6px);background-color:transparent;height:2px;"></div> BCP (bandwidth-constrained)</div>
     </div>
   </div>
 
@@ -417,7 +417,7 @@ function buildGraph() {
       fsWrite: a.fs_write || [],
       sendTo: a.send_to || [],
       receiveFrom: a.receive_from || [],
-      bctpChannels: a.bctp_channels || [],
+      bcpChannels: a.bcp_channels || [],
       maxInputTaint: aa.max_input_taint || null,
       maxInputSensitivity: aa.max_input_sensitivity || null,
       maxInputRisk: aa.max_input_risk || null,
@@ -480,30 +480,30 @@ function buildGraph() {
     }
   }
 
-  // Compute BCTP edges from agent detail data (bctp_channels)
-  const addedBctpEdges = new Set();
+  // Compute BCP edges from agent detail data (bcp_channels)
+  const addedBcpEdges = new Set();
   for (const controller of nodes) {
-    for (const channel of controller.bctpChannels) {
+    for (const channel of controller.bcpChannels) {
       if (channel.role !== 'controller') continue;
       const reader = nodeMap[channel.peer];
       if (!reader) continue;
 
       // Verify the peer declares a matching reader role back
-      const peerChannel = reader.bctpChannels.find(
+      const peerChannel = reader.bcpChannels.find(
         ch => ch.peer === controller.id && ch.role === 'reader'
       );
       if (!peerChannel) continue;
 
       const key = `${channel.peer}|${controller.id}`;
-      addedBctpEdges.add(key);
+      addedBcpEdges.add(key);
       const isBibaViolation = bibaViolations.has(key);
       const isBlpViolation = blpViolations.has(key);
 
       links.push({
         source: channel.peer, target: controller.id,
-        type: 'bctp',
-        paths: [`${channel.peer} → ${controller.id} (BCTP cat-${channel.max_category})`],
-        taintLevel: 'low',  // BCTP is always taint-neutral
+        type: 'bcp',
+        paths: [`${channel.peer} → ${controller.id} (BCP cat-${channel.max_category})`],
+        taintLevel: 'low',  // BCP is always taint-neutral
         sensitivityLevel: 'low',
         bibaViolation: isBibaViolation,
         blpViolation: isBlpViolation,
@@ -513,8 +513,8 @@ function buildGraph() {
     }
   }
 
-  // Fallback: derive messaging and BCTP edges from /graph/analysis incoming_edges
-  // when agent detail data (send_to/receive_from/bctp_channels) is unavailable.
+  // Fallback: derive messaging and BCP edges from /graph/analysis incoming_edges
+  // when agent detail data (send_to/receive_from/bcp_channels) is unavailable.
   for (const target of nodes) {
     for (const edge of target.incomingEdges) {
       const edgeType = edge.edge_type || 'filesystem';
@@ -523,7 +523,7 @@ function buildGraph() {
 
       const key = `${edge.from}|${target.id}`;
       if (edgeType === 'messaging' && addedMsgEdges.has(key)) continue;
-      if (edgeType === 'bctp' && addedBctpEdges.has(key)) continue;
+      if (edgeType === 'bcp' && addedBcpEdges.has(key)) continue;
 
       const source = nodeMap[edge.from];
       const isBibaViolation = bibaViolations.has(key);
@@ -539,11 +539,11 @@ function buildGraph() {
           bibaViolation: isBibaViolation,
           blpViolation: isBlpViolation,
         });
-      } else if (edgeType === 'bctp') {
+      } else if (edgeType === 'bcp') {
         links.push({
           source: edge.from, target: target.id,
-          type: 'bctp',
-          paths: [`${edge.from} → ${target.id} (BCTP)`],
+          type: 'bcp',
+          paths: [`${edge.from} → ${target.id} (BCP)`],
           taintLevel: 'low',
           sensitivityLevel: 'low',
           bibaViolation: isBibaViolation,
@@ -585,7 +585,7 @@ function buildGraph() {
 // Mirrors RiskScorer.infer_capability/2 from the gateway.
 const TOOL_CAPABILITY = {
   Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
   Bash: 'medium', WebFetch: 'medium', WebSearch: 'medium',
   SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
   CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
@@ -594,7 +594,7 @@ const TOOL_CAPABILITY = {
 // Tool taint levels — mirrors TaintMatrix @tool_taint
 const TOOL_TAINT = {
   Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
   Bash: 'low', WebFetch: 'high', WebSearch: 'high',
   SendEmail: 'low', MoveEmail: 'low', CreateFolder: 'low',
   CalendarQuery: 'low', CalendarCreate: 'low', CalendarUpdate: 'low', CalendarDelete: 'low',
@@ -603,7 +603,7 @@ const TOOL_TAINT = {
 // Tool sensitivity levels — mirrors SensitivityMatrix @tool_sensitivity
 const TOOL_SENSITIVITY = {
   Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
   Bash: 'low', WebFetch: 'low', WebSearch: 'low',
   SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
   CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
@@ -673,7 +673,7 @@ function renderAllToolsByLevel(tools, toolMap, hasNetwork) {
   ).join('');
 }
 
-const EDGE_TYPE_LABELS = { write_read: 'filesystem', messaging: 'messaging', bctp: 'BCTP' };
+const EDGE_TYPE_LABELS = { write_read: 'filesystem', messaging: 'messaging', bcp: 'BCP' };
 
 function getIncomingConnections(nodeId) {
   return graphData.links.filter(l => {
@@ -807,8 +807,8 @@ function edgeColor(link) {
   // Messaging edges default to accent blue unless in violation
   if (link.type === 'messaging') return '#58a6ff';
 
-  // BCTP edges use purple (bandwidth-constrained, trusted channel)
-  if (link.type === 'bctp') return '#bc8cff';
+  // BCP edges use purple (bandwidth-constrained, trusted channel)
+  if (link.type === 'bcp') return '#bc8cff';
 
   // In Biba mode, color by taint. In BLP mode, color by sensitivity. Default: max of both.
   let level;
@@ -835,7 +835,7 @@ function edgeOpacity(link) {
 }
 
 function edgeMarker(d) {
-  if (d.type === 'bctp') return 'url(#arrow-bctp)';
+  if (d.type === 'bcp') return 'url(#arrow-bcp)';
   if (d.type !== 'write_read') return null;
   const mode = getAnalysisMode();
   if (mode === 'biba' && d.bibaViolation) return 'url(#arrow-violation)';
@@ -858,7 +858,7 @@ function edgeLabelText(d) {
   const mode = getAnalysisMode();
   if (mode === 'biba' && d.bibaViolation) return 'BIBA';
   if (mode === 'blp' && d.blpViolation) return 'BLP';
-  if (d.type === 'bctp') return `BCTP-${d.maxCategory || '?'}`;
+  if (d.type === 'bcp') return `BCP-${d.maxCategory || '?'}`;
   if (mode === 'biba') return d.taintLevel || '';
   if (mode === 'blp') return d.sensitivityLevel || '';
   return `T:${(d.taintLevel || 'low')[0]} S:${(d.sensitivityLevel || 'low')[0]}`;
@@ -952,7 +952,7 @@ function renderGraph() {
 
   // Defs for arrowheads
   const defs = svg.append('defs');
-  ['compliant', 'warning', 'violation', 'bctp'].forEach((cls, i) => {
+  ['compliant', 'warning', 'violation', 'bcp'].forEach((cls, i) => {
     const colors = ['#3fb950', '#d29922', '#f85149', '#bc8cff'];
     defs.append('marker')
       .attr('id', `arrow-${cls}`)
@@ -989,7 +989,7 @@ function renderGraph() {
     .attr('stroke', d => edgeColor(d))
     .attr('stroke-opacity', d => edgeOpacity(d))
     .attr('stroke-width', d => edgeWidth(d))
-    .attr('stroke-dasharray', d => d.type === 'messaging' ? '6,4' : d.type === 'bctp' ? '3,3' : null)
+    .attr('stroke-dasharray', d => d.type === 'messaging' ? '6,4' : d.type === 'bcp' ? '3,3' : null)
     .attr('marker-end', d => edgeMarker(d))
     .attr('class', d => `edge-${d.type}`)
     .style('pointer-events', 'stroke')
@@ -997,9 +997,9 @@ function renderGraph() {
       const src = typeof d.source === 'object' ? d.source.id : d.source;
       const tgt = typeof d.target === 'object' ? d.target.id : d.target;
 
-      if (d.type === 'bctp') {
-        const bctpHtml = `
-          <h3>${src} \u2192 ${tgt} (BCTP)</h3>
+      if (d.type === 'bcp') {
+        const bcpHtml = `
+          <h3>${src} \u2192 ${tgt} (BCP)</h3>
           <div class="row"><span class="label">Channel:</span><span>Bandwidth-Constrained Trust Protocol</span></div>
           <div class="row"><span class="label">Max category:</span><span class="badge low">Cat-${d.maxCategory || '?'}</span></div>
           <div class="row"><span class="label">Budget:</span><span>${d.budgetBits || '?'} bits/session</span></div>
@@ -1008,7 +1008,7 @@ function renderGraph() {
             Gateway validates all responses. Cat-1: structured primitives. Cat-2: constrained Q&A. Cat-3: free-text (requires approval).
           </div>
         `;
-        tooltip.innerHTML = bctpHtml;
+        tooltip.innerHTML = bcpHtml;
       } else {
         const direction = d.type === 'write_read' ? `${src} writes \u2192 ${tgt} reads`
           : d.type === 'messaging' ? `${src} \u2192 ${tgt} (messaging)`
@@ -1042,7 +1042,7 @@ function renderGraph() {
   // Edge labels
   const edgeLabelGroup = g.append('g').attr('class', 'edge-labels');
   const edgeLabels = edgeLabelGroup.selectAll('text')
-    .data(graphData.links.filter(d => d.type === 'write_read' || d.type === 'bctp'))
+    .data(graphData.links.filter(d => d.type === 'write_read' || d.type === 'bcp'))
     .join('text')
     .attr('class', 'edge-label')
     .text(d => edgeLabelText(d))
@@ -1259,15 +1259,15 @@ function renderGraph() {
 function applyToggles() {
   const showFs = document.getElementById('toggle-fs').checked;
   const showMsg = document.getElementById('toggle-msg').checked;
-  const showBctp = document.getElementById('toggle-bctp').checked;
+  const showBcp = document.getElementById('toggle-bcp').checked;
   const showLabels = document.getElementById('toggle-labels').checked;
   const showMatrix = document.getElementById('toggle-matrix').checked;
 
   d3.selectAll('.edge-write_read').attr('visibility', showFs ? 'visible' : 'hidden');
   d3.selectAll('.edge-messaging').attr('visibility', showMsg ? 'visible' : 'hidden');
-  d3.selectAll('.edge-bctp').attr('visibility', showBctp ? 'visible' : 'hidden');
+  d3.selectAll('.edge-bcp').attr('visibility', showBcp ? 'visible' : 'hidden');
 
-  d3.selectAll('.edge-label').attr('visibility', (showFs || showMsg || showBctp) ? 'visible' : 'hidden');
+  d3.selectAll('.edge-label').attr('visibility', (showFs || showMsg || showBcp) ? 'visible' : 'hidden');
   d3.selectAll('.node-label').attr('visibility', showLabels ? 'visible' : 'hidden');
 
   const matrixPanel = document.getElementById('matrix-panel');
@@ -1314,10 +1314,10 @@ function updateMatrix() {
   const names = graphData.nodes.map(n => n.id);
   const edgeMap = {};
   for (const link of graphData.links) {
-    if (link.type !== 'write_read' && link.type !== 'bctp') continue;
+    if (link.type !== 'write_read' && link.type !== 'bcp') continue;
     const src = typeof link.source === 'object' ? link.source.id : link.source;
     const tgt = typeof link.target === 'object' ? link.target.id : link.target;
-    // Prefer filesystem edges over BCTP in the matrix if both exist
+    // Prefer filesystem edges over BCP in the matrix if both exist
     if (!edgeMap[`${src}|${tgt}`] || link.type === 'write_read') {
       edgeMap[`${src}|${tgt}`] = link;
     }
@@ -1348,7 +1348,7 @@ function updateMatrix() {
         cls = 'violation'; label = 'BIBA';
       } else if (mode === 'blp' && link.blpViolation) {
         cls = 'violation'; label = 'BLP';
-      } else if (link.type === 'bctp') {
+      } else if (link.type === 'bcp') {
         cls = 'compliant';
         label = `B${link.maxCategory || '?'}`;
       } else {
@@ -1410,7 +1410,7 @@ function escapeHtml(s) {
 // Toggle listeners
 document.getElementById('toggle-fs').addEventListener('change', applyToggles);
 document.getElementById('toggle-msg').addEventListener('change', applyToggles);
-document.getElementById('toggle-bctp').addEventListener('change', applyToggles);
+document.getElementById('toggle-bcp').addEventListener('change', applyToggles);
 document.getElementById('toggle-labels').addEventListener('change', applyToggles);
 document.getElementById('toggle-matrix').addEventListener('change', () => { applyToggles(); updateMatrix(); });
 document.querySelectorAll('input[name="analysis-mode"]').forEach(el => {

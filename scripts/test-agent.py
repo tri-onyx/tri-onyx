@@ -24,7 +24,7 @@ Options:
                                  (default: verified)
     --timeout SECONDS            Max wait time per turn in seconds
                                  (default: 120)
-    --auto-approve               Automatically approve any BCTP
+    --auto-approve               Automatically approve any BCP
                                  approval_request with 👍
 
 Turn-based usage:
@@ -41,7 +41,7 @@ Turn-based usage:
 
     Reactions to approval_request are sent immediately when the frame
     arrives (mid-session), not after agent_result, because the agent
-    is blocked waiting for the BCTP tool result.
+    is blocked waiting for the BCP tool result.
 
 Output:
     One JSON object per line (JSONL). Frame types:
@@ -57,7 +57,7 @@ Examples:
     # Simple single-turn
     uv run scripts/test-agent.py main "What files are in /workspace?"
 
-    # Auto-approve BCTP requests
+    # Auto-approve BCP requests
     uv run scripts/test-agent.py researcher "Summarise the logs" --auto-approve
 
     # Multi-turn with explicit approval
@@ -138,7 +138,7 @@ async def run(
 
         # Single event loop for the entire session.
         #
-        # approval_request arrives mid-session (agent is blocked on the BCTP
+        # approval_request arrives mid-session (agent is blocked on the BCP
         # tool result), so we handle it inline rather than after agent_result.
         pending_approval: dict | None = None
 
@@ -150,7 +150,7 @@ async def run(
 
                     frame_type = frame.get("type")
 
-                    # ── BCTP approval request ──────────────────────────────
+                    # ── BCP approval request ──────────────────────────────
                     if frame_type == "approval_request":
                         pending_approval = frame
                         react_turn = _pop_next_react(remaining)
@@ -244,7 +244,7 @@ async def _send_approval_reaction(
     channel: dict,
     trust: str,
 ) -> None:
-    """Send a reaction that resolves a pending BCTP approval_request."""
+    """Send a reaction that resolves a pending BCP approval_request."""
     await ws.send(
         json.dumps(
             {
@@ -365,7 +365,7 @@ def main() -> None:
     parser.add_argument(
         "--auto-approve",
         action="store_true",
-        help="Automatically approve BCTP approval_request frames with 👍",
+        help="Automatically approve BCP approval_request frames with 👍",
     )
     args = parser.parse_args()
 

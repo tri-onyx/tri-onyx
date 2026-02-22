@@ -38,8 +38,8 @@ defmodule TriOnyx.GraphAnalyzer do
   def analyze(definitions, risk_manifest) do
     fs_edges = build_filesystem_edges(definitions, risk_manifest)
     msg_edges = build_messaging_edges(definitions)
-    bctp_edges = build_bctp_edges(definitions)
-    edges = merge_edges(fs_edges, msg_edges) |> merge_edges(bctp_edges)
+    bcp_edges = build_bcp_edges(definitions)
+    edges = merge_edges(fs_edges, msg_edges) |> merge_edges(bcp_edges)
 
     definitions
     |> Enum.map(fn definition ->
@@ -162,14 +162,14 @@ defmodule TriOnyx.GraphAnalyzer do
   @doc """
   Infers worst-case taint with peer resolution.
 
-  When `all_definitions` is provided (name → definition map), BCTP channels
-  are resolved: a controller receiving BCTP responses from a peer inherits
-  `step_down(peer_taint)`. Without peer context, BCTP channels are ignored.
+  When `all_definitions` is provided (name → definition map), BCP channels
+  are resolved: a controller receiving BCP responses from a peer inherits
+  `step_down(peer_taint)`. Without peer context, BCP channels are ignored.
 
   Taint sources (input quality only, never tools):
   - Network access or WebFetch/WebSearch → `:high`
   - Free-text messaging peers (receive_from) → `:medium`
-  - BCTP controller channel → `step_down(peer's worst-case taint)`
+  - BCP controller channel → `step_down(peer's worst-case taint)`
   - No external inputs → `:low`
   """
   @spec worst_case_taint(map(), map()) :: InformationClassifier.information_level()
@@ -181,10 +181,10 @@ defmodule TriOnyx.GraphAnalyzer do
 
     has_messaging_peers = definition.receive_from != []
 
-    # BCTP taint: for each controller channel, resolve peer's worst-case
+    # BCP taint: for each controller channel, resolve peer's worst-case
     # taint and step it down by one level.
-    bctp_taint =
-      definition.bctp_channels
+    bcp_taint =
+      definition.bcp_channels
       |> Enum.filter(fn ch -> ch.role == :controller end)
       |> Enum.map(fn ch ->
         case Map.get(all_definitions, ch.peer) do
@@ -205,7 +205,7 @@ defmodule TriOnyx.GraphAnalyzer do
         true -> :low
       end
 
-    result = InformationClassifier.higher_level(base, bctp_taint)
+    result = InformationClassifier.higher_level(base, bcp_taint)
 
     # Factor in base_taint from agent definition as a floor
     base_taint_floor = Map.get(definition, :base_taint, :low)
@@ -334,17 +334,17 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
-  # Builds directed edges from BCTP channel declarations.
+  # Builds directed edges from BCP channel declarations.
   #
-  # A BCTP channel between a controller and a reader creates an edge from
+  # A BCP channel between a controller and a reader creates an edge from
   # the reader to the controller (information flows from reader to controller
-  # in the BCTP model — the reader extracts data, the controller consumes it).
-  @spec build_bctp_edges([map()]) :: %{String.t() => [map()]}
-  defp build_bctp_edges(definitions) do
+  # in the BCP model — the reader extracts data, the controller consumes it).
+  @spec build_bcp_edges([map()]) :: %{String.t() => [map()]}
+  defp build_bcp_edges(definitions) do
     def_map = Map.new(definitions, &{&1.name, &1})
 
     for definition <- definitions,
-        channel <- Map.get(definition, :bctp_channels, []),
+        channel <- Map.get(definition, :bcp_channels, []),
         channel.role == :controller,
         Map.has_key?(def_map, channel.peer),
         reduce: %{} do
@@ -352,30 +352,30 @@ defmodule TriOnyx.GraphAnalyzer do
         edge = %{
           from: channel.peer,
           paths: [],
-          risk_level: bctp_risk_level(channel.max_category),
-          edge_type: :bctp
+          risk_level: bcp_risk_level(channel.max_category),
+          edge_type: :bcp
         }
 
         Map.update(acc, definition.name, [edge], &[edge | &1])
     end
   end
 
-  defp bctp_risk_level(1), do: "low"
-  defp bctp_risk_level(2), do: "medium"
-  defp bctp_risk_level(3), do: "high"
+  defp bcp_risk_level(1), do: "low"
+  defp bcp_risk_level(2), do: "medium"
+  defp bcp_risk_level(3), do: "high"
 
   @doc """
-  Validates BCTP role symmetry across agent definitions.
+  Validates BCP role symmetry across agent definitions.
 
   If agent A declares `role: controller` toward B, then B should declare
   `role: reader` toward A. Returns a list of warning maps for mismatches.
   """
-  @spec validate_bctp_roles([map()]) :: [map()]
-  def validate_bctp_roles(definitions) do
+  @spec validate_bcp_roles([map()]) :: [map()]
+  def validate_bcp_roles(definitions) do
     def_map = Map.new(definitions, &{&1.name, &1})
 
     for definition <- definitions,
-        channel <- Map.get(definition, :bctp_channels, []),
+        channel <- Map.get(definition, :bcp_channels, []),
         channel.role == :controller,
         reduce: [] do
       acc ->
@@ -386,12 +386,12 @@ defmodule TriOnyx.GraphAnalyzer do
             %{
               agent: definition.name,
               peer: channel.peer,
-              warning: "BCTP channel declares peer '#{channel.peer}' which does not exist"
+              warning: "BCP channel declares peer '#{channel.peer}' which does not exist"
             }
             | acc
           ]
         else
-          peer_channels = Map.get(peer_def, :bctp_channels, [])
+          peer_channels = Map.get(peer_def, :bcp_channels, [])
 
           has_reader_decl =
             Enum.any?(peer_channels, fn ch ->

@@ -30,8 +30,8 @@ defmodule TriOnyx.SensitivityMatrixTest do
 
     test "messaging tools are low sensitivity" do
       assert :low = SensitivityMatrix.tool_sensitivity("SendMessage")
-      assert :low = SensitivityMatrix.tool_sensitivity("BCTPQuery")
-      assert :low = SensitivityMatrix.tool_sensitivity("BCTPRespond")
+      assert :low = SensitivityMatrix.tool_sensitivity("BCPQuery")
+      assert :low = SensitivityMatrix.tool_sensitivity("BCPRespond")
     end
 
     test "control tools are low sensitivity" do

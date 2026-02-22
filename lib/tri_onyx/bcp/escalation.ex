@@ -1,4 +1,4 @@
-defmodule TriOnyx.BCTP.Escalation do
+defmodule TriOnyx.BCP.Escalation do
   @moduledoc """
   Per-channel escalation state tracking for the Bandwidth-Constrained Trust Protocol.
 

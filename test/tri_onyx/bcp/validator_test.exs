@@ -1,7 +1,7 @@
-defmodule TriOnyx.BCTP.ValidatorTest do
+defmodule TriOnyx.BCP.ValidatorTest do
   use ExUnit.Case, async: true
 
-  alias TriOnyx.BCTP.{Query, Validator}
+  alias TriOnyx.BCP.{Query, Validator}
 
   # -- Category 1: Pure type checking --
 

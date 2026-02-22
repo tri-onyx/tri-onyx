@@ -22,7 +22,7 @@ defmodule TriOnyx.InformationClassifier do
   truth for all per-tool and per-trigger values. See those modules for the
   complete tables.
 
-  Dynamic sources (inter-agent messages, BCTP responses) inherit from the
+  Dynamic sources (inter-agent messages, BCP responses) inherit from the
   sender's classification and are handled by dedicated functions below.
   """
 
@@ -105,24 +105,24 @@ defmodule TriOnyx.InformationClassifier do
 
 
   @doc """
-  Classifies a validated BCTP response.
+  Classifies a validated BCP response.
 
-  BCTP responses are gateway-validated with bounded bandwidth. Taint is
+  BCP responses are gateway-validated with bounded bandwidth. Taint is
   the sender's taint stepped down by one level — the structured validation
   reduces but does not eliminate taint. Sensitivity is always `:low` (structured
   data, no free-text leakage).
 
   The 2-arity form is kept for backward compatibility and assumes `:low`
-  sender taint (equivalent to `classify_bctp(category, bits, :low)`).
+  sender taint (equivalent to `classify_bcp(category, bits, :low)`).
   """
-  @spec classify_bctp(1 | 2 | 3, float(), information_level()) :: classification()
-  def classify_bctp(category, bandwidth_bits, sender_taint \\ :low) do
+  @spec classify_bcp(1 | 2 | 3, float(), information_level()) :: classification()
+  def classify_bcp(category, bandwidth_bits, sender_taint \\ :low) do
     taint = step_down(sender_taint)
 
     %{
       taint: taint,
       sensitivity: :low,
-      reason: "BCTP cat-#{category} (#{bandwidth_bits} bits, sender taint: #{sender_taint})"
+      reason: "BCP cat-#{category} (#{bandwidth_bits} bits, sender taint: #{sender_taint})"
     }
   end
 

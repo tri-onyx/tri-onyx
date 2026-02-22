@@ -30,13 +30,13 @@ docker compose up -d
 # Single turn
 uv run scripts/test-agent.py <agent-name> "<prompt>"
 
-# Multi-turn with explicit BCTP approval
+# Multi-turn with explicit BCP approval
 uv run scripts/test-agent.py <agent-name> --turns '[
   {"type": "message", "content": "<prompt>"},
   {"type": "react",   "emoji":  "👍"}
 ]'
 
-# Auto-approve all BCTP Cat-3 requests
+# Auto-approve all BCP Cat-3 requests
 uv run scripts/test-agent.py <agent-name> "<prompt>" --auto-approve
 
 # Lower-trust trigger (maps to :connector_unverified in the gateway)
@@ -59,7 +59,7 @@ to filter to just the agent's words.
 | `agent_text`    | Text chunk produced by the agent |
 | `agent_result`  | Session complete — exit 0 |
 | `agent_error`   | Runtime error — exit 1 |
-| `approval_request` | Cat-3 BCTP response needs human sign-off |
+| `approval_request` | Cat-3 BCP response needs human sign-off |
 | `timeout`       | Harness gave up waiting |
 
 ### Exit codes
@@ -79,14 +79,14 @@ the same scope the real Matrix connector has.
 - Everything the triggered agent does: tool calls, tool results, text output, risk
   escalations
 - `approval_request` frames — these are broadcast to **all registered connectors**,
-  so the harness always receives them regardless of which agent triggered the BCTP
+  so the harness always receives them regardless of which agent triggered the BCP
   query
-- The BCTP tool result that arrives back to the triggered agent after approval
+- The BCP tool result that arrives back to the triggered agent after approval
 
 **Not visible to the harness:**
 
 - Events from agents spawned as a side-effect (e.g. a `researcher` session started
-  because `main` called `BCTPQuery` or `SendMessage`). Those sessions are not
+  because `main` called `BCPQuery` or `SendMessage`). Those sessions are not
   triggered by the connector and their EventBus is never subscribed.
 - Internal inter-agent message routing steps
 
@@ -96,16 +96,16 @@ To observe what a side-effect agent did, read its session log (see below).
 
 ## Multi-agent flow example
 
-Flow: user → `main` → `researcher` (BCTP Cat-3) → approval → `main` responds.
+Flow: user → `main` → `researcher` (BCP Cat-3) → approval → `main` responds.
 
 What the harness sees in order:
 
 ```
 {"type":"agent_typing","is_typing":true,...}
-{"type":"agent_step","step_type":"tool_use","name":"BCTPQuery",...}
+{"type":"agent_step","step_type":"tool_use","name":"BCPQuery",...}
 {"type":"approval_request","approval_id":"...","from_agent":"main","to_agent":"researcher","response_content":"...","anomalies":[...]}
   ← harness sends reaction 👍 here (--auto-approve or react turn)
-{"type":"agent_step","step_type":"tool_result","name":"BCTPQuery","content":"..."}
+{"type":"agent_step","step_type":"tool_result","name":"BCPQuery","content":"..."}
 {"type":"agent_typing","is_typing":true,...}
 {"type":"agent_text","content":"..."}
 {"type":"agent_result",...}
@@ -201,7 +201,7 @@ Look for:
 - `port_spawn_failed` — Docker failed to start the agent container
 - `risk_escalation` — taint or secrecy level was elevated
 - `violation` — Biba/Bell-LaPadula policy was breached and session was killed
-- `BCTP.Channel` lines — query routing and validation
+- `BCP.Channel` lines — query routing and validation
 
 **Agent container logs** — the Python runtime and FUSE driver:
 
@@ -255,11 +255,11 @@ E2E encryption is in use.
    docker build --no-cache -t tri-onyx-agent:latest -f agent.Dockerfile .
    ```
 
-### BCTP approval request never arrives
+### BCP approval request never arrives
 
 1. Confirm the researcher's response actually reached Cat-3 validation — check
-   `docker compose logs gateway` for `BCTP.Channel: Cat-3` log lines.
-2. Check `ApprovalQueue` state via HTTP: `curl http://localhost:4000/bctp/approvals`
+   `docker compose logs gateway` for `BCP.Channel: Cat-3` log lines.
+2. Check `ApprovalQueue` state via HTTP: `curl http://localhost:4000/bcp/approvals`
 3. If `approval_request` was sent but the harness missed it, the harness may have
    connected after the broadcast. Restart the test.
 
