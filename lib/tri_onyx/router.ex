@@ -768,12 +768,69 @@ defmodule TriOnyx.Router do
     biba = GraphAnalyzer.biba_violations(analysis, definitions, info_levels)
     blp = GraphAnalyzer.bell_lapadula_violations(definitions, manifest, info_levels)
 
+    # Build violation lookup sets for flat edges
+    biba_set =
+      MapSet.new(biba, fn v -> {v["writer"], v["reader"]} end)
+
+    blp_set =
+      MapSet.new(blp, fn v -> {v["writer"], v["reader"]} end)
+
+    # Build flat edge list from analysis incoming_edges
+    flat_edges =
+      analysis
+      |> Enum.flat_map(fn {target_name, %{incoming_edges: edges}} ->
+        Enum.map(edges, fn edge ->
+          edge_type = Map.get(edge, :edge_type, :filesystem)
+          %{
+            "from" => edge.from,
+            "to" => target_name,
+            "edge_type" => to_string(edge_type),
+            "paths" => edge.paths,
+            "risk_level" => edge.risk_level,
+            "biba_violation" => MapSet.member?(biba_set, {edge.from, target_name}),
+            "blp_violation" => MapSet.member?(blp_set, {edge.from, target_name}),
+            "max_category" => Map.get(edge, :max_category),
+            "budget_bits" => Map.get(edge, :budget_bits)
+          }
+        end)
+      end)
+
+    # Add per-agent enrichments: effective_risk, worst_case levels, tool_drivers
+    enriched_analysis =
+      serialize_analysis(analysis)
+      |> Map.new(fn {name, data} ->
+        definition = all_defs[name]
+        prop_t = data["propagated_taint"]
+        prop_s = data["propagated_sensitivity"]
+        wc_t = Map.get(taint_levels, name, :low)
+        wc_s = Map.get(sensitivity_levels, name, :low)
+
+        eff_t = if prop_t, do: String.to_existing_atom(prop_t), else: wc_t
+        eff_s = if prop_s, do: String.to_existing_atom(prop_s), else: wc_s
+        cap = RiskScorer.infer_capability(definition.tools, definition.network)
+        eff_risk = RiskScorer.effective_risk(eff_t, eff_s, cap)
+
+        drivers = GraphAnalyzer.tool_drivers(definition)
+
+        {name, Map.merge(data, %{
+          "effective_risk" => RiskScorer.format_risk(eff_risk),
+          "worst_case_taint" => to_string(wc_t),
+          "worst_case_sensitivity" => to_string(wc_s),
+          "tool_drivers" => %{
+            "taint_drivers" => Enum.map(drivers.taint_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end),
+            "sensitivity_drivers" => Enum.map(drivers.sensitivity_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end),
+            "capability_drivers" => Enum.map(drivers.capability_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end)
+          }
+        })}
+      end)
+
     conn
     |> put_resp_content_type("application/json")
     |> send_resp(
       200,
       Jason.encode!(%{
-        "agents" => serialize_analysis(analysis),
+        "agents" => enriched_analysis,
+        "edges" => flat_edges,
         "biba_violations" => biba,
         "blp_violations" => blp
       })

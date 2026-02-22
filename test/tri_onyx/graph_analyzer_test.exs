@@ -850,6 +850,74 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
   end
 
+  describe "tool_drivers/1" do
+    test "returns taint drivers for tools with taint > low" do
+      agent = make_def(%{name: "fetcher", tools: ["Read", "WebFetch", "WebSearch"], network: :none})
+      result = GraphAnalyzer.tool_drivers(agent)
+
+      assert length(result.taint_drivers) == 2
+      tools = Enum.map(result.taint_drivers, & &1.tool)
+      assert "WebFetch" in tools
+      assert "WebSearch" in tools
+    end
+
+    test "Bash promoted to high taint and capability with network" do
+      agent = make_def(%{name: "basher", tools: ["Read", "Bash"], network: :outbound})
+      result = GraphAnalyzer.tool_drivers(agent)
+
+      bash_taint = Enum.find(result.taint_drivers, &(&1.tool == "Bash"))
+      assert bash_taint.level == :high
+
+      bash_cap = Enum.find(result.capability_drivers, &(&1.tool == "Bash"))
+      assert bash_cap.level == :high
+    end
+
+    test "Bash without network stays at base levels" do
+      agent = make_def(%{name: "basher", tools: ["Read", "Bash"], network: :none})
+      result = GraphAnalyzer.tool_drivers(agent)
+
+      # Bash taint is :low without network, so not in drivers
+      assert Enum.find(result.taint_drivers, &(&1.tool == "Bash")) == nil
+
+      bash_cap = Enum.find(result.capability_drivers, &(&1.tool == "Bash"))
+      assert bash_cap.level == :medium
+    end
+
+    test "returns empty lists for all-low tools" do
+      agent = make_def(%{name: "reader", tools: ["Read", "Grep", "Glob"]})
+      result = GraphAnalyzer.tool_drivers(agent)
+
+      assert result.taint_drivers == []
+      assert result.sensitivity_drivers == []
+      assert result.capability_drivers == []
+    end
+  end
+
+  describe "BCP edge metadata" do
+    test "BCP edges include max_category and budget_bits" do
+      controller = make_def(%{
+        name: "ctrl",
+        bcp_channels: [
+          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      reader = make_def(%{
+        name: "rdr",
+        bcp_channels: [
+          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      result = GraphAnalyzer.analyze([controller, reader], %{})
+      edge = hd(result["ctrl"].incoming_edges)
+      assert edge.max_category == 2
+      assert edge.budget_bits == 500
+    end
+  end
+
   describe "propagate_risk/2" do
     test "propagates risk level from source through chain" do
       edges = %{
