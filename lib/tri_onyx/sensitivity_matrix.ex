@@ -2,7 +2,7 @@ defmodule TriOnyx.SensitivityMatrix do
   @moduledoc """
   Source-of-truth mapping from tools and input sources to sensitivity levels.
 
-  Sensitivity tracks the confidentiality axis of the dual-axis risk model --
+  Sensitivity tracks the confidentiality axis of the three-axis risk model --
   how sensitive is the data? High sensitivity indicates data that must not be
   exposed outside authorised channels.
 

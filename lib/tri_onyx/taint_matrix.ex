@@ -2,7 +2,7 @@ defmodule TriOnyx.TaintMatrix do
   @moduledoc """
   Source-of-truth mapping from tools and input sources to taint levels.
 
-  Taint tracks the integrity axis of the dual-axis risk model — how
+  Taint tracks the integrity axis of the three-axis risk model — how
   trustworthy is the data? High taint indicates data that may have been
   crafted by an adversary to manipulate agent behaviour (prompt injection
   risk).
