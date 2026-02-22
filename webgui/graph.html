@@ -559,11 +559,11 @@ function buildGraph() {
 
   // Use server-propagated taint/sensitivity levels (transitive, with BCP step-down).
   for (const node of nodes) {
-    const agentAnalysis = data.agents[node.id] || {};
-    node.effTaintLevel = agentAnalysis.propagated_taint || node.taintLevel;
-    node.effSensitivityLevel = agentAnalysis.propagated_sensitivity || node.sensitivityLevel;
-    node.taintSources = agentAnalysis.taint_sources || [];
-    node.sensitivitySources = agentAnalysis.sensitivity_sources || [];
+    const aa = agentAnalysis[node.id] || {};
+    node.effTaintLevel = aa.propagated_taint || node.taintLevel;
+    node.effSensitivityLevel = aa.propagated_sensitivity || node.sensitivityLevel;
+    node.taintSources = aa.taint_sources || [];
+    node.sensitivitySources = aa.sensitivity_sources || [];
     node.effectiveRisk = normalizeRisk(computeEffectiveRisk(node.effTaintLevel, node.effSensitivityLevel, node.capabilityLevel));
   }
   document.getElementById('agent-count').textContent = `${nodes.length} agents`;
