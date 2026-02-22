@@ -764,7 +764,7 @@ defmodule TriOnyx.Router do
       end)
       |> Map.new()
 
-    analysis = GraphAnalyzer.analyze(definitions, manifest)
+    analysis = GraphAnalyzer.analyze(definitions, manifest, info_levels)
     biba = GraphAnalyzer.biba_violations(analysis, definitions, info_levels)
     blp = GraphAnalyzer.bell_lapadula_violations(definitions, manifest, info_levels)
 
@@ -1075,7 +1075,15 @@ defmodule TriOnyx.Router do
              }
            end),
          "capability_level" => to_string(entry.capability_level),
-         "risk_chain" => entry.risk_chain
+         "risk_chain" => entry.risk_chain,
+         "propagated_taint" => if(entry[:propagated_taint], do: to_string(entry.propagated_taint), else: nil),
+         "propagated_sensitivity" => if(entry[:propagated_sensitivity], do: to_string(entry.propagated_sensitivity), else: nil),
+         "taint_sources" => Enum.map(Map.get(entry, :taint_sources, []), fn src ->
+           %{"from" => src.from, "contributed" => to_string(src.contributed), "edge_type" => to_string(src.edge_type)}
+         end),
+         "sensitivity_sources" => Enum.map(Map.get(entry, :sensitivity_sources, []), fn src ->
+           %{"from" => src.from, "contributed" => to_string(src.contributed), "edge_type" => to_string(src.edge_type)}
+         end)
        }}
     end)
   end

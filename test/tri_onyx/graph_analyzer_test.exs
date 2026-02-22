@@ -733,6 +733,123 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
   end
 
+  describe "propagate_levels/3" do
+    test "transitive propagation A→B→C propagates taint through chain" do
+      agent_a = make_def(%{name: "source", fs_write: ["/data/raw/**"], fs_read: []})
+      agent_b = make_def(%{name: "middle", fs_read: ["/data/raw/**"], fs_write: ["/data/out/**"]})
+      agent_c = make_def(%{name: "sink", fs_read: ["/data/out/**"], fs_write: []})
+
+      manifest = %{
+        "/data/raw/**" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"},
+        "/data/out/**" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"}
+      }
+
+      definitions = [agent_a, agent_b, agent_c]
+      fs_edges = build_edges_for_test(definitions, manifest)
+
+      base_levels = %{
+        "source" => %{taint: :high, sensitivity: :low},
+        "middle" => %{taint: :low, sensitivity: :low},
+        "sink" => %{taint: :low, sensitivity: :low}
+      }
+
+      result = GraphAnalyzer.propagate_levels(definitions, fs_edges, base_levels)
+
+      assert result["middle"].taint == :high
+      assert result["sink"].taint == :high
+      assert result["sink"].sensitivity == :low
+    end
+
+    test "BCP edge applies step_down on taint" do
+      controller = make_def(%{
+        name: "ctrl",
+        bcp_channels: [%{peer: "rdr", role: :controller, max_category: 2,
+          budget_bits: 500, max_cat2_queries: 5, max_cat3_queries: 0}]
+      })
+      reader = make_def(%{
+        name: "rdr",
+        bcp_channels: [%{peer: "ctrl", role: :reader, max_category: 2,
+          budget_bits: 500, max_cat2_queries: 5, max_cat3_queries: 0}]
+      })
+
+      definitions = [controller, reader]
+      # BCP edge: reader → controller
+      edges = %{"ctrl" => [%{from: "rdr", paths: [], risk_level: "medium", edge_type: :bcp}]}
+
+      base_levels = %{
+        "ctrl" => %{taint: :low, sensitivity: :low},
+        "rdr" => %{taint: :high, sensitivity: :medium}
+      }
+
+      result = GraphAnalyzer.propagate_levels(definitions, edges, base_levels)
+
+      # step_down(:high) = :medium for taint via BCP
+      assert result["ctrl"].taint == :medium
+      # sensitivity passes through unchanged
+      assert result["ctrl"].sensitivity == :medium
+    end
+
+    test "BCP edge does NOT step down sensitivity" do
+      ctrl = make_def(%{name: "ctrl"})
+      rdr = make_def(%{name: "rdr"})
+
+      edges = %{"ctrl" => [%{from: "rdr", paths: [], risk_level: "low", edge_type: :bcp}]}
+      base_levels = %{
+        "ctrl" => %{taint: :low, sensitivity: :low},
+        "rdr" => %{taint: :low, sensitivity: :high}
+      }
+
+      result = GraphAnalyzer.propagate_levels([ctrl, rdr], edges, base_levels)
+      assert result["ctrl"].sensitivity == :high
+    end
+
+    test "tracks taint_sources correctly" do
+      a = make_def(%{name: "a"})
+      b = make_def(%{name: "b"})
+
+      edges = %{"b" => [%{from: "a", paths: [], risk_level: "low", edge_type: :filesystem}]}
+      base_levels = %{
+        "a" => %{taint: :high, sensitivity: :low},
+        "b" => %{taint: :low, sensitivity: :low}
+      }
+
+      result = GraphAnalyzer.propagate_levels([a, b], edges, base_levels)
+      assert length(result["b"].taint_sources) == 1
+      assert hd(result["b"].taint_sources).from == "a"
+      assert hd(result["b"].taint_sources).contributed == :high
+    end
+
+    test "monotonic convergence with cycle" do
+      a = make_def(%{name: "a"})
+      b = make_def(%{name: "b"})
+
+      edges = %{
+        "a" => [%{from: "b", paths: [], risk_level: "low", edge_type: :filesystem}],
+        "b" => [%{from: "a", paths: [], risk_level: "low", edge_type: :filesystem}]
+      }
+      base_levels = %{
+        "a" => %{taint: :high, sensitivity: :low},
+        "b" => %{taint: :low, sensitivity: :medium}
+      }
+
+      result = GraphAnalyzer.propagate_levels([a, b], edges, base_levels)
+      assert result["a"].taint == :high
+      assert result["b"].taint == :high
+      assert result["a"].sensitivity == :medium
+      assert result["b"].sensitivity == :medium
+    end
+  end
+
+  # Helper to build edges for propagate_levels tests
+  defp build_edges_for_test(definitions, risk_manifest) do
+    # Replicate the edge building from analyze/2
+    # Simple: just call analyze and extract edges from incoming_edges
+    analysis = GraphAnalyzer.analyze(definitions, risk_manifest)
+    for {name, %{incoming_edges: edges}} <- analysis, into: %{} do
+      {name, edges}
+    end
+  end
+
   describe "propagate_risk/2" do
     test "propagates risk level from source through chain" do
       edges = %{

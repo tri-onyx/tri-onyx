@@ -35,11 +35,29 @@ defmodule TriOnyx.GraphAnalyzer do
   Returns `%{agent_name => agent_analysis}`.
   """
   @spec analyze([map()], map()) :: %{String.t() => agent_analysis()}
-  def analyze(definitions, risk_manifest) do
+  def analyze(definitions, risk_manifest), do: analyze(definitions, risk_manifest, %{})
+
+  @doc """
+  Analyzes risk propagation with optional base levels for transitive propagation.
+
+  When `base_levels` is provided (agent_name => %{taint, sensitivity}), transitive
+  propagation is computed via fixed-point iteration. Otherwise, only direct edge
+  manifest data is used for max_input_taint/sensitivity.
+  """
+  @spec analyze([map()], map(), map()) :: %{String.t() => agent_analysis()}
+  def analyze(definitions, risk_manifest, base_levels) do
     fs_edges = build_filesystem_edges(definitions, risk_manifest)
     msg_edges = build_messaging_edges(definitions)
     bcp_edges = build_bcp_edges(definitions)
     edges = merge_edges(fs_edges, msg_edges) |> merge_edges(bcp_edges)
+
+    # Compute transitive propagation if base levels provided
+    propagated =
+      if base_levels != %{} do
+        propagate_levels(definitions, edges, base_levels)
+      else
+        %{}
+      end
 
     definitions
     |> Enum.map(fn definition ->
@@ -59,6 +77,8 @@ defmodule TriOnyx.GraphAnalyzer do
       chain = trace_risk_chain(definition.name, edges, MapSet.new())
       capability = RiskScorer.infer_capability(definition.tools, definition.network)
 
+      prop = Map.get(propagated, definition.name, %{})
+
       {definition.name,
        %{
          max_input_taint: max_taint,
@@ -66,7 +86,11 @@ defmodule TriOnyx.GraphAnalyzer do
          max_input_risk: max_risk,
          capability_level: capability,
          incoming_edges: incoming,
-         risk_chain: chain
+         risk_chain: chain,
+         propagated_taint: Map.get(prop, :taint),
+         propagated_sensitivity: Map.get(prop, :sensitivity),
+         taint_sources: Map.get(prop, :taint_sources, []),
+         sensitivity_sources: Map.get(prop, :sensitivity_sources, [])
        }}
     end)
     |> Map.new()
@@ -239,6 +263,80 @@ defmodule TriOnyx.GraphAnalyzer do
       worst_case_taint(definition),
       worst_case_sensitivity(definition)
     )
+  end
+
+  @doc """
+  Computes fully propagated taint and sensitivity for all agents via fixed-point iteration.
+
+  Takes agent definitions, pre-built edges map, and base levels (from worst_case_* functions).
+  Returns a map of agent_name => %{taint, sensitivity, taint_sources, sensitivity_sources}.
+
+  BCP edges apply `step_down/1` on taint but pass sensitivity through unchanged.
+  Both axes are monotonic (only escalate), guaranteeing convergence.
+  """
+  @spec propagate_levels([map()], map(), map()) :: map()
+  def propagate_levels(definitions, edges, base_levels) do
+    agent_names = Enum.map(definitions, & &1.name)
+
+    initial =
+      Map.new(agent_names, fn name ->
+        base = Map.get(base_levels, name, %{taint: :low, sensitivity: :low})
+        {name, %{taint: base.taint, sensitivity: base.sensitivity}}
+      end)
+
+    resolved = do_propagate_levels(agent_names, edges, base_levels, initial)
+
+    # Build source tracking
+    Map.new(agent_names, fn name ->
+      incoming = Map.get(edges, name, [])
+      resolved_t = resolved[name].taint
+      resolved_s = resolved[name].sensitivity
+
+      taint_sources =
+        incoming
+        |> Enum.map(fn edge ->
+          src_taint = resolved[edge.from].taint
+          contributed = if edge.edge_type == :bcp, do: InformationClassifier.step_down(src_taint), else: src_taint
+          %{from: edge.from, contributed: contributed, edge_type: edge.edge_type}
+        end)
+        |> Enum.filter(fn %{contributed: c} -> c == resolved_t and resolved_t != :low end)
+
+      sensitivity_sources =
+        incoming
+        |> Enum.map(fn edge ->
+          src_sens = resolved[edge.from].sensitivity
+          %{from: edge.from, contributed: src_sens, edge_type: edge.edge_type}
+        end)
+        |> Enum.filter(fn %{contributed: c} -> c == resolved_s and resolved_s != :low end)
+
+      {name, %{
+        taint: resolved_t,
+        sensitivity: resolved_s,
+        taint_sources: taint_sources,
+        sensitivity_sources: sensitivity_sources
+      }}
+    end)
+  end
+
+  defp do_propagate_levels(agent_names, edges, base_levels, current) do
+    next =
+      Map.new(agent_names, fn name ->
+        base = Map.get(base_levels, name, %{taint: :low, sensitivity: :low})
+        incoming = Map.get(edges, name, [])
+
+        {new_t, new_s} =
+          Enum.reduce(incoming, {base.taint, base.sensitivity}, fn edge, {t_acc, s_acc} ->
+            src = current[edge.from]
+            src_taint = if edge.edge_type == :bcp, do: InformationClassifier.step_down(src.taint), else: src.taint
+            src_sens = src.sensitivity
+            {InformationClassifier.higher_level(t_acc, src_taint),
+             InformationClassifier.higher_level(s_acc, src_sens)}
+          end)
+
+        {name, %{taint: new_t, sensitivity: new_s}}
+      end)
+
+    if next == current, do: current, else: do_propagate_levels(agent_names, edges, base_levels, next)
   end
 
   # --- Private Functions ---

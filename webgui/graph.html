@@ -557,23 +557,14 @@ function buildGraph() {
 
   graphData = { nodes, links, bibaViolations, blpViolations };
 
-  // Second pass: compute effective taint/sensitivity including inherited levels
-  // from incoming connections, and recompute effective risk accordingly.
+  // Use server-propagated taint/sensitivity levels (transitive, with BCP step-down).
   for (const node of nodes) {
-    const incoming = links.filter(l => {
-      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-      return tgt === node.id;
-    });
-    let maxT = node.taintLevel, maxS = node.sensitivityLevel;
-    for (const l of incoming) {
-      const srcId = typeof l.source === 'object' ? l.source.id : l.source;
-      const src = nodeMap[srcId];
-      if (src && LEVEL_RANK[src.taintLevel] > LEVEL_RANK[maxT]) maxT = src.taintLevel;
-      if (src && LEVEL_RANK[src.sensitivityLevel] > LEVEL_RANK[maxS]) maxS = src.sensitivityLevel;
-    }
-    node.effTaintLevel = maxT;
-    node.effSensitivityLevel = maxS;
-    node.effectiveRisk = normalizeRisk(computeEffectiveRisk(maxT, maxS, node.capabilityLevel));
+    const agentAnalysis = data.agents[node.id] || {};
+    node.effTaintLevel = agentAnalysis.propagated_taint || node.taintLevel;
+    node.effSensitivityLevel = agentAnalysis.propagated_sensitivity || node.sensitivityLevel;
+    node.taintSources = agentAnalysis.taint_sources || [];
+    node.sensitivitySources = agentAnalysis.sensitivity_sources || [];
+    node.effectiveRisk = normalizeRisk(computeEffectiveRisk(node.effTaintLevel, node.effSensitivityLevel, node.capabilityLevel));
   }
   document.getElementById('agent-count').textContent = `${nodes.length} agents`;
   document.getElementById('edge-count').textContent = `${links.length} edges`;
@@ -701,6 +692,17 @@ function renderInherited(connections, axis) {
       `← <span class="badge ${c[axis]}">${c[axis]}</span> ` +
       `<span style="color:var(--text)">${c.from}</span> ` +
       `<span style="font-style:italic">(${c.type})</span></div>`
+    ).join('') + '</div>';
+}
+
+function renderSourceBadges(sources) {
+  if (!sources || !sources.length) return '';
+  return '<div style="margin-top:3px;">' +
+    sources.map(s =>
+      `<div style="font-size:10px;color:var(--muted);margin-top:1px;">` +
+      `← <span class="badge ${s.contributed}">${s.contributed}</span> ` +
+      `<span style="color:var(--text)">${s.from}</span> ` +
+      `<span style="font-style:italic">(${s.edge_type})</span></div>`
     ).join('') + '</div>';
 }
 
@@ -1159,8 +1161,10 @@ function renderGraph() {
       ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network → high taint &amp; capability</div>'
       : '';
 
-    const inheritedTaint = renderInherited(incoming, 'taint');
-    const inheritedSens = renderInherited(incoming, 'sensitivity');
+    const inheritedTaint = d.taintSources && d.taintSources.length
+      ? renderSourceBadges(d.taintSources) : renderInherited(incoming, 'taint');
+    const inheritedSens = d.sensitivitySources && d.sensitivitySources.length
+      ? renderSourceBadges(d.sensitivitySources) : renderInherited(incoming, 'sensitivity');
 
     const chainHtml = (d.riskChain && d.riskChain.length)
       ? `<div class="axis-row"><span class="axis-label">Risk chain</span><span class="risk-chain" style="margin:0">${d.riskChain.join(' → ')}</span></div>`
