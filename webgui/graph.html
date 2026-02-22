@@ -556,6 +556,25 @@ function buildGraph() {
   }
 
   graphData = { nodes, links, bibaViolations, blpViolations };
+
+  // Second pass: compute effective taint/sensitivity including inherited levels
+  // from incoming connections, and recompute effective risk accordingly.
+  for (const node of nodes) {
+    const incoming = links.filter(l => {
+      const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+      return tgt === node.id;
+    });
+    let maxT = node.taintLevel, maxS = node.sensitivityLevel;
+    for (const l of incoming) {
+      const srcId = typeof l.source === 'object' ? l.source.id : l.source;
+      const src = nodeMap[srcId];
+      if (src && LEVEL_RANK[src.taintLevel] > LEVEL_RANK[maxT]) maxT = src.taintLevel;
+      if (src && LEVEL_RANK[src.sensitivityLevel] > LEVEL_RANK[maxS]) maxS = src.sensitivityLevel;
+    }
+    node.effTaintLevel = maxT;
+    node.effSensitivityLevel = maxS;
+    node.effectiveRisk = normalizeRisk(computeEffectiveRisk(maxT, maxS, node.capabilityLevel));
+  }
   document.getElementById('agent-count').textContent = `${nodes.length} agents`;
   document.getElementById('edge-count').textContent = `${links.length} edges`;
 
@@ -1047,8 +1066,8 @@ function renderGraph() {
     const r = nodeRadius(d);
     const hr = r / 2;
     const el = d3.select(this);
-    const leftColor = levelColor[d.taintLevel] || '#3fb950';
-    const rightColor = levelColor[d.sensitivityLevel] || '#3fb950';
+    const leftColor = levelColor[d.effTaintLevel || d.taintLevel] || '#3fb950';
+    const rightColor = levelColor[d.effSensitivityLevel || d.sensitivityLevel] || '#3fb950';
     const clipId = `clip-${d.id.replace(/[^a-zA-Z0-9]/g, '-')}`;
 
     // Clip everything to the main circle
@@ -1136,11 +1155,11 @@ function renderGraph() {
     .attr('font-weight', '600')
     .attr('class', 'node-info-badge');
   infoBadge.append('tspan')
-    .text(d => `T:${d.taintLevel}`)
-    .attr('fill', d => levelColor[d.taintLevel] || '#8b949e');
+    .text(d => `T:${d.effTaintLevel || d.taintLevel}`)
+    .attr('fill', d => levelColor[d.effTaintLevel || d.taintLevel] || '#8b949e');
   infoBadge.append('tspan')
-    .text(d => ` S:${d.sensitivityLevel}`)
-    .attr('fill', d => levelColor[d.sensitivityLevel] || '#8b949e');
+    .text(d => ` S:${d.effSensitivityLevel || d.sensitivityLevel}`)
+    .attr('fill', d => levelColor[d.effSensitivityLevel || d.sensitivityLevel] || '#8b949e');
   infoBadge.append('tspan')
     .text(d => ` C:${d.capabilityLevel}`)
     .attr('fill', d => levelColor[d.capabilityLevel] || '#8b949e');
