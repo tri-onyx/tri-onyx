@@ -1138,32 +1138,6 @@ function renderGraph() {
     .attr('font-weight', 500)
     .attr('class', 'node-label');
 
-  // Tool icons below label
-  node.append('text')
-    .text(d => d.tools.join(', '))
-    .attr('dy', d => (nodeRadius(d)) + 26)
-    .attr('text-anchor', 'middle')
-    .attr('fill', '#8b949e')
-    .attr('font-size', '9px')
-    .attr('class', 'node-tools');
-
-  // Taint / sensitivity / capability badges below tools — each colored independently
-  const infoBadge = node.append('text')
-    .attr('dy', d => (nodeRadius(d)) + 38)
-    .attr('text-anchor', 'middle')
-    .attr('font-size', '9px')
-    .attr('font-weight', '600')
-    .attr('class', 'node-info-badge');
-  infoBadge.append('tspan')
-    .text(d => `T:${d.effTaintLevel || d.taintLevel}`)
-    .attr('fill', d => levelColor[d.effTaintLevel || d.taintLevel] || '#8b949e');
-  infoBadge.append('tspan')
-    .text(d => ` S:${d.effSensitivityLevel || d.sensitivityLevel}`)
-    .attr('fill', d => levelColor[d.effSensitivityLevel || d.sensitivityLevel] || '#8b949e');
-  infoBadge.append('tspan')
-    .text(d => ` C:${d.capabilityLevel}`)
-    .attr('fill', d => levelColor[d.capabilityLevel] || '#8b949e');
-
   // Node tooltip
   node.on('mouseenter', (event, d) => {
     const a = d.agent;
@@ -1295,8 +1269,6 @@ function applyToggles() {
 
   d3.selectAll('.edge-label').attr('visibility', (showFs || showMsg || showBctp) ? 'visible' : 'hidden');
   d3.selectAll('.node-label').attr('visibility', showLabels ? 'visible' : 'hidden');
-  d3.selectAll('.node-tools').attr('visibility', showLabels ? 'visible' : 'hidden');
-  d3.selectAll('.node-info-badge').attr('visibility', showLabels ? 'visible' : 'hidden');
 
   const matrixPanel = document.getElementById('matrix-panel');
   matrixPanel.classList.toggle('visible', showMatrix);
