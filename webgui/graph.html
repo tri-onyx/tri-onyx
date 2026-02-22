@@ -1,0 +1,1380 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureClaw — Agent Graph</title>
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --orange: #db6d28; --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    padding: 12px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  }
+  .header h1 { font-size: 15px; font-weight: 600; }
+  .header h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .header-controls { display: flex; align-items: center; gap: 12px; margin-left: auto; flex-wrap: wrap; }
+  .header-controls label { font-size: 12px; color: var(--muted); cursor: pointer; user-select: none; }
+  .header-controls input[type="checkbox"],
+  .header-controls input[type="radio"] { accent-color: var(--accent); cursor: pointer; }
+  .header-controls input[type="text"] {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 8px; border-radius: 4px; font-size: 12px; width: 200px;
+  }
+  button {
+    background: var(--accent); color: #fff; border: none;
+    padding: 5px 12px; border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button.subtle { background: var(--border); }
+  .toggle-group {
+    display: flex; align-items: center; gap: 4px;
+    background: var(--bg); border: 1px solid var(--border);
+    border-radius: 6px; padding: 2px 4px;
+  }
+  .toggle-group label {
+    padding: 3px 8px; border-radius: 4px; font-size: 11px; transition: all 0.15s;
+  }
+  .toggle-group input[type="radio"] { display: none; }
+  .toggle-group input[type="radio"]:checked + span {
+    background: var(--accent); color: #fff; border-radius: 4px; padding: 2px 6px;
+  }
+  .toggle-group span { padding: 2px 6px; }
+
+  /* Graph canvas */
+  .graph-container { flex: 1; position: relative; }
+  svg { width: 100%; height: 100%; }
+
+  /* Tooltip */
+  .tooltip {
+    position: absolute; pointer-events: none; opacity: 0;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px 16px; font-size: 12px;
+    max-width: 420px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+    z-index: 10; transition: opacity 0.15s;
+  }
+  .tooltip.visible { opacity: 1; }
+  .tooltip h3 { font-size: 14px; margin-bottom: 6px; }
+  .tooltip .row { display: flex; gap: 6px; margin-top: 3px; }
+  .tooltip .label { color: var(--muted); min-width: 90px; }
+  .tooltip .badge {
+    display: inline-block; font-size: 10px; padding: 1px 6px;
+    border-radius: 10px; font-weight: 600;
+  }
+  .tooltip .badge.low { background: rgba(63,185,80,0.2); color: var(--green); }
+  .tooltip .badge.medium { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .tooltip .badge.moderate { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .tooltip .badge.high { background: rgba(219,109,40,0.2); color: var(--orange); }
+  .tooltip .badge.critical { background: rgba(248,81,73,0.2); color: var(--red); }
+  .tooltip .tools { color: var(--yellow); font-family: monospace; font-size: 11px; }
+  .tooltip .paths { color: var(--muted); font-family: monospace; font-size: 11px; word-break: break-all; }
+  .tooltip .risk-chain { color: var(--orange); font-size: 10px; margin-top: 4px; }
+  .tooltip .section {
+    border: 1px solid var(--border); border-radius: 5px;
+    padding: 6px 8px; margin-top: 6px; background: rgba(13,17,23,0.5);
+  }
+  .tooltip .section-title {
+    font-size: 10px; text-transform: uppercase; color: var(--muted);
+    letter-spacing: 0.5px; margin-bottom: 4px;
+  }
+  .tooltip .axis-row {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-top: 2px; font-size: 11px;
+  }
+  .tooltip .axis-row .axis-label { color: var(--muted); }
+  .tooltip .driver-list {
+    display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px;
+  }
+  .tooltip .driver-badge {
+    display: inline-block; font-size: 9px; padding: 1px 5px;
+    border-radius: 8px; font-weight: 600; font-family: monospace;
+  }
+  .tooltip .driver-badge.low { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tooltip .driver-badge.medium { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .tooltip .driver-badge.high { background: rgba(219,109,40,0.15); color: var(--orange); }
+  .tooltip .derivation {
+    font-size: 10px; color: var(--muted); margin-top: 3px; font-family: monospace;
+  }
+
+  /* Legend */
+  .legend {
+    position: absolute; bottom: 16px; left: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; font-size: 14px;
+    max-height: calc(100% - 32px); overflow-y: auto;
+  }
+  .legend h4 { font-size: 16px; margin-bottom: 10px; color: var(--text); font-weight: 600; }
+  .legend-section { margin-bottom: 10px; }
+  .legend-section:last-child { margin-bottom: 0; }
+  .legend-item { display: flex; align-items: center; gap: 10px; margin: 4px 0; }
+  .legend-dot {
+    width: 14px; height: 14px; border-radius: 50%; flex-shrink: 0;
+  }
+  .legend-line {
+    width: 28px; height: 3px; flex-shrink: 0;
+  }
+  .legend-yinyang {
+    width: 24px; height: 24px; flex-shrink: 0;
+  }
+
+  /* Analysis explainer */
+  .analysis-explainer {
+    position: absolute; top: 16px; left: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px 20px; font-size: 14px;
+    max-width: 340px; line-height: 1.6;
+  }
+  .analysis-explainer h4 { font-size: 16px; margin-bottom: 10px; color: var(--text); font-weight: 600; }
+
+  /* Matrix panel */
+  .matrix-panel {
+    position: absolute; top: 16px; right: 16px;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 8px; padding: 12px; font-size: 11px;
+    display: none; max-width: 50vw; overflow: auto;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+  }
+  .matrix-panel.visible { display: block; }
+  .matrix-panel h4 { font-size: 12px; margin-bottom: 8px; color: var(--muted); }
+  .matrix-panel table { border-collapse: collapse; }
+  .matrix-panel th, .matrix-panel td {
+    padding: 3px 6px; text-align: center; font-size: 10px;
+    border: 1px solid var(--border);
+  }
+  .matrix-panel th { color: var(--muted); background: var(--bg); white-space: nowrap; }
+  .matrix-panel td.compliant { background: rgba(63,185,80,0.15); }
+  .matrix-panel td.warning { background: rgba(210,153,34,0.15); }
+  .matrix-panel td.violation { background: rgba(248,81,73,0.15); }
+  .matrix-panel td.self { background: var(--bg); color: var(--border); }
+
+  /* Edge label */
+  .edge-label {
+    font-size: 9px; fill: var(--muted); pointer-events: none;
+  }
+
+  /* Status bar */
+  .status-bar {
+    padding: 6px 20px; font-size: 11px; color: var(--muted);
+    background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; gap: 16px;
+  }
+  .status-bar .connected { color: var(--green); }
+  .status-bar .disconnected { color: var(--red); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>SecureClaw <span>Agent Graph</span></h1>
+  <div style="display:flex;gap:8px;margin-left:8px">
+    <a href="matrix.html" style="color:var(--muted);font-size:12px;text-decoration:none;padding:4px 10px;border-radius:4px;border:1px solid var(--border)">Classification Matrix</a>
+    <a href="log-viewer.html" style="color:var(--muted);font-size:12px;text-decoration:none;padding:4px 10px;border-radius:4px;border:1px solid var(--border)">Session Logs</a>
+  </div>
+  <div class="header-controls">
+    <div class="toggle-group">
+      <label><input type="radio" name="analysis-mode" value="none" checked><span>Off</span></label>
+      <label><input type="radio" name="analysis-mode" value="biba"><span>Biba</span></label>
+      <label><input type="radio" name="analysis-mode" value="blp"><span>Bell-LaPadula</span></label>
+    </div>
+    <label><input type="checkbox" id="toggle-fs" checked> Filesystem flow</label>
+    <label><input type="checkbox" id="toggle-msg" checked> Messaging flow</label>
+    <label><input type="checkbox" id="toggle-bctp" checked> BCTP flow</label>
+    <label><input type="checkbox" id="toggle-labels" checked> Labels</label>
+    <label><input type="checkbox" id="toggle-matrix"> Matrix</label>
+    <label>Gateway:</label>
+    <input type="text" id="gateway-url" value="http://localhost:4000">
+    <button onclick="loadGraph()">Reload</button>
+    <button class="subtle" onclick="resetLayout()">Reset layout</button>
+  </div>
+</div>
+
+<div class="graph-container" id="graph-container">
+  <svg id="graph-svg"></svg>
+  <div class="tooltip" id="tooltip"></div>
+
+  <div class="legend" id="legend">
+    <h4>Legend</h4>
+    <div class="legend-section">
+      <div style="color:var(--muted);margin-bottom:4px;">Node = yin-yang split</div>
+      <div style="color:var(--muted);margin-bottom:4px;font-size:12px;">Left half = taint (integrity)</div>
+      <div style="color:var(--muted);margin-bottom:4px;font-size:12px;">Right half = sensitivity (confidentiality)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#3fb950"></div> Low</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#db6d28"></div> Medium</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f85149"></div> High</div>
+    </div>
+    <div class="legend-section">
+      <div style="color:var(--muted);margin-bottom:4px;">Node size = effective risk</div>
+      <div class="legend-item"><div class="legend-dot" style="width:12px;height:12px;background:var(--muted)"></div> Low</div>
+      <div class="legend-item"><div class="legend-dot" style="width:16px;height:16px;background:var(--muted)"></div> Moderate</div>
+      <div class="legend-item"><div class="legend-dot" style="width:20px;height:20px;background:var(--muted)"></div> High</div>
+      <div class="legend-item"><div class="legend-dot" style="width:24px;height:24px;background:var(--muted)"></div> Critical</div>
+    </div>
+    <div class="legend-section">
+      <div style="color:var(--muted);margin-bottom:4px;">Effective risk = taint &times; sensitivity &times; capability</div>
+      <div style="color:var(--muted);margin-bottom:4px;font-size:11px;">Capability modulates the 2D baseline:</div>
+      <div style="color:var(--muted);margin-bottom:2px;font-size:11px;">Low cap = step down, Med = baseline, High = step up</div>
+      <table style="border-collapse:collapse;font-size:12px;width:100%;text-align:center;margin-top:4px;">
+        <thead>
+          <tr>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);"></th>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">Low S</th>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">Med S</th>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">High S</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">Low T</th>
+            <td style="border:1px solid var(--border);padding:2px;color:#3fb950;">low</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#3fb950;">low</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#db6d28;">mod</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">Med T</th>
+            <td style="border:1px solid var(--border);padding:2px;color:#3fb950;">low</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#db6d28;">mod</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#f85149;">high</td>
+          </tr>
+          <tr>
+            <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted);">High T</th>
+            <td style="border:1px solid var(--border);padding:2px;color:#db6d28;">mod</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#f85149;">high</td>
+            <td style="border:1px solid var(--border);padding:2px;color:#f85149;">crit</td>
+          </tr>
+        </tbody>
+      </table>
+      <div style="color:var(--muted);margin-top:4px;font-size:10px;">(Table shows medium capability baseline)</div>
+    </div>
+    <div class="legend-section">
+      <div style="color:var(--muted);margin-bottom:4px;">Capability levels</div>
+      <div class="legend-item"><span style="color:#3fb950;font-size:12px;font-weight:600;min-width:60px;">Low</span> Internal only (files, messages)</div>
+      <div class="legend-item"><span style="color:#db6d28;font-size:12px;font-weight:600;min-width:60px;">Medium</span> Bash (no net), email, web tools</div>
+      <div class="legend-item"><span style="color:#f85149;font-size:12px;font-weight:600;min-width:60px;">High</span> Bash + network access</div>
+    </div>
+    <div class="legend-section">
+      <div style="color:var(--muted);margin-bottom:4px;">Edges</div>
+      <div class="legend-item"><div class="legend-line" style="background:#3fb950"></div> Compliant flow</div>
+      <div class="legend-item"><div class="legend-line" style="background:#d29922"></div> Warning</div>
+      <div class="legend-item"><div class="legend-line" style="background:#f85149"></div> Violation</div>
+      <div class="legend-item"><div class="legend-line" style="background:#58a6ff;background-image:repeating-linear-gradient(90deg,#58a6ff 0,#58a6ff 6px,transparent 6px,transparent 10px);background-color:transparent;height:2px;"></div> Messaging</div>
+      <div class="legend-item"><div class="legend-line" style="background:#bc8cff;background-image:repeating-linear-gradient(90deg,#bc8cff 0,#bc8cff 3px,transparent 3px,transparent 6px);background-color:transparent;height:2px;"></div> BCTP (bandwidth-constrained)</div>
+    </div>
+  </div>
+
+  <div class="analysis-explainer" id="analysis-explainer" style="display:none;">
+    <h4 id="explainer-title"></h4>
+    <div id="explainer-body"></div>
+  </div>
+
+  <div class="matrix-panel" id="matrix-panel">
+    <h4>Agent Flow Matrix</h4>
+    <div id="matrix-content"></div>
+  </div>
+</div>
+
+<div class="status-bar" id="status-bar">
+  <span id="status-text" class="disconnected">Loading...</span>
+  <span id="agent-count"></span>
+  <span id="edge-count"></span>
+  <span id="violation-count"></span>
+</div>
+
+<script>
+// ── State ──
+let agents = [];
+let analysisData = null;
+let graphData = { nodes: [], links: [] };
+let simulation = null;
+
+function gatewayUrl() {
+  return document.getElementById('gateway-url').value.replace(/\/+$/, '');
+}
+
+async function api(method, path) {
+  const resp = await fetch(gatewayUrl() + path, { method });
+  return resp.json();
+}
+
+function getAnalysisMode() {
+  const checked = document.querySelector('input[name="analysis-mode"]:checked');
+  return checked ? checked.value : 'none';
+}
+
+// ── Data loading ──
+
+async function loadGraph() {
+  try {
+    const [agentData, analysis] = await Promise.allSettled([
+      api('GET', '/agents'),
+      api('GET', '/graph/analysis')
+    ]);
+
+    if (agentData.status === 'fulfilled') {
+      agents = agentData.value.agents || [];
+      // Fetch full details for each agent (includes fs_read/fs_write)
+      const details = await Promise.allSettled(
+        agents.map(a => api('GET', `/agents/${encodeURIComponent(a.name)}`))
+      );
+      agents = details.map((r, i) =>
+        r.status === 'fulfilled' ? { ...agents[i], ...r.value } : agents[i]
+      );
+    } else {
+      agents = [];
+    }
+
+    analysisData = (analysis.status === 'fulfilled') ? analysis.value : null;
+
+    document.getElementById('status-text').className = 'connected';
+    document.getElementById('status-text').textContent = 'Connected to gateway';
+  } catch (err) {
+    document.getElementById('status-text').className = 'disconnected';
+    document.getElementById('status-text').textContent = 'Gateway unreachable: ' + err.message;
+    agents = [];
+    analysisData = null;
+  }
+
+  buildGraph();
+  renderGraph();
+  updateMatrix();
+}
+
+// ── Graph construction ──
+
+function buildGraph() {
+  // Build analysis lookup
+  const agentAnalysis = {};
+  if (analysisData && analysisData.agents) {
+    for (const [name, data] of Object.entries(analysisData.agents)) {
+      agentAnalysis[name] = data;
+    }
+  }
+
+  const bibaViolations = new Set();
+  if (analysisData && analysisData.biba_violations) {
+    for (const v of analysisData.biba_violations) {
+      bibaViolations.add(`${v.writer}|${v.reader}`);
+    }
+  }
+
+  const blpViolations = new Set();
+  if (analysisData && analysisData.blp_violations) {
+    for (const v of analysisData.blp_violations) {
+      blpViolations.add(`${v.writer}|${v.reader}`);
+    }
+  }
+
+  const nodes = agents.map(a => {
+    const aa = agentAnalysis[a.name] || {};
+    // Support new two-axis fields, fall back to legacy single-axis
+    const taint = normalizeLevel(a.taint_level || a.information_level || 'low');
+    const sensitivity = normalizeLevel(a.sensitivity_level || a.secrecy_level || 'low');
+    const capability = normalizeLevel(aa.capability_level || a.capability_level || inferCapability(a.tools || [], a.network));
+    return {
+      id: a.name,
+      agent: a,
+      taintLevel: taint,
+      sensitivityLevel: sensitivity,
+      capabilityLevel: capability,
+      effectiveRisk: normalizeRisk(a.effective_risk || computeEffectiveRisk(taint, sensitivity, capability)),
+      active: a.status && a.status !== 'inactive',
+      network: a.network || 'none',
+      tools: a.tools || [],
+      fsRead: a.fs_read || [],
+      fsWrite: a.fs_write || [],
+      sendTo: a.send_to || [],
+      receiveFrom: a.receive_from || [],
+      bctpChannels: a.bctp_channels || [],
+      maxInputRisk: aa.max_input_risk || null,
+      riskChain: aa.risk_chain || [],
+      incomingEdges: aa.incoming_edges || [],
+    };
+  });
+
+  const links = [];
+  const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
+
+  // Compute filesystem overlap edges
+  for (let i = 0; i < nodes.length; i++) {
+    for (let j = 0; j < nodes.length; j++) {
+      if (i === j) continue;
+      const a = nodes[i], b = nodes[j];
+
+      // Write -> Read: agent A writes to paths that agent B reads
+      const writeReadOverlap = findGlobOverlap(a.fsWrite, b.fsRead);
+      if (writeReadOverlap.length > 0) {
+        const key = `${a.id}|${b.id}`;
+        const isBibaViolation = bibaViolations.has(key);
+        const isBlpViolation = blpViolations.has(key);
+
+        links.push({
+          source: a.id, target: b.id,
+          type: 'write_read',
+          paths: writeReadOverlap,
+          taintLevel: a.taintLevel,
+          sensitivityLevel: a.sensitivityLevel,
+          bibaViolation: isBibaViolation,
+          blpViolation: isBlpViolation,
+        });
+      }
+    }
+  }
+
+  // Compute messaging edges from agent detail data (send_to/receive_from)
+  const addedMsgEdges = new Set();
+  for (const sender of nodes) {
+    for (const targetName of sender.sendTo) {
+      const receiver = nodeMap[targetName];
+      if (!receiver) continue;
+      if (!receiver.receiveFrom.includes(sender.id)) continue;
+
+      const key = `${sender.id}|${targetName}`;
+      addedMsgEdges.add(key);
+      const isBibaViolation = bibaViolations.has(key);
+      const isBlpViolation = blpViolations.has(key);
+
+      links.push({
+        source: sender.id, target: targetName,
+        type: 'messaging',
+        paths: [`${sender.id} → ${targetName} (messaging)`],
+        taintLevel: sender.taintLevel,
+        sensitivityLevel: sender.sensitivityLevel,
+        bibaViolation: isBibaViolation,
+        blpViolation: isBlpViolation,
+      });
+    }
+  }
+
+  // Compute BCTP edges from agent detail data (bctp_channels)
+  const addedBctpEdges = new Set();
+  for (const controller of nodes) {
+    for (const channel of controller.bctpChannels) {
+      if (channel.role !== 'controller') continue;
+      const reader = nodeMap[channel.peer];
+      if (!reader) continue;
+
+      // Verify the peer declares a matching reader role back
+      const peerChannel = reader.bctpChannels.find(
+        ch => ch.peer === controller.id && ch.role === 'reader'
+      );
+      if (!peerChannel) continue;
+
+      const key = `${channel.peer}|${controller.id}`;
+      addedBctpEdges.add(key);
+      const isBibaViolation = bibaViolations.has(key);
+      const isBlpViolation = blpViolations.has(key);
+
+      links.push({
+        source: channel.peer, target: controller.id,
+        type: 'bctp',
+        paths: [`${channel.peer} → ${controller.id} (BCTP cat-${channel.max_category})`],
+        taintLevel: 'low',  // BCTP is always taint-neutral
+        sensitivityLevel: 'low',
+        bibaViolation: isBibaViolation,
+        blpViolation: isBlpViolation,
+        maxCategory: channel.max_category,
+        budgetBits: channel.budget_bits,
+      });
+    }
+  }
+
+  // Fallback: derive messaging and BCTP edges from /graph/analysis incoming_edges
+  // when agent detail data (send_to/receive_from/bctp_channels) is unavailable.
+  for (const target of nodes) {
+    for (const edge of target.incomingEdges) {
+      const edgeType = edge.edge_type || 'filesystem';
+      if (edgeType === 'filesystem') continue; // already computed client-side
+      if (!nodeMap[edge.from]) continue;
+
+      const key = `${edge.from}|${target.id}`;
+      if (edgeType === 'messaging' && addedMsgEdges.has(key)) continue;
+      if (edgeType === 'bctp' && addedBctpEdges.has(key)) continue;
+
+      const source = nodeMap[edge.from];
+      const isBibaViolation = bibaViolations.has(key);
+      const isBlpViolation = blpViolations.has(key);
+
+      if (edgeType === 'messaging') {
+        links.push({
+          source: edge.from, target: target.id,
+          type: 'messaging',
+          paths: [`${edge.from} → ${target.id} (messaging)`],
+          taintLevel: source.taintLevel,
+          sensitivityLevel: source.sensitivityLevel,
+          bibaViolation: isBibaViolation,
+          blpViolation: isBlpViolation,
+        });
+      } else if (edgeType === 'bctp') {
+        links.push({
+          source: edge.from, target: target.id,
+          type: 'bctp',
+          paths: [`${edge.from} → ${target.id} (BCTP)`],
+          taintLevel: 'low',
+          sensitivityLevel: 'low',
+          bibaViolation: isBibaViolation,
+          blpViolation: isBlpViolation,
+          maxCategory: null,
+          budgetBits: null,
+        });
+      }
+    }
+  }
+
+  graphData = { nodes, links, bibaViolations, blpViolations };
+  document.getElementById('agent-count').textContent = `${nodes.length} agents`;
+  document.getElementById('edge-count').textContent = `${links.length} edges`;
+
+  updateViolationCount();
+}
+
+// Client-side capability inference (fallback when server doesn't provide it)
+// Mirrors RiskScorer.infer_capability/2 from the gateway.
+const TOOL_CAPABILITY = {
+  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
+  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  Bash: 'medium', WebFetch: 'medium', WebSearch: 'medium',
+  SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
+  CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
+};
+
+// Tool taint levels — mirrors TaintMatrix @tool_taint
+const TOOL_TAINT = {
+  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
+  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  Bash: 'low', WebFetch: 'high', WebSearch: 'high',
+  SendEmail: 'low', MoveEmail: 'low', CreateFolder: 'low',
+  CalendarQuery: 'low', CalendarCreate: 'low', CalendarUpdate: 'low', CalendarDelete: 'low',
+};
+
+// Tool sensitivity levels — mirrors SensitivityMatrix @tool_sensitivity
+const TOOL_SENSITIVITY = {
+  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
+  SendMessage: 'low', BCTPQuery: 'low', BCTPRespond: 'low', RestartAgent: 'low',
+  Bash: 'low', WebFetch: 'low', WebSearch: 'low',
+  SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
+  CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
+};
+
+const LEVEL_RANK = { low: 0, medium: 1, high: 2 };
+const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
+const RISK_MATRIX_2D = [
+  ['low', 'low', 'moderate'],
+  ['low', 'moderate', 'high'],
+  ['moderate', 'high', 'critical'],
+];
+
+function buildRatingBreakdown(d) {
+  const hasNetwork = d.network && d.network !== 'none' && !(Array.isArray(d.network) && d.network.length === 0);
+
+  function getDrivers(toolMap, tools) {
+    const drivers = [];
+    for (const tool of tools) {
+      let level = toolMap[tool] || 'low';
+      if (tool === 'Bash' && hasNetwork) level = 'high';
+      if (LEVEL_RANK[level] > 0) drivers.push({ tool, level });
+    }
+    return drivers;
+  }
+
+  const taintDrivers = getDrivers(TOOL_TAINT, d.tools);
+  const sensitivityDrivers = getDrivers(TOOL_SENSITIVITY, d.tools);
+  const capDrivers = getDrivers(TOOL_CAPABILITY, d.tools);
+
+  const tI = LEVEL_RANK[d.taintLevel] || 0;
+  const sI = LEVEL_RANK[d.sensitivityLevel] || 0;
+  const baseline = RISK_MATRIX_2D[tI][sI];
+  const baseIdx = RISK_LEVELS.indexOf(baseline);
+
+  let capMod, finalRisk;
+  if (d.capabilityLevel === 'low') {
+    capMod = 'step down';
+    finalRisk = RISK_LEVELS[Math.max(0, baseIdx - 1)];
+  } else if (d.capabilityLevel === 'high') {
+    capMod = 'step up';
+    finalRisk = RISK_LEVELS[Math.min(3, baseIdx + 1)];
+  } else {
+    capMod = 'no change';
+    finalRisk = baseline;
+  }
+
+  return { taintDrivers, sensitivityDrivers, capDrivers, hasNetwork, baseline, capMod, finalRisk };
+}
+
+function renderDriverBadges(drivers) {
+  if (!drivers.length) return '<span style="color:var(--muted);font-size:10px;">all tools low</span>';
+  return drivers.map(d =>
+    `<span class="driver-badge ${d.level}">${d.tool}</span>`
+  ).join('');
+}
+
+function inferCapability(tools, network) {
+  const hasNetwork = network && network !== 'none' && !(Array.isArray(network) && network.length === 0);
+  const rank = { low: 0, medium: 1, high: 2 };
+  let max = 0;
+  for (const tool of tools) {
+    let level = TOOL_CAPABILITY[tool] || 'low';
+    if (tool === 'Bash' && hasNetwork && level === 'medium') level = 'high';
+    max = Math.max(max, rank[level] || 0);
+  }
+  return ['low', 'medium', 'high'][max];
+}
+
+// Client-side effective risk computation (fallback when server doesn't provide it)
+// 3-axis: taint x sensitivity x capability (lethal trifecta, ADR-010)
+function computeEffectiveRisk(taint, sensitivity, capability) {
+  const levelRank = { low: 0, medium: 1, high: 2 };
+  const taintIdx = levelRank[taint] || 0;
+  const sensIdx = levelRank[sensitivity] || 0;
+  const cap = capability || 'medium';
+
+  // Step 1: 2D baseline
+  const matrix = [
+    ['low', 'low', 'moderate'],
+    ['low', 'moderate', 'high'],
+    ['moderate', 'high', 'critical'],
+  ];
+  const baseline = matrix[taintIdx][sensIdx];
+
+  // Step 2: modulate by capability
+  if (cap === 'medium') return baseline;
+
+  const riskLevels = ['low', 'moderate', 'high', 'critical'];
+  const riskIdx = riskLevels.indexOf(baseline);
+  if (cap === 'low') return riskLevels[Math.max(0, riskIdx - 1)];
+  if (cap === 'high') return riskLevels[Math.min(3, riskIdx + 1)];
+  return baseline;
+}
+
+function normalizeLevel(l) {
+  if (!l) return 'low';
+  const s = String(l).toLowerCase();
+  if (s === 'high') return 'high';
+  if (s === 'medium') return 'medium';
+  return 'low';
+}
+
+function normalizeRisk(r) {
+  if (!r) return 'low';
+  const s = String(r).toLowerCase().replace(/[^a-z]/g, '');
+  if (s.startsWith('critical')) return 'critical';
+  if (s.startsWith('high')) return 'high';
+  if (s.startsWith('moderate') || s.startsWith('medium')) return 'moderate';
+  return 'low';
+}
+
+// Simple glob overlap detection
+function findGlobOverlap(patternsA, patternsB) {
+  const overlaps = [];
+  for (const a of patternsA) {
+    for (const b of patternsB) {
+      if (globsOverlap(a, b)) {
+        overlaps.push(`${a} <-> ${b}`);
+      }
+    }
+  }
+  return overlaps;
+}
+
+function globsOverlap(a, b) {
+  const pa = a.replace(/\/?\*\*.*$/, '').replace(/\/?\*$/, '');
+  const pb = b.replace(/\/?\*\*.*$/, '').replace(/\/?\*$/, '');
+  return pa.startsWith(pb) || pb.startsWith(pa);
+}
+
+// ── D3 rendering ──
+
+const levelColor = {
+  low: '#3fb950', medium: '#db6d28', high: '#f85149'
+};
+
+const riskColor = {
+  low: '#3fb950', moderate: '#db6d28', high: '#f85149', critical: '#f85149'
+};
+
+const riskRadius = { low: 14, moderate: 20, high: 26, critical: 32 };
+
+function nodeRadius(d) {
+  return riskRadius[d.effectiveRisk] || 14;
+}
+
+function edgeColor(link) {
+  const mode = getAnalysisMode();
+  if (mode === 'biba' && link.bibaViolation) return '#f85149';
+  if (mode === 'blp' && link.blpViolation) return '#f85149';
+
+  // Messaging edges default to accent blue unless in violation
+  if (link.type === 'messaging') return '#58a6ff';
+
+  // BCTP edges use purple (bandwidth-constrained, trusted channel)
+  if (link.type === 'bctp') return '#bc8cff';
+
+  // In Biba mode, color by taint. In BLP mode, color by sensitivity. Default: max of both.
+  let level;
+  if (mode === 'biba') {
+    level = link.taintLevel;
+  } else if (mode === 'blp') {
+    level = link.sensitivityLevel;
+  } else {
+    const rank = { low: 0, medium: 1, high: 2 };
+    level = (rank[link.sensitivityLevel] || 0) >= (rank[link.taintLevel] || 0)
+      ? link.sensitivityLevel : link.taintLevel;
+  }
+
+  if (level === 'high') return '#f85149';
+  if (level === 'medium') return '#db6d28';
+  return '#3fb950';
+}
+
+function edgeOpacity(link) {
+  const mode = getAnalysisMode();
+  if (mode === 'biba') return link.bibaViolation ? 0.9 : 0.25;
+  if (mode === 'blp') return link.blpViolation ? 0.9 : 0.25;
+  return 0.6;
+}
+
+function edgeMarker(d) {
+  if (d.type === 'bctp') return 'url(#arrow-bctp)';
+  if (d.type !== 'write_read') return null;
+  const mode = getAnalysisMode();
+  if (mode === 'biba' && d.bibaViolation) return 'url(#arrow-violation)';
+  if (mode === 'blp' && d.blpViolation) return 'url(#arrow-violation)';
+  const rank = { low: 0, medium: 1, high: 2 };
+  const maxLevel = Math.max(rank[d.taintLevel] || 0, rank[d.sensitivityLevel] || 0);
+  if (maxLevel >= 2) return 'url(#arrow-warning)';
+  if (maxLevel >= 1) return 'url(#arrow-warning)';
+  return 'url(#arrow-compliant)';
+}
+
+function edgeWidth(d) {
+  const mode = getAnalysisMode();
+  if (mode === 'biba' && d.bibaViolation) return 3;
+  if (mode === 'blp' && d.blpViolation) return 3;
+  return 2;
+}
+
+function edgeLabelText(d) {
+  const mode = getAnalysisMode();
+  if (mode === 'biba' && d.bibaViolation) return 'BIBA';
+  if (mode === 'blp' && d.blpViolation) return 'BLP';
+  if (d.type === 'bctp') return `BCTP-${d.maxCategory || '?'}`;
+  if (mode === 'biba') return d.taintLevel || '';
+  if (mode === 'blp') return d.sensitivityLevel || '';
+  return `T:${(d.taintLevel || 'low')[0]} S:${(d.sensitivityLevel || 'low')[0]}`;
+}
+
+function edgeLabelColor(d) {
+  const mode = getAnalysisMode();
+  if (mode === 'biba' && d.bibaViolation) return '#f85149';
+  if (mode === 'blp' && d.blpViolation) return '#f85149';
+  return 'var(--muted)';
+}
+
+function edgeLabelWeight(d) {
+  const mode = getAnalysisMode();
+  if ((mode === 'biba' && d.bibaViolation) || (mode === 'blp' && d.blpViolation)) return '700';
+  return '400';
+}
+
+// Assigns a curveOffset to each link so parallel edges between the same
+// node pair are visually separated. Edges with no siblings get offset 0
+// (rendered as straight lines).
+function assignCurveOffsets(links) {
+  const pairCounts = {};
+  const pairIndex = {};
+  for (const link of links) {
+    const srcId = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgtId = typeof link.target === 'object' ? link.target.id : link.target;
+    // Canonical pair key (undirected) so A→B and B→A share the same group
+    const key = srcId < tgtId ? `${srcId}|${tgtId}` : `${tgtId}|${srcId}`;
+    pairCounts[key] = (pairCounts[key] || 0) + 1;
+    link._pairKey = key;
+  }
+  for (const link of links) {
+    const count = pairCounts[link._pairKey];
+    if (count <= 1) {
+      link.curveOffset = 0;
+    } else {
+      const idx = pairIndex[link._pairKey] || 0;
+      pairIndex[link._pairKey] = idx + 1;
+      // Spread edges symmetrically: -40, +40 for 2 edges; -40, 0, +40 for 3, etc.
+      link.curveOffset = (idx - (count - 1) / 2) * 40;
+    }
+  }
+}
+
+// Computes the SVG path d-attribute for a link. Straight line if curveOffset
+// is 0, otherwise a quadratic Bézier with the control point offset
+// perpendicular to the line.
+function linkPath(d) {
+  const sx = d.source.x, sy = d.source.y;
+  const tx = d.target.x, ty = d.target.y;
+  if (!d.curveOffset) {
+    return `M${sx},${sy}L${tx},${ty}`;
+  }
+  // Perpendicular offset for the control point
+  const dx = tx - sx, dy = ty - sy;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  const cx = (sx + tx) / 2 + nx * d.curveOffset;
+  const cy = (sy + ty) / 2 + ny * d.curveOffset;
+  return `M${sx},${sy}Q${cx},${cy} ${tx},${ty}`;
+}
+
+// Returns the visual midpoint of a link (on the curve, not just the
+// straight-line midpoint).
+function linkMidpoint(d) {
+  const sx = d.source.x, sy = d.source.y;
+  const tx = d.target.x, ty = d.target.y;
+  if (!d.curveOffset) {
+    return { x: (sx + tx) / 2, y: (sy + ty) / 2 };
+  }
+  const dx = tx - sx, dy = ty - sy;
+  const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const nx = -dy / len, ny = dx / len;
+  // Midpoint of quadratic Bézier at t=0.5
+  const cx = (sx + tx) / 2 + nx * d.curveOffset;
+  const cy = (sy + ty) / 2 + ny * d.curveOffset;
+  return {
+    x: 0.25 * sx + 0.5 * cx + 0.25 * tx,
+    y: 0.25 * sy + 0.5 * cy + 0.25 * ty
+  };
+}
+
+function renderGraph() {
+  const container = document.getElementById('graph-container');
+  const width = container.clientWidth;
+  const height = container.clientHeight;
+
+  const svg = d3.select('#graph-svg');
+  svg.selectAll('*').remove();
+
+  // Defs for arrowheads
+  const defs = svg.append('defs');
+  ['compliant', 'warning', 'violation', 'bctp'].forEach((cls, i) => {
+    const colors = ['#3fb950', '#d29922', '#f85149', '#bc8cff'];
+    defs.append('marker')
+      .attr('id', `arrow-${cls}`)
+      .attr('viewBox', '0 -5 10 10')
+      .attr('refX', 28).attr('refY', 0)
+      .attr('markerWidth', 6).attr('markerHeight', 6)
+      .attr('orient', 'auto')
+      .append('path')
+      .attr('d', 'M0,-5L10,0L0,5')
+      .attr('fill', colors[i]);
+  });
+
+  // Main group for zoom/pan
+  const g = svg.append('g');
+
+  // Zoom behavior
+  const zoom = d3.zoom()
+    .scaleExtent([0.2, 4])
+    .on('zoom', (e) => g.attr('transform', e.transform));
+  svg.call(zoom);
+
+  // Tooltip ref
+  const tooltip = document.getElementById('tooltip');
+
+  // Pre-compute curve offsets for parallel edges between the same node pair
+  assignCurveOffsets(graphData.links);
+
+  // Links (paths to support curved parallel edges)
+  const linkGroup = g.append('g').attr('class', 'links');
+  const link = linkGroup.selectAll('path')
+    .data(graphData.links)
+    .join('path')
+    .attr('fill', 'none')
+    .attr('stroke', d => edgeColor(d))
+    .attr('stroke-opacity', d => edgeOpacity(d))
+    .attr('stroke-width', d => edgeWidth(d))
+    .attr('stroke-dasharray', d => d.type === 'messaging' ? '6,4' : d.type === 'bctp' ? '3,3' : null)
+    .attr('marker-end', d => edgeMarker(d))
+    .attr('class', d => `edge-${d.type}`)
+    .style('pointer-events', 'stroke')
+    .on('mouseenter', (event, d) => {
+      const src = typeof d.source === 'object' ? d.source.id : d.source;
+      const tgt = typeof d.target === 'object' ? d.target.id : d.target;
+
+      if (d.type === 'bctp') {
+        const bctpHtml = `
+          <h3>${src} \u2192 ${tgt} (BCTP)</h3>
+          <div class="row"><span class="label">Channel:</span><span>Bandwidth-Constrained Trust Protocol</span></div>
+          <div class="row"><span class="label">Max category:</span><span class="badge low">Cat-${d.maxCategory || '?'}</span></div>
+          <div class="row"><span class="label">Budget:</span><span>${d.budgetBits || '?'} bits/session</span></div>
+          <div class="row"><span class="label">Taint effect:</span><span class="badge low">none (taint-neutral)</span></div>
+          <div style="margin-top:6px;color:var(--muted);font-size:10px;">
+            Gateway validates all responses. Cat-1: structured primitives. Cat-2: constrained Q&A. Cat-3: free-text (requires approval).
+          </div>
+        `;
+        tooltip.innerHTML = bctpHtml;
+      } else {
+        const direction = d.type === 'write_read' ? `${src} writes \u2192 ${tgt} reads`
+          : d.type === 'messaging' ? `${src} \u2192 ${tgt} (messaging)`
+          : `${src} \u2194 ${tgt}`;
+        const pathList = d.paths.map(p => escapeHtml(p)).join('<br>');
+        const taintHtml = `<div class="row"><span class="label">Taint carried:</span><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>`;
+        const sensitivityHtml = `<div class="row"><span class="label">Sensitivity carried:</span><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>`;
+        tooltip.innerHTML = `
+          <h3>${direction}</h3>
+          ${taintHtml}
+          ${sensitivityHtml}
+          <div style="margin-top:6px;color:var(--muted);font-size:10px;">Overlapping paths:</div>
+          <div class="paths" style="margin-top:2px;">${pathList}</div>
+        `;
+      }
+      tooltip.classList.add('visible');
+    })
+    .on('mousemove', (event) => {
+      const rect = container.getBoundingClientRect();
+      let x = event.clientX - rect.left + 16;
+      let y = event.clientY - rect.top + 16;
+      if (x + 390 > rect.width) x = event.clientX - rect.left - 396;
+      if (y + 200 > rect.height) y = event.clientY - rect.top - 200;
+      tooltip.style.left = x + 'px';
+      tooltip.style.top = y + 'px';
+    })
+    .on('mouseleave', () => {
+      tooltip.classList.remove('visible');
+    });
+
+  // Edge labels
+  const edgeLabelGroup = g.append('g').attr('class', 'edge-labels');
+  const edgeLabels = edgeLabelGroup.selectAll('text')
+    .data(graphData.links.filter(d => d.type === 'write_read' || d.type === 'bctp'))
+    .join('text')
+    .attr('class', 'edge-label')
+    .text(d => edgeLabelText(d))
+    .attr('fill', d => edgeLabelColor(d))
+    .attr('font-weight', d => edgeLabelWeight(d));
+
+  // Nodes
+  const nodeGroup = g.append('g').attr('class', 'nodes');
+  const node = nodeGroup.selectAll('g')
+    .data(graphData.nodes)
+    .join('g')
+    .attr('class', 'node')
+    .call(d3.drag()
+      .on('start', dragStart)
+      .on('drag', dragging)
+      .on('end', dragEnd));
+
+  // Yin-yang node rendering using stacked primitives:
+  // Full circle (taint) + right semicircle (sensitivity) + two small circles for "heads"
+  node.each(function(d) {
+    const r = nodeRadius(d);
+    const hr = r / 2;
+    const el = d3.select(this);
+    const leftColor = levelColor[d.taintLevel] || '#3fb950';
+    const rightColor = levelColor[d.sensitivityLevel] || '#3fb950';
+    const clipId = `clip-${d.id.replace(/[^a-zA-Z0-9]/g, '-')}`;
+
+    // Clip everything to the main circle
+    el.append('clipPath').attr('id', clipId)
+      .append('circle').attr('r', r);
+    const clipped = el.append('g').attr('clip-path', `url(#${clipId})`);
+
+    // 1. Full circle background = left/taint color
+    clipped.append('circle').attr('r', r).attr('fill', leftColor);
+
+    // 2. Right semicircle = right/sensitivity color
+    //    Path: straight line top→bottom, then arc bottom→top via right side
+    clipped.append('path')
+      .attr('d', `M 0,${-r} L 0,${r} A ${r},${r} 0 0,0 0,${-r} Z`)
+      .attr('fill', rightColor);
+
+    // 3. Upper small circle = left/taint "head" extending into right territory
+    clipped.append('circle').attr('cy', -hr).attr('r', hr).attr('fill', leftColor);
+
+    // 4. Lower small circle = right/sensitivity "head" extending into left territory
+    clipped.append('circle').attr('cy', hr).attr('r', hr).attr('fill', rightColor);
+
+    // 5. Small dots (opposite color in each head)
+    clipped.append('circle').attr('cy', -hr).attr('r', hr * 0.22).attr('fill', rightColor);
+    clipped.append('circle').attr('cy', hr).attr('r', hr * 0.22).attr('fill', leftColor);
+
+    // 6. S-curve divider — uses canvas background color for contrast
+    clipped.append('path')
+      .attr('d', [
+        `M 0,${-r}`,
+        `A ${hr},${hr} 0 0,1 0,0`,
+        `A ${hr},${hr} 0 0,0 0,${r}`,
+      ].join(' '))
+      .attr('fill', 'none')
+      .attr('stroke', '#0d1117')
+      .attr('stroke-width', 2);
+
+    // 7. Outline circle — matching background stroke for clean edge
+    el.append('circle')
+      .attr('r', r)
+      .attr('fill', 'none')
+      .attr('stroke', '#0d1117')
+      .attr('stroke-width', 2)
+      .style('filter', d.active ? 'drop-shadow(0 0 6px rgba(88,166,255,0.3))' : null);
+  });
+
+  // Status indicator (small dot)
+  node.filter(d => d.active)
+    .append('circle')
+    .attr('r', 4)
+    .attr('cx', d => (nodeRadius(d)) - 3)
+    .attr('cy', d => -(nodeRadius(d)) + 3)
+    .attr('fill', d => {
+      const s = d.agent.status;
+      if (s === 'running') return '#58a6ff';
+      if (s === 'ready') return '#3fb950';
+      if (s === 'starting') return '#d29922';
+      return '#8b949e';
+    });
+
+  // Labels
+  const labels = node.append('text')
+    .text(d => d.id)
+    .attr('dy', d => (nodeRadius(d)) + 14)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#e6edf3')
+    .attr('font-size', '11px')
+    .attr('font-weight', 500)
+    .attr('class', 'node-label');
+
+  // Tool icons below label
+  node.append('text')
+    .text(d => d.tools.join(', '))
+    .attr('dy', d => (nodeRadius(d)) + 26)
+    .attr('text-anchor', 'middle')
+    .attr('fill', '#8b949e')
+    .attr('font-size', '9px')
+    .attr('class', 'node-tools');
+
+  // Taint / sensitivity / capability badges below tools — each colored independently
+  const infoBadge = node.append('text')
+    .attr('dy', d => (nodeRadius(d)) + 38)
+    .attr('text-anchor', 'middle')
+    .attr('font-size', '9px')
+    .attr('font-weight', '600')
+    .attr('class', 'node-info-badge');
+  infoBadge.append('tspan')
+    .text(d => `T:${d.taintLevel}`)
+    .attr('fill', d => levelColor[d.taintLevel] || '#8b949e');
+  infoBadge.append('tspan')
+    .text(d => ` S:${d.sensitivityLevel}`)
+    .attr('fill', d => levelColor[d.sensitivityLevel] || '#8b949e');
+  infoBadge.append('tspan')
+    .text(d => ` C:${d.capabilityLevel}`)
+    .attr('fill', d => levelColor[d.capabilityLevel] || '#8b949e');
+
+  // Node tooltip
+  node.on('mouseenter', (event, d) => {
+    const a = d.agent;
+    const b = buildRatingBreakdown(d);
+    const sources = (a.information_sources && a.information_sources.length) ? a.information_sources : [];
+    const sourcesRow = sources.length
+      ? `<div class="axis-row"><span class="axis-label">Sources</span><span class="paths">${sources.join(', ')}</span></div>`
+      : '';
+
+    const bashNetNote = (b.hasNetwork && d.tools.includes('Bash'))
+      ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network → high taint &amp; capability</div>'
+      : '';
+
+    const chainHtml = (d.riskChain && d.riskChain.length)
+      ? `<div class="axis-row"><span class="axis-label">Risk chain</span><span class="risk-chain" style="margin:0">${d.riskChain.join(' → ')}</span></div>`
+      : '';
+
+    const maxInputNote = d.maxInputRisk
+      ? `<div class="axis-row"><span class="axis-label">Max input risk</span><span class="badge ${d.maxInputRisk}">${d.maxInputRisk}</span></div>`
+      : '';
+
+    tooltip.innerHTML = `
+      <h3>${a.name}</h3>
+      ${a.description ? `<div style="color:var(--muted);margin-bottom:6px">${escapeHtml(a.description)}</div>` : ''}
+      <div class="row"><span class="label">Model:</span><span>${a.model || '?'}</span></div>
+      <div class="row"><span class="label">Status:</span><span>${a.status || 'inactive'}</span></div>
+
+      <div class="section">
+        <div class="section-title">Taint (integrity)</div>
+        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>
+        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.taintDrivers)}</div></div>
+        ${sourcesRow}
+        ${bashNetNote}
+      </div>
+
+      <div class="section">
+        <div class="section-title">Sensitivity (confidentiality)</div>
+        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>
+        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.sensitivityDrivers)}</div></div>
+        ${sourcesRow}
+      </div>
+
+      <div class="section">
+        <div class="section-title">Capability (blast radius)</div>
+        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
+        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>
+        <div class="axis-row"><span class="axis-label">Network</span><span>${formatNetwork(a.network)}</span></div>
+      </div>
+
+      <div class="section">
+        <div class="section-title">Effective Risk</div>
+        <div class="derivation">T:${d.taintLevel} × S:${d.sensitivityLevel} → ${b.baseline}</div>
+        <div class="derivation">cap:${d.capabilityLevel} → ${b.capMod}</div>
+        <hr style="border:none;border-top:1px solid var(--border);margin:4px 0">
+        <div class="axis-row"><span class="axis-label" style="font-weight:600">Effective risk</span><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
+        ${maxInputNote}
+        ${chainHtml}
+      </div>
+    `;
+    tooltip.classList.add('visible');
+  })
+  .on('mousemove', (event) => {
+    const rect = container.getBoundingClientRect();
+    let x = event.clientX - rect.left + 16;
+    let y = event.clientY - rect.top + 16;
+    if (x + 390 > rect.width) x = event.clientX - rect.left - 396;
+    if (y + 200 > rect.height) y = event.clientY - rect.top - 200;
+    tooltip.style.left = x + 'px';
+    tooltip.style.top = y + 'px';
+  })
+  .on('mouseleave', () => {
+    tooltip.classList.remove('visible');
+  });
+
+  // Simulation
+  simulation = d3.forceSimulation(graphData.nodes)
+    .force('link', d3.forceLink(graphData.links).id(d => d.id).distance(280).strength(0.3))
+    .force('charge', d3.forceManyBody().strength(-1200).distanceMax(800))
+    .force('center', d3.forceCenter(width / 2, height / 2))
+    .force('collision', d3.forceCollide().radius(d => (nodeRadius(d)) + 50).iterations(3))
+    .alphaDecay(0.015)
+    .on('tick', () => {
+      link.attr('d', d => linkPath(d));
+      node.attr('transform', d => `translate(${d.x},${d.y})`);
+      edgeLabels
+        .attr('x', d => linkMidpoint(d).x)
+        .attr('y', d => linkMidpoint(d).y - 4);
+    });
+
+  // Warm start: pre-tick so the layout is already spread before first paint
+  simulation.stop();
+  for (let i = 0; i < 200; i++) simulation.tick();
+  simulation.restart();
+
+  // Apply toggles
+  applyToggles();
+
+  // Store refs
+  window._graphRefs = { link, edgeLabels, node, labels, svg, g, zoom };
+}
+
+function applyToggles() {
+  const showFs = document.getElementById('toggle-fs').checked;
+  const showMsg = document.getElementById('toggle-msg').checked;
+  const showBctp = document.getElementById('toggle-bctp').checked;
+  const showLabels = document.getElementById('toggle-labels').checked;
+  const showMatrix = document.getElementById('toggle-matrix').checked;
+
+  d3.selectAll('.edge-write_read').attr('visibility', showFs ? 'visible' : 'hidden');
+  d3.selectAll('.edge-messaging').attr('visibility', showMsg ? 'visible' : 'hidden');
+  d3.selectAll('.edge-bctp').attr('visibility', showBctp ? 'visible' : 'hidden');
+
+  d3.selectAll('.edge-label').attr('visibility', (showFs || showMsg || showBctp) ? 'visible' : 'hidden');
+  d3.selectAll('.node-label').attr('visibility', showLabels ? 'visible' : 'hidden');
+  d3.selectAll('.node-tools').attr('visibility', showLabels ? 'visible' : 'hidden');
+  d3.selectAll('.node-info-badge').attr('visibility', showLabels ? 'visible' : 'hidden');
+
+  const matrixPanel = document.getElementById('matrix-panel');
+  matrixPanel.classList.toggle('visible', showMatrix);
+
+  // Re-style edges based on analysis mode
+  if (window._graphRefs) {
+    const { link, edgeLabels } = window._graphRefs;
+    link
+      .attr('stroke', d => edgeColor(d))
+      .attr('stroke-opacity', d => edgeOpacity(d))
+      .attr('stroke-width', d => edgeWidth(d))
+      .attr('marker-end', d => edgeMarker(d));
+
+    edgeLabels
+      .text(d => edgeLabelText(d))
+      .attr('fill', d => edgeLabelColor(d))
+      .attr('font-weight', d => edgeLabelWeight(d));
+  }
+}
+
+// ── Matrix panel ──
+
+function updateViolationCount() {
+  const mode = getAnalysisMode();
+  const vEl = document.getElementById('violation-count');
+  if (mode === 'none' || !graphData.bibaViolations) {
+    vEl.textContent = '';
+    return;
+  }
+  const vCount = mode === 'biba' ? graphData.bibaViolations.size
+    : mode === 'blp' ? graphData.blpViolations.size : 0;
+  vEl.textContent = vCount > 0 ? `${vCount} violations` : '';
+  vEl.style.color = vCount > 0 ? '#f85149' : '';
+}
+
+function updateMatrix() {
+  const content = document.getElementById('matrix-content');
+  if (!graphData.nodes.length) {
+    content.innerHTML = '<div style="color:var(--muted)">No agents loaded</div>';
+    return;
+  }
+
+  const names = graphData.nodes.map(n => n.id);
+  const edgeMap = {};
+  for (const link of graphData.links) {
+    if (link.type !== 'write_read' && link.type !== 'bctp') continue;
+    const src = typeof link.source === 'object' ? link.source.id : link.source;
+    const tgt = typeof link.target === 'object' ? link.target.id : link.target;
+    // Prefer filesystem edges over BCTP in the matrix if both exist
+    if (!edgeMap[`${src}|${tgt}`] || link.type === 'write_read') {
+      edgeMap[`${src}|${tgt}`] = link;
+    }
+  }
+
+  const mode = getAnalysisMode();
+  let html = '<table><thead><tr><th></th>';
+  for (const name of names) {
+    html += `<th>${escapeHtml(truncate(name, 12))}</th>`;
+  }
+  html += '</tr></thead><tbody>';
+
+  for (const writer of names) {
+    html += `<tr><th>${escapeHtml(truncate(writer, 12))}</th>`;
+    for (const reader of names) {
+      if (writer === reader) {
+        html += '<td class="self">-</td>';
+        continue;
+      }
+      const link = edgeMap[`${writer}|${reader}`];
+      if (!link) {
+        html += '<td></td>';
+        continue;
+      }
+      let cls = 'compliant';
+      let label;
+      if (mode === 'biba' && link.bibaViolation) {
+        cls = 'violation'; label = 'BIBA';
+      } else if (mode === 'blp' && link.blpViolation) {
+        cls = 'violation'; label = 'BLP';
+      } else if (link.type === 'bctp') {
+        cls = 'compliant';
+        label = `B${link.maxCategory || '?'}`;
+      } else {
+        // Show both axes compactly
+        label = `T:${(link.taintLevel || 'low')[0]} S:${(link.sensitivityLevel || 'low')[0]}`;
+        const rank = { low: 0, medium: 1, high: 2 };
+        const maxRank = Math.max(rank[link.taintLevel] || 0, rank[link.sensitivityLevel] || 0);
+        if (maxRank >= 2) cls = 'warning';
+        else if (maxRank >= 1) cls = 'warning';
+      }
+
+      html += `<td class="${cls}" title="${writer} \u2192 ${reader}: ${link.paths.join(', ')}">${label}</td>`;
+    }
+    html += '</tr>';
+  }
+  html += '</tbody></table>';
+  content.innerHTML = html;
+}
+
+// ── Helpers ──
+
+function truncate(s, n) {
+  return s.length > n ? s.slice(0, n - 1) + '\u2026' : s;
+}
+
+// Drag handlers
+function dragStart(event, d) {
+  if (!event.active) simulation.alphaTarget(0.3).restart();
+  d.fx = d.x; d.fy = d.y;
+}
+function dragging(event, d) { d.fx = event.x; d.fy = event.y; }
+function dragEnd(event, d) {
+  if (!event.active) simulation.alphaTarget(0);
+  d.fx = null; d.fy = null;
+}
+
+function resetLayout() {
+  if (simulation) {
+    graphData.nodes.forEach(n => { n.fx = null; n.fy = null; });
+    simulation.alpha(1).restart();
+  }
+  if (window._graphRefs) {
+    window._graphRefs.svg.transition().duration(500)
+      .call(window._graphRefs.zoom.transform, d3.zoomIdentity);
+  }
+}
+
+function formatNetwork(n) {
+  if (!n || n === 'none') return '<span style="color:var(--green)">isolated</span>';
+  if (n === 'outbound') return '<span style="color:var(--purple)">outbound (unrestricted)</span>';
+  if (Array.isArray(n)) return n.join(', ');
+  return String(n);
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Toggle listeners
+document.getElementById('toggle-fs').addEventListener('change', applyToggles);
+document.getElementById('toggle-msg').addEventListener('change', applyToggles);
+document.getElementById('toggle-bctp').addEventListener('change', applyToggles);
+document.getElementById('toggle-labels').addEventListener('change', applyToggles);
+document.getElementById('toggle-matrix').addEventListener('change', () => { applyToggles(); updateMatrix(); });
+document.querySelectorAll('input[name="analysis-mode"]').forEach(el => {
+  el.addEventListener('change', () => { applyToggles(); updateMatrix(); updateExplainer(); updateViolationCount(); });
+});
+
+function updateExplainer() {
+  const mode = getAnalysisMode();
+  const panel = document.getElementById('analysis-explainer');
+  const title = document.getElementById('explainer-title');
+  const body = document.getElementById('explainer-body');
+
+  if (mode === 'biba') {
+    title.textContent = 'Biba (integrity)';
+    body.innerHTML = 'Flags where a low-taint agent reads data from a higher-taint source. ' +
+      'The concern is integrity contamination: a clean agent ingesting potentially ' +
+      'poisoned data that may contain prompt injection.';
+    panel.style.display = '';
+  } else if (mode === 'blp') {
+    title.textContent = 'Bell-LaPadula (confidentiality)';
+    body.innerHTML = 'Flags where an agent with high sensitivity writes to a location ' +
+      'readable by a lower-sensitivity, network-capable agent. ' +
+      'The concern is data exfiltration: sensitive response data ' +
+      'reaching an agent that can send it outside the system.';
+    panel.style.display = '';
+  } else {
+    panel.style.display = 'none';
+  }
+}
+
+// Handle resize
+window.addEventListener('resize', () => {
+  if (simulation) {
+    const container = document.getElementById('graph-container');
+    simulation.force('center', d3.forceCenter(container.clientWidth / 2, container.clientHeight / 2));
+    simulation.alpha(0.3).restart();
+  }
+});
+
+// ── Init ──
+loadGraph();
+</script>
+</body>
+</html>
