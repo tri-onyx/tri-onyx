@@ -1,0 +1,760 @@
+defmodule TriOnyx.GraphAnalyzerTest do
+  use ExUnit.Case, async: true
+
+  alias TriOnyx.AgentDefinition
+  alias TriOnyx.GraphAnalyzer
+
+  # Helper to build a minimal agent definition
+  defp make_def(attrs) do
+    defaults = %{
+      description: nil,
+      model: "claude-sonnet-4-20250514",
+      tools: ["Read"],
+      network: :none,
+      fs_read: [],
+      fs_write: [],
+      send_to: [],
+      receive_from: [],
+      system_prompt: "test prompt",
+      heartbeat_every: nil,
+      idle_timeout: nil,
+      bctp_channels: []
+    }
+
+    merged = Map.merge(defaults, attrs)
+
+    %AgentDefinition{
+      name: merged.name,
+      description: merged[:description],
+      model: merged.model,
+      tools: merged.tools,
+      network: merged.network,
+      fs_read: merged.fs_read,
+      fs_write: merged.fs_write,
+      send_to: merged.send_to,
+      receive_from: merged.receive_from,
+      system_prompt: merged.system_prompt,
+      heartbeat_every: merged[:heartbeat_every],
+      idle_timeout: merged[:idle_timeout],
+      bctp_channels: merged.bctp_channels
+    }
+  end
+
+  describe "analyze/2" do
+    test "empty definitions and manifest returns empty map" do
+      assert %{} == GraphAnalyzer.analyze([], %{})
+    end
+
+    test "two agents with no path overlap produce no edges" do
+      agent_a = make_def(%{name: "writer", fs_write: ["/output/a/**"], fs_read: []})
+      agent_b = make_def(%{name: "reader", fs_read: ["/input/b/**"], fs_write: []})
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+
+      assert result["writer"].incoming_edges == []
+      assert result["reader"].incoming_edges == []
+      assert result["writer"].max_input_risk == :low
+      assert result["reader"].max_input_risk == :low
+      assert result["reader"].max_input_taint == :low
+      assert result["reader"].max_input_sensitivity == :low
+    end
+
+    test "agent A writes to paths agent B reads creates edge A -> B" do
+      agent_a = make_def(%{name: "producer", fs_write: ["src/output/**"], fs_read: []})
+      agent_b = make_def(%{name: "consumer", fs_read: ["src/**"], fs_write: []})
+
+      manifest = %{
+        "src/output/**" => %{
+          "taint_level" => "high",
+          "sensitivity_level" => "low",
+          "risk_level" => "high",
+          "agent" => "producer",
+          "updated_at" => "now"
+        }
+      }
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b], manifest)
+
+      assert length(result["consumer"].incoming_edges) == 1
+      edge = hd(result["consumer"].incoming_edges)
+      assert edge.from == "producer"
+      assert result["consumer"].max_input_taint == :high
+      assert result["consumer"].max_input_sensitivity == :low
+      assert result["consumer"].max_input_risk == :high
+
+      assert result["producer"].incoming_edges == []
+    end
+
+    test "transitive chain A -> B -> C propagates risk" do
+      agent_a = make_def(%{name: "source", fs_write: ["/data/raw/**"], fs_read: []})
+
+      agent_b =
+        make_def(%{name: "processor", fs_read: ["/data/raw/**"], fs_write: ["/data/processed/**"]})
+
+      agent_c = make_def(%{name: "sink", fs_read: ["/data/processed/**"], fs_write: []})
+
+      manifest = %{
+        "/data/raw/**" => %{
+          "taint_level" => "high",
+          "sensitivity_level" => "low",
+          "risk_level" => "high",
+          "agent" => "source",
+          "updated_at" => "now"
+        },
+        "/data/processed/**" => %{
+          "taint_level" => "medium",
+          "sensitivity_level" => "medium",
+          "risk_level" => "medium",
+          "agent" => "processor",
+          "updated_at" => "now"
+        }
+      }
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b, agent_c], manifest)
+
+      assert result["processor"].max_input_taint == :high
+      assert result["sink"].max_input_sensitivity == :medium
+      assert result["sink"].max_input_risk == :medium
+
+      chain = result["sink"].risk_chain
+      assert "source" in chain
+      assert "processor" in chain
+    end
+
+    test "single agent with no connections" do
+      agent = make_def(%{name: "loner", fs_read: ["/solo/**"], fs_write: ["/solo/out/**"]})
+
+      result = GraphAnalyzer.analyze([agent], %{})
+
+      assert result["loner"].incoming_edges == []
+      assert result["loner"].max_input_risk == :low
+      assert result["loner"].risk_chain == []
+    end
+  end
+
+  describe "biba_violations/3 (taint axis)" do
+    test "detects low-taint reader consuming high-taint writer output" do
+      writer =
+        make_def(%{
+          name: "web-scraper",
+          tools: ["WebFetch"],
+          network: :outbound,
+          fs_write: ["/data/scraped/**"],
+          fs_read: []
+        })
+
+      reader =
+        make_def(%{
+          name: "formatter",
+          tools: ["Read"],
+              network: :none,
+          fs_read: ["/data/scraped/**"],
+          fs_write: []
+        })
+
+      manifest = %{
+        "/data/scraped/**" => %{
+          "taint_level" => "high",
+          "sensitivity_level" => "low",
+          "risk_level" => "high",
+          "agent" => "web-scraper",
+          "updated_at" => "now"
+        }
+      }
+
+      analysis = GraphAnalyzer.analyze([writer, reader], manifest)
+      # Use two-axis format: taint used for Biba checks
+      info_levels = %{
+        "web-scraper" => %{taint: :high, sensitivity: :low},
+        "formatter" => %{taint: :low, sensitivity: :low}
+      }
+      violations = GraphAnalyzer.biba_violations(analysis, [writer, reader], info_levels)
+
+      assert length(violations) == 1
+      violation = hd(violations)
+      assert violation["writer"] == "web-scraper"
+      assert violation["reader"] == "formatter"
+      assert String.contains?(violation["description"], "Integrity violation")
+    end
+
+    test "no violation when taint levels are equal" do
+      agent_a =
+        make_def(%{
+          name: "a",
+          tools: ["Read"],
+              fs_write: ["/shared/**"],
+          fs_read: []
+        })
+
+      agent_b =
+        make_def(%{
+          name: "b",
+          tools: ["Read"],
+              fs_read: ["/shared/**"],
+          fs_write: []
+        })
+
+      analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+      info_levels = %{
+        "a" => %{taint: :medium, sensitivity: :low},
+        "b" => %{taint: :medium, sensitivity: :low}
+      }
+      violations = GraphAnalyzer.biba_violations(analysis, [agent_a, agent_b], info_levels)
+
+      assert violations == []
+    end
+
+    test "Biba ignores sensitivity differences" do
+      agent_a =
+        make_def(%{
+          name: "writer",
+          tools: ["Write"],
+          fs_write: ["/shared/**"],
+          fs_read: []
+        })
+
+      agent_b =
+        make_def(%{
+          name: "reader",
+          tools: ["Read"],
+              fs_read: ["/shared/**"],
+          fs_write: []
+        })
+
+      analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+      # High sensitivity difference, but same taint — should produce no Biba violation
+      info_levels = %{
+        "writer" => %{taint: :low, sensitivity: :high},
+        "reader" => %{taint: :low, sensitivity: :low}
+      }
+      violations = GraphAnalyzer.biba_violations(analysis, [agent_a, agent_b], info_levels)
+
+      assert violations == []
+    end
+
+    test "backward compat: works with single-axis level atoms" do
+      agent_a =
+        make_def(%{name: "a", fs_write: ["/shared/**"], fs_read: []})
+
+      agent_b =
+        make_def(%{name: "b", fs_read: ["/shared/**"], fs_write: []})
+
+      analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+      info_levels = %{"a" => :high, "b" => :low}
+      violations = GraphAnalyzer.biba_violations(analysis, [agent_a, agent_b], info_levels)
+
+      assert length(violations) == 1
+    end
+  end
+
+  describe "bell_lapadula_violations/3 (sensitivity axis)" do
+    test "detects high-sensitivity writer to lower-sensitivity network reader" do
+      writer =
+        make_def(%{
+          name: "secret-handler",
+          tools: ["Read", "Write", "Bash"],
+          network: :outbound,
+          fs_write: ["/data/secrets/**"],
+          fs_read: []
+        })
+
+      reader =
+        make_def(%{
+          name: "reporter",
+          tools: ["Read", "WebFetch"],
+          network: :outbound,
+          fs_read: ["/data/**"],
+          fs_write: []
+        })
+
+      manifest = %{}
+      # Use two-axis format: sensitivity used for BLP checks
+      info_levels = %{
+        "secret-handler" => %{taint: :low, sensitivity: :high},
+        "reporter" => %{taint: :low, sensitivity: :low}
+      }
+
+      violations = GraphAnalyzer.bell_lapadula_violations([writer, reader], manifest, info_levels)
+
+      assert length(violations) == 1
+      violation = hd(violations)
+      assert violation["writer"] == "secret-handler"
+      assert violation["reader"] == "reporter"
+      assert String.contains?(violation["description"], "Sensitivity violation")
+    end
+
+    test "no violation when reader has no network access" do
+      writer =
+        make_def(%{
+          name: "writer",
+          tools: ["Write"],
+          network: :outbound,
+          fs_write: ["/data/**"],
+          fs_read: []
+        })
+
+      reader =
+        make_def(%{
+          name: "reader",
+          tools: ["Read"],
+              network: :none,
+          fs_read: ["/data/**"],
+          fs_write: []
+        })
+
+      info_levels = %{
+        "writer" => %{taint: :low, sensitivity: :high},
+        "reader" => %{taint: :low, sensitivity: :low}
+      }
+      violations = GraphAnalyzer.bell_lapadula_violations([writer, reader], %{}, info_levels)
+
+      assert violations == []
+    end
+
+    test "BLP ignores taint differences" do
+      writer =
+        make_def(%{
+          name: "tainted-writer",
+          tools: ["Write"],
+          network: :outbound,
+          fs_write: ["/data/**"],
+          fs_read: []
+        })
+
+      reader =
+        make_def(%{
+          name: "network-reader",
+          tools: ["Read", "WebFetch"],
+          network: :outbound,
+          fs_read: ["/data/**"],
+          fs_write: []
+        })
+
+      # High taint difference, but same sensitivity — should produce no BLP violation
+      info_levels = %{
+        "tainted-writer" => %{taint: :high, sensitivity: :low},
+        "network-reader" => %{taint: :low, sensitivity: :low}
+      }
+      violations = GraphAnalyzer.bell_lapadula_violations([writer, reader], %{}, info_levels)
+
+      assert violations == []
+    end
+  end
+
+  describe "messaging edges in analyze/2" do
+    test "creates messaging edge when both sides declare the link" do
+      agent_a = make_def(%{
+        name: "main",
+        tools: ["Read", "SendMessage"],
+        send_to: ["researcher"],
+        receive_from: ["researcher"]
+      })
+
+      agent_b = make_def(%{
+        name: "researcher",
+        tools: ["Read", "SendMessage"],
+        send_to: ["main"],
+        receive_from: ["main"]
+      })
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+
+      # main sends to researcher → researcher has incoming messaging edge from main
+      researcher_incoming = result["researcher"].incoming_edges
+      assert length(researcher_incoming) == 1
+      edge = hd(researcher_incoming)
+      assert edge.from == "main"
+      assert edge.edge_type == :messaging
+
+      # researcher sends to main → main has incoming messaging edge from researcher
+      main_incoming = result["main"].incoming_edges
+      assert length(main_incoming) == 1
+      edge = hd(main_incoming)
+      assert edge.from == "researcher"
+      assert edge.edge_type == :messaging
+    end
+
+    test "no messaging edge when only sender declares" do
+      agent_a = make_def(%{
+        name: "sender",
+        tools: ["Read", "SendMessage"],
+        send_to: ["receiver"],
+        receive_from: []
+      })
+
+      agent_b = make_def(%{
+        name: "receiver",
+        tools: ["Read"],
+        send_to: [],
+        receive_from: []
+      })
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+
+      assert result["receiver"].incoming_edges == []
+    end
+
+    test "no messaging edge when only receiver declares" do
+      agent_a = make_def(%{
+        name: "sender",
+        tools: ["Read", "SendMessage"],
+        send_to: [],
+        receive_from: []
+      })
+
+      agent_b = make_def(%{
+        name: "receiver",
+        tools: ["Read"],
+        send_to: [],
+        receive_from: ["sender"]
+      })
+
+      result = GraphAnalyzer.analyze([agent_a, agent_b], %{})
+
+      assert result["receiver"].incoming_edges == []
+    end
+  end
+
+  describe "BLP violations via messaging" do
+    test "detects sensitivity violation through messaging link" do
+      secret_agent = make_def(%{
+        name: "secret-handler",
+        tools: ["Read", "SendMessage"],
+        send_to: ["reporter"],
+        receive_from: []
+      })
+
+      reporter = make_def(%{
+        name: "reporter",
+        tools: ["Read", "WebFetch", "SendMessage"],
+        network: :outbound,
+        send_to: [],
+        receive_from: ["secret-handler"]
+      })
+
+      sensitivity_levels = %{
+        "secret-handler" => %{taint: :low, sensitivity: :high},
+        "reporter" => %{taint: :low, sensitivity: :low}
+      }
+
+      violations = GraphAnalyzer.bell_lapadula_violations(
+        [secret_agent, reporter], %{}, sensitivity_levels
+      )
+
+      msg_violations = Enum.filter(violations, &(&1["edge_type"] == "messaging"))
+      assert length(msg_violations) == 1
+      violation = hd(msg_violations)
+      assert violation["writer"] == "secret-handler"
+      assert violation["reader"] == "reporter"
+      assert String.contains?(violation["description"], "messaging link")
+    end
+
+    test "no messaging BLP violation when receiver has no network" do
+      secret_agent = make_def(%{
+        name: "secret-handler",
+        tools: ["Read", "SendMessage"],
+        send_to: ["safe-reader"],
+        receive_from: []
+      })
+
+      safe_reader = make_def(%{
+        name: "safe-reader",
+        tools: ["Read", "SendMessage"],
+        network: :none,
+        send_to: [],
+        receive_from: ["secret-handler"]
+      })
+
+      sensitivity_levels = %{
+        "secret-handler" => %{taint: :low, sensitivity: :high},
+        "safe-reader" => %{taint: :low, sensitivity: :low}
+      }
+
+      violations = GraphAnalyzer.bell_lapadula_violations(
+        [secret_agent, safe_reader], %{}, sensitivity_levels
+      )
+
+      msg_violations = Enum.filter(violations, &(&1["edge_type"] == "messaging"))
+      assert msg_violations == []
+    end
+  end
+
+  describe "Biba violations via messaging edges" do
+    test "detects integrity violation through messaging edge" do
+      tainted = make_def(%{
+        name: "tainted-agent",
+        tools: ["Read", "WebFetch", "SendMessage"],
+        network: :outbound,
+        send_to: ["clean-agent"],
+        receive_from: []
+      })
+
+      clean = make_def(%{
+        name: "clean-agent",
+        tools: ["Read", "SendMessage"],
+        network: :none,
+        send_to: [],
+        receive_from: ["tainted-agent"]
+      })
+
+      analysis = GraphAnalyzer.analyze([tainted, clean], %{})
+
+      info_levels = %{
+        "tainted-agent" => %{taint: :high, sensitivity: :low},
+        "clean-agent" => %{taint: :low, sensitivity: :low}
+      }
+
+      violations = GraphAnalyzer.biba_violations(analysis, [tainted, clean], info_levels)
+      assert length(violations) == 1
+      violation = hd(violations)
+      assert violation["writer"] == "tainted-agent"
+      assert violation["reader"] == "clean-agent"
+    end
+  end
+
+  describe "worst_case_taint/2" do
+    test "network agent has high taint" do
+      agent = make_def(%{name: "net", network: :outbound})
+      assert :high = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "WebFetch agent has high taint" do
+      agent = make_def(%{name: "fetcher", tools: ["Read", "WebFetch"]})
+      assert :high = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "agent receiving messages has medium taint" do
+      agent = make_def(%{name: "receiver", receive_from: ["other"]})
+      assert :medium = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "Bash-only agent with no inputs has low taint" do
+      agent = make_def(%{name: "bash", tools: ["Read", "Bash"]})
+      assert :low = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "isolated agent has low taint" do
+      agent = make_def(%{name: "reader", network: :none})
+      assert :low = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "BCTP controller inherits step_down of peer taint" do
+      # researcher has network → high taint; controller gets step_down(high) = medium
+      researcher = make_def(%{name: "researcher", network: :outbound,
+        bctp_channels: [%{peer: "main", role: :reader, max_category: 2,
+          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+      main = make_def(%{name: "main", tools: ["Read", "Bash"],
+        bctp_channels: [%{peer: "researcher", role: :controller, max_category: 2,
+          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+
+      all_defs = %{"main" => main, "researcher" => researcher}
+      assert :medium = GraphAnalyzer.worst_case_taint(main, all_defs)
+    end
+
+    test "BCTP controller with low-taint peer stays low" do
+      # peer has no external inputs → low taint; step_down(low) = low
+      peer = make_def(%{name: "helper", tools: ["Read"]})
+      main = make_def(%{name: "main", tools: ["Read", "Bash"],
+        bctp_channels: [%{peer: "helper", role: :controller, max_category: 1,
+          budget_bits: 100, max_cat2_queries: 0, max_cat3_queries: 0}]})
+
+      all_defs = %{"main" => main, "helper" => peer}
+      assert :low = GraphAnalyzer.worst_case_taint(main, all_defs)
+    end
+
+    test "BCTP without peer context falls back to low" do
+      main = make_def(%{name: "main",
+        bctp_channels: [%{peer: "unknown", role: :controller, max_category: 2,
+          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+
+      assert :low = GraphAnalyzer.worst_case_taint(main, %{})
+    end
+  end
+
+  describe "worst_case_sensitivity/1" do
+    test "built-in tools all return low sensitivity" do
+      agent = make_def(%{name: "test", tools: ["Read", "Write", "Bash", "WebFetch"]})
+      assert :low = GraphAnalyzer.worst_case_sensitivity(agent)
+    end
+  end
+
+  describe "worst_case_level/1" do
+    test "returns max of taint and sensitivity" do
+      agent = make_def(%{name: "net", network: :outbound})
+      # worst_case_taint = :high, worst_case_sensitivity = :low → max = :high
+      assert :high = GraphAnalyzer.worst_case_level(agent)
+    end
+  end
+
+  describe "trace_risk_chain/3 cycle handling" do
+    test "A -> B -> A does not infinite loop" do
+      edges = %{
+        "A" => [%{from: "B", paths: ["/shared/**"], risk_level: "medium"}],
+        "B" => [%{from: "A", paths: ["/shared/**"], risk_level: "medium"}]
+      }
+
+      chain_a = GraphAnalyzer.trace_risk_chain("A", edges, MapSet.new())
+      chain_b = GraphAnalyzer.trace_risk_chain("B", edges, MapSet.new())
+
+      assert is_list(chain_a)
+      assert is_list(chain_b)
+      assert "B" in chain_a
+    end
+  end
+
+  describe "BCTP edges in analyze/2" do
+    test "creates bctp edge from reader to controller" do
+      controller = make_def(%{
+        name: "controller",
+        tools: ["Read", "SendMessage"],
+        bctp_channels: [
+          %{peer: "reader", role: :controller, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      reader = make_def(%{
+        name: "reader",
+        tools: ["Read"],
+        bctp_channels: [
+          %{peer: "controller", role: :reader, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      result = GraphAnalyzer.analyze([controller, reader], %{})
+
+      controller_incoming = result["controller"].incoming_edges
+      assert length(controller_incoming) == 1
+      edge = hd(controller_incoming)
+      assert edge.from == "reader"
+      assert edge.edge_type == :bctp
+      assert edge.risk_level == "medium"
+
+      # Reader has no incoming bctp edges (only controller receives)
+      assert result["reader"].incoming_edges == []
+    end
+
+    test "bctp edge risk level matches max_category" do
+      for {cat, expected_risk} <- [{1, "low"}, {2, "medium"}, {3, "high"}] do
+        controller = make_def(%{
+          name: "ctrl",
+          bctp_channels: [
+            %{peer: "rdr", role: :controller, max_category: cat, budget_bits: 100,
+              max_cat2_queries: 0, max_cat3_queries: 0}
+          ]
+        })
+
+        reader = make_def(%{name: "rdr"})
+
+        result = GraphAnalyzer.analyze([controller, reader], %{})
+        edge = hd(result["ctrl"].incoming_edges)
+        assert edge.risk_level == expected_risk
+      end
+    end
+
+    test "no bctp edge when peer does not exist" do
+      controller = make_def(%{
+        name: "ctrl",
+        bctp_channels: [
+          %{peer: "nonexistent", role: :controller, max_category: 1, budget_bits: 100,
+            max_cat2_queries: 0, max_cat3_queries: 0}
+        ]
+      })
+
+      result = GraphAnalyzer.analyze([controller], %{})
+      assert result["ctrl"].incoming_edges == []
+    end
+  end
+
+  describe "validate_bctp_roles/1" do
+    test "returns empty list when roles are symmetric" do
+      controller = make_def(%{
+        name: "ctrl",
+        bctp_channels: [
+          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      reader = make_def(%{
+        name: "rdr",
+        bctp_channels: [
+          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      assert [] == GraphAnalyzer.validate_bctp_roles([controller, reader])
+    end
+
+    test "warns when peer does not declare reader role" do
+      controller = make_def(%{
+        name: "ctrl",
+        bctp_channels: [
+          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      reader = make_def(%{name: "rdr", bctp_channels: []})
+
+      warnings = GraphAnalyzer.validate_bctp_roles([controller, reader])
+      assert length(warnings) == 1
+      assert hd(warnings).agent == "ctrl"
+      assert hd(warnings).peer == "rdr"
+      assert hd(warnings).warning =~ "does not declare reader role"
+    end
+
+    test "warns when peer does not exist" do
+      controller = make_def(%{
+        name: "ctrl",
+        bctp_channels: [
+          %{peer: "ghost", role: :controller, max_category: 1, budget_bits: 100,
+            max_cat2_queries: 0, max_cat3_queries: 0}
+        ]
+      })
+
+      warnings = GraphAnalyzer.validate_bctp_roles([controller])
+      assert length(warnings) == 1
+      assert hd(warnings).warning =~ "does not exist"
+    end
+
+    test "ignores reader-only declarations (no symmetry check needed)" do
+      reader = make_def(%{
+        name: "rdr",
+        bctp_channels: [
+          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
+            max_cat2_queries: 5, max_cat3_queries: 0}
+        ]
+      })
+
+      assert [] == GraphAnalyzer.validate_bctp_roles([reader])
+    end
+  end
+
+  describe "propagate_risk/2" do
+    test "propagates risk level from source through chain" do
+      edges = %{
+        "sink" => [%{from: "middle", paths: ["/b/**"], risk_level: "medium"}],
+        "middle" => [%{from: "source", paths: ["/a/**"], risk_level: "high"}]
+      }
+
+      assert :high == GraphAnalyzer.propagate_risk("sink", edges)
+    end
+
+    test "returns low for agent with no incoming edges" do
+      assert :low == GraphAnalyzer.propagate_risk("isolated", %{})
+    end
+
+    test "handles cycles without infinite loop" do
+      edges = %{
+        "A" => [%{from: "B", paths: ["/x/**"], risk_level: "high"}],
+        "B" => [%{from: "A", paths: ["/y/**"], risk_level: "medium"}]
+      }
+
+      result = GraphAnalyzer.propagate_risk("A", edges)
+      assert result in [:low, :medium, :high]
+    end
+  end
+end

@@ -1,0 +1,41 @@
+# Elixir/OTP
+_build/
+deps/
+*.ez
+erl_crash.dump
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Go
+fuse/tri-onyx-fs
+
+# Environment / secrets
+.env
+.env.*
+!.env.example
+connector/config.yaml
+
+# Test artifacts
+test/tmp/
+
+# Local temp
+tmp/
+
+# Runtime workspace (except agent definitions which are source-controlled)
+workspace/*
+!workspace/agent-definitions/
+!workspace/modules/
+
+# Session logs
+logs/
+
+# Claude Code / AI assistants
+.transcripts/
+.memories/
+.tmp/
+
+# BetterBeads
+.betterbeads/

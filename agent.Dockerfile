@@ -1,0 +1,76 @@
+# Agent container image for TriOnyx
+#
+# Runs Python agents using the Claude Agent SDK inside a sandboxed
+# environment with FUSE-based filesystem access control.
+#
+# Runtime requirements:
+#   docker run --device /dev/fuse --cap-drop ALL --cap-add SYS_ADMIN ...
+#   (add --cap-add NET_ADMIN for network policy enforcement)
+
+FROM python:3.12-slim
+
+# Install FUSE3 for the tri-onyx-fs driver, iptables for optional
+# network policy enforcement, tini as a minimal init process, and gosu
+# for dropping root privileges after sandbox setup.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      fuse3 \
+      libfuse3-dev \
+      iptables \
+      tini \
+      gosu \
+      # Playwright/Chromium system dependencies
+      libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
+      libatspi2.0-0 libdbus-1-3 libdrm2 libxcomposite1 \
+      libxdamage1 libxfixes3 libxrandr2 libgbm1 libxcb1 \
+      libxkbcommon0 libx11-6 libx11-xcb1 libxext6 libasound2 \
+      libexpat1 libcups2 libpango-1.0-0 libcairo2 \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Allow non-root FUSE mounts (the entrypoint runs as root for FUSE/iptables,
+# but this ensures fuse3 works correctly inside the container).
+RUN echo "user_allow_other" >> /etc/fuse.conf
+
+# Create a dedicated non-root user for running the agent process.
+# The entrypoint drops privileges to this user after FUSE mount and
+# iptables setup (which require root).
+RUN groupadd -r tri_onyx && useradd -r -g tri_onyx -d /home/tri_onyx -s /bin/bash tri_onyx \
+    && mkdir -p /home/tri_onyx && chown tri_onyx:tri_onyx /home/tri_onyx
+
+# Install UV for running the agent script with inline dependencies.
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
+
+# Copy the FUSE driver binary.
+COPY fuse/tri-onyx-fs /usr/local/bin/tri-onyx-fs
+RUN chmod +x /usr/local/bin/tri-onyx-fs
+
+# Copy the Python agent runtime.
+COPY runtime/agent_runner.py runtime/protocol.py /opt/tri_onyx/
+
+# Pre-install the inline script dependencies into UV's cache so that
+# `uv run --script` at runtime is a cache hit with no network required.
+# The script exits immediately (stdin is empty → EOF → shutdown), but the
+# dependencies are resolved and cached. Use a shared cache directory that
+# the non-root agent user can access after privilege dropping.
+ENV UV_CACHE_DIR=/opt/uv-cache
+RUN uv run --script /opt/tri_onyx/agent_runner.py < /dev/null 2>&1 || true
+
+# Pre-install Playwright and its Chromium browser so agents with outbound
+# network can use the newsagg fetcher without downloading at runtime.
+# Uses uvx to run the playwright CLI in an ephemeral venv.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
+RUN uv tool run playwright install chromium \
+    && chown -R tri_onyx:tri_onyx /opt/playwright-browsers
+
+RUN chown -R tri_onyx:tri_onyx /opt/uv-cache
+
+# Copy the container entrypoint.
+COPY runtime/entrypoint.sh /opt/tri_onyx/entrypoint.sh
+RUN chmod +x /opt/tri_onyx/entrypoint.sh
+
+# Create the FUSE mountpoint and bind mount target.
+RUN mkdir -p /workspace /mnt/host /etc/tri_onyx
+
+WORKDIR /workspace
+
+# Use tini as PID 1 to handle signal forwarding and zombie reaping.
+ENTRYPOINT ["tini", "--", "/opt/tri_onyx/entrypoint.sh"]
