@@ -1,0 +1,22 @@
+gateway:
+  url: "ws://gateway:4000/connectors/ws"
+  connector_id: "matrix-home"
+  token: "${TRI_ONYX_CONNECTOR_TOKEN}"
+
+adapters:
+  matrix:
+    enabled: true
+    homeserver: "https://matrix.org"
+    user_id: "@tri-onyx-bot:matrix.org"
+    access_token: "${MATRIX_ACCESS_TOKEN}"
+    device_id: "TRI_ONYX01"
+    store_path: "/data/matrix-store"
+    trusted_users:
+      - "@alice:matrix.org"
+    rooms:
+      "!abc123:matrix.org":
+        agent: "persona"
+        mode: "mention"
+        merge_window_ms: 3000
+        # show_steps: publish tool use / result events as messages in the room
+        show_steps: false

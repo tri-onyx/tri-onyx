@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureClaw</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --orange: #db6d28;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    background: var(--bg); color: var(--text);
+    display: flex; height: 100vh;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 280px; min-width: 280px;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .sidebar-header {
+    padding: 16px; border-bottom: 1px solid var(--border);
+    font-size: 14px; font-weight: 600;
+  }
+  .sidebar-header span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .agent-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .agent-card {
+    padding: 10px 12px; border-radius: 6px; cursor: pointer;
+    margin-bottom: 4px; border: 1px solid transparent;
+  }
+  .agent-card:hover { background: rgba(88,166,255,0.05); }
+  .agent-card.active { background: rgba(88,166,255,0.1); border-color: var(--accent); }
+  .agent-name { font-size: 13px; font-weight: 600; }
+  .agent-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 4px; vertical-align: middle;
+  }
+  .status-dot.inactive { background: var(--muted); }
+  .status-dot.starting { background: var(--yellow); }
+  .status-dot.ready { background: var(--green); }
+  .status-dot.running { background: var(--accent); animation: pulse 1.5s infinite; }
+  .status-dot.stopped { background: var(--red); }
+  @keyframes pulse { 50% { opacity: 0.5; } }
+  .risk-badge {
+    display: inline-block; font-size: 10px; padding: 1px 6px;
+    border-radius: 10px; font-weight: 600;
+  }
+  .risk-badge.low { background: rgba(63,185,80,0.2); color: var(--green); }
+  .risk-badge.medium { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .risk-badge.high { background: rgba(219,109,40,0.2); color: var(--orange); }
+  .risk-badge.critical { background: rgba(248,81,73,0.2); color: var(--red); }
+  .taint-badge {
+    display: inline-block; font-size: 10px; padding: 1px 6px;
+    border-radius: 10px; font-weight: 600;
+    background: rgba(248,81,73,0.15); color: var(--red);
+  }
+
+  /* Main content */
+  .main { flex: 1; display: flex; flex-direction: column; }
+  .toolbar {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface);
+  }
+  .toolbar .agent-title { font-size: 15px; font-weight: 600; flex: 1; }
+  button {
+    background: var(--accent); color: #fff; border: none;
+    padding: 6px 14px; border-radius: 6px; cursor: pointer;
+    font-size: 12px; font-weight: 600;
+  }
+  button:hover { opacity: 0.9; }
+  button:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.danger { background: var(--red); }
+
+  /* Event log */
+  .event-log {
+    flex: 1; overflow-y: auto; padding: 16px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
+    line-height: 1.6;
+  }
+  .event {
+    padding: 4px 0; border-bottom: 1px solid rgba(48,54,61,0.4);
+  }
+  .event-time { color: var(--muted); font-size: 11px; margin-right: 8px; }
+  .event-type {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px; margin-right: 6px;
+    text-transform: uppercase;
+  }
+  .event-type.ready { background: rgba(63,185,80,0.2); color: var(--green); }
+  .event-type.text { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .event-type.tool_use { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .event-type.tool_result { background: rgba(139,148,158,0.2); color: var(--muted); }
+  .event-type.result { background: rgba(63,185,80,0.2); color: var(--green); }
+  .event-type.error { background: rgba(248,81,73,0.2); color: var(--red); }
+  .event-type.port_down { background: rgba(248,81,73,0.2); color: var(--red); }
+  .event-type.connected { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .event-content { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .event-content.tool { color: var(--yellow); }
+  .event-content.err { color: var(--red); }
+
+  /* Prompt input */
+  .prompt-bar {
+    padding: 12px 16px; border-top: 1px solid var(--border);
+    background: var(--surface); display: flex; gap: 8px;
+  }
+  .prompt-bar input {
+    flex: 1; background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 8px 12px; border-radius: 6px;
+    font-family: inherit; font-size: 13px;
+  }
+  .prompt-bar input:focus { outline: none; border-color: var(--accent); }
+  .prompt-bar input::placeholder { color: var(--muted); }
+
+  /* Empty state */
+  .empty-state {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; text-align: center;
+  }
+
+  /* Connection status */
+  .conn-status {
+    padding: 8px 16px; font-size: 11px; color: var(--muted);
+    border-top: 1px solid var(--border);
+  }
+  .conn-status .connected { color: var(--green); }
+  .conn-status .disconnected { color: var(--red); }
+
+  /* Settings bar */
+  .settings-bar {
+    padding: 8px 16px; border-top: 1px solid var(--border);
+    display: flex; flex-direction: column; gap: 6px; font-size: 12px;
+  }
+  .settings-bar label { color: var(--muted); }
+  .settings-row { display: flex; align-items: center; gap: 8px; }
+  .settings-bar input[type="text"] {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 4px;
+    font-size: 12px; flex: 1; min-width: 0;
+  }
+  .settings-bar select {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 3px 6px; border-radius: 4px;
+    font-size: 12px;
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    SecureClaw <span>Agent Gateway</span>
+  </div>
+  <div class="agent-list" id="agent-list"></div>
+  <div class="settings-bar">
+    <div class="settings-row">
+      <label>Gateway:</label>
+      <input type="text" id="gateway-url" value="http://localhost:4000"
+             onchange="refreshAgents()">
+    </div>
+    <div class="settings-row">
+      <label>Tools:</label>
+      <select id="tool-mode" onchange="setToolMode(this.value)">
+        <option value="brief">Brief</option>
+        <option value="pretty">Pretty</option>
+        <option value="raw">Raw</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="main" id="main-area">
+  <div class="empty-state" id="empty-state">
+    Select an agent from the sidebar to get started.
+  </div>
+</div>
+
+<script>
+const state = {
+  agents: [],
+  selected: null,   // agent name
+  eventSource: null,
+  events: [],        // {time, type, data}
+  logLoadedAt: null, // ISO timestamp of last loaded log event (for dedup)
+  toolMode: localStorage.getItem('toolMode') || 'brief',
+};
+
+function setToolMode(mode) {
+  state.toolMode = mode;
+  localStorage.setItem('toolMode', mode);
+  const log = document.getElementById('event-log');
+  if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+}
+
+function gatewayUrl() {
+  return document.getElementById('gateway-url').value.replace(/\/+$/, '');
+}
+
+async function api(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body) opts.body = JSON.stringify(body);
+  const resp = await fetch(gatewayUrl() + path, opts);
+  return resp.json();
+}
+
+// --- Agent list ---
+
+async function refreshAgents() {
+  try {
+    const data = await api('GET', '/agents');
+    state.agents = data.agents || [];
+  } catch {
+    state.agents = [];
+  }
+  renderAgentList();
+}
+
+function renderAgentList() {
+  const el = document.getElementById('agent-list');
+  if (!state.agents.length) {
+    el.innerHTML = '<div style="padding:12px;color:var(--muted);font-size:12px;">No agents loaded. Check gateway connection.</div>';
+    return;
+  }
+  el.innerHTML = state.agents.map(a => {
+    const active = a.name === state.selected ? 'active' : '';
+    const status = a.status || 'inactive';
+    const risk = (a.effective_risk || '').toLowerCase().replace(/[^a-z]/g, '') || 'low';
+    let badges = `<span class="risk-badge ${risk}">${a.effective_risk || 'low'}</span>`;
+    if (a.taint_status === 'tainted') badges += ` <span class="taint-badge">tainted</span>`;
+    return `<div class="agent-card ${active}" onclick="selectAgent('${a.name}')">
+      <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
+      <div class="agent-meta">${a.model} &middot; ${status} ${badges}</div>
+    </div>`;
+  }).join('');
+}
+
+// --- Agent selection ---
+
+async function selectAgent(name) {
+  if (state.selected === name) return;
+  state.selected = name;
+  state.events = [];
+  state.logLoadedAt = null;
+  disconnectSSE();
+  renderAgentList();
+  renderMain();
+  const agent = state.agents.find(a => a.name === name);
+  if (agent && agent.status && agent.status !== 'inactive') {
+    if (agent.session_id) await loadSessionLog(name, agent.session_id);
+    connectSSE(name);
+  } else if (agent) {
+    await startAgent();
+  }
+}
+
+async function loadSessionLog(agentName, sessionId) {
+  try {
+    const resp = await fetch(`${gatewayUrl()}/logs/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}`);
+    if (!resp.ok) return;
+    const text = await resp.text();
+    const parsed = text.trim().split('\n')
+      .filter(line => line.trim())
+      .map(line => { try { return JSON.parse(line); } catch { return null; } })
+      .filter(Boolean);
+    state.events = parsed.map(e => ({
+      time: e.timestamp ? new Date(e.timestamp) : new Date(),
+      type: e.type || 'unknown',
+      data: e
+    }));
+    // Track latest log timestamp so SSE can skip duplicates
+    const last = parsed[parsed.length - 1];
+    state.logLoadedAt = last && last.timestamp ? last.timestamp : null;
+    const log = document.getElementById('event-log');
+    if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+  } catch { /* ignore — will still get live events via SSE */ }
+}
+
+function renderMain() {
+  const main = document.getElementById('main-area');
+  const agent = state.agents.find(a => a.name === state.selected);
+  if (!agent) {
+    main.innerHTML = '<div class="empty-state">Select an agent from the sidebar.</div>';
+    return;
+  }
+  const isActive = agent.status && agent.status !== 'inactive';
+  main.innerHTML = `
+    <div class="toolbar">
+      <div class="agent-title">${agent.name}</div>
+      ${!isActive
+        ? '<button onclick="startAgent()">Start Session</button>'
+        : '<button class="danger" onclick="stopAgent()">Stop</button>'}
+      <button onclick="refreshAgents()" style="background:var(--border)">Refresh</button>
+    </div>
+    <div class="event-log" id="event-log">${renderEvents()}</div>
+    <div class="prompt-bar">
+      <input type="text" id="prompt-input" placeholder="Send a prompt..."
+             ${isActive ? '' : 'disabled'}
+             onkeydown="if(event.key==='Enter')sendPrompt()">
+      <button onclick="sendPrompt()" ${isActive ? '' : 'disabled'}>Send</button>
+    </div>
+    <div class="conn-status" id="conn-status">
+      ${state.eventSource
+        ? '<span class="connected">SSE connected</span>'
+        : '<span class="disconnected">Not connected</span>'}
+    </div>`;
+  scrollLog();
+}
+
+function renderEvents() {
+  if (!state.events.length) return '<div style="padding:12px;color:var(--muted)">No events yet.</div>';
+  return state.events.map(e => {
+    const time = e.time.toLocaleTimeString();
+    const cls = ['error','port_down'].includes(e.type) ? 'err' :
+                ['tool_use','tool_result'].includes(e.type) ? 'tool' : '';
+    return `<div class="event">
+      <span class="event-time">${time}</span>
+      <span class="event-type ${e.type}">${e.type}</span>
+      <span class="event-content ${cls}">${formatEvent(e)}</span>
+    </div>`;
+  }).join('');
+}
+
+function formatToolUse(d) {
+  const input = d.input || {};
+  let detail = '';
+  switch (d.name) {
+    case 'Read':
+      detail = input.file_path || '';
+      if (input.offset) detail += `:${input.offset}`;
+      break;
+    case 'Write':
+      detail = input.file_path || '';
+      break;
+    case 'Edit':
+      detail = input.file_path || '';
+      if (input.old_string) detail += ` (replacing ${truncate(input.old_string, 40)})`;
+      break;
+    case 'Bash':
+      detail = truncate(input.command || input.description || '', 120);
+      break;
+    case 'Glob':
+      detail = input.pattern || '';
+      if (input.path) detail += ` in ${input.path}`;
+      break;
+    case 'Grep':
+      detail = `/${input.pattern || ''}/${input.glob ? ' ' + input.glob : ''}`;
+      if (input.path) detail += ` in ${input.path}`;
+      break;
+    case 'WebFetch':
+      detail = input.url || '';
+      break;
+    case 'WebSearch':
+      detail = input.query || '';
+      break;
+    case 'Task':
+      detail = input.description || input.prompt ? truncate(input.prompt || '', 80) : '';
+      break;
+    default: {
+      const keys = Object.keys(input);
+      if (keys.length) detail = truncate(JSON.stringify(input), 120);
+    }
+  }
+  return `${escapeHtml(d.name)}${detail ? ' — ' + escapeHtml(detail) : ''}`;
+}
+
+function formatEvent(e) {
+  const d = e.data;
+  const mode = state.toolMode;
+  switch (e.type) {
+    case 'connected': return `Session ${d.session_id} (${d.status})`;
+    case 'ready': return 'Runtime ready';
+    case 'text': return escapeHtml(d.content || '');
+    case 'tool_use':
+      if (mode === 'raw') return escapeHtml(JSON.stringify(d, null, 2));
+      if (mode === 'pretty') return formatToolUsePretty(d);
+      return formatToolUse(d);
+    case 'tool_result':
+      if (mode === 'raw') return escapeHtml(JSON.stringify(d, null, 2));
+      if (mode === 'pretty') return formatToolResultPretty(d);
+      return (d.is_error ? '[ERROR] ' : '') + escapeHtml(truncate(d.content || '', 500));
+    case 'result':
+      return `Done: ${d.num_turns} turns, ${d.duration_ms}ms, $${d.cost_usd}`;
+    case 'error': return escapeHtml(d.message || JSON.stringify(d));
+    case 'port_down': return escapeHtml(d.reason || '');
+    default: return JSON.stringify(d);
+  }
+}
+
+function formatToolUsePretty(d) {
+  const input = d.input || {};
+  let out = escapeHtml(d.name || '');
+  const keys = Object.keys(input);
+  if (keys.length) {
+    const lines = keys.map(k => {
+      const v = input[k];
+      const vs = typeof v === 'string' ? v : JSON.stringify(v);
+      return `  ${escapeHtml(k)}: ${escapeHtml(truncate(vs, 300))}`;
+    });
+    out += '\n' + lines.join('\n');
+  }
+  return out;
+}
+
+function formatToolResultPretty(d) {
+  let out = (d.is_error ? '[ERROR] ' : '') + escapeHtml(d.name || '');
+  if (d.content) out += '\n' + escapeHtml(truncate(d.content, 1000));
+  return out;
+}
+
+function escapeHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function truncate(s, n) { return s.length > n ? s.slice(0, n) + '...' : s; }
+
+function scrollLog() {
+  const log = document.getElementById('event-log');
+  if (log) log.scrollTop = log.scrollHeight;
+}
+
+// --- SSE ---
+
+function connectSSE(name) {
+  disconnectSSE();
+  const url = `${gatewayUrl()}/agents/${encodeURIComponent(name)}/events`;
+  const es = new EventSource(url);
+  state.eventSource = es;
+
+  const eventTypes = ['connected','ready','text','tool_use','tool_result','result','error','port_down'];
+  eventTypes.forEach(type => {
+    es.addEventListener(type, (e) => {
+      let data;
+      try { data = JSON.parse(e.data); } catch { data = { raw: e.data }; }
+      // Skip events already loaded from the session log
+      if (state.logLoadedAt && data.timestamp && data.timestamp <= state.logLoadedAt) return;
+      state.events.push({ time: new Date(), type, data });
+      // Re-render event log only (avoid full re-render)
+      const log = document.getElementById('event-log');
+      if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+      // Refresh agent list on status-changing events
+      if (['ready','result','port_down','error'].includes(type)) refreshAgents();
+    });
+  });
+
+  es.onerror = () => {
+    const statusEl = document.getElementById('conn-status');
+    if (statusEl) statusEl.innerHTML = '<span class="disconnected">SSE disconnected — reconnecting...</span>';
+  };
+  es.onopen = () => {
+    const statusEl = document.getElementById('conn-status');
+    if (statusEl) statusEl.innerHTML = '<span class="connected">SSE connected</span>';
+  };
+}
+
+function disconnectSSE() {
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+}
+
+// --- Actions ---
+
+async function startAgent() {
+  if (!state.selected) return;
+  try {
+    await api('POST', `/agents/${encodeURIComponent(state.selected)}/start`);
+    await refreshAgents();
+    renderMain();
+    connectSSE(state.selected);
+  } catch (err) {
+    alert('Failed to start agent: ' + err.message);
+  }
+}
+
+async function stopAgent() {
+  if (!state.selected) return;
+  try {
+    await api('POST', `/agents/${encodeURIComponent(state.selected)}/stop`);
+    disconnectSSE();
+    await refreshAgents();
+    renderMain();
+  } catch (err) {
+    alert('Failed to stop agent: ' + err.message);
+  }
+}
+
+async function sendPrompt() {
+  const input = document.getElementById('prompt-input');
+  const content = input.value.trim();
+  if (!content || !state.selected) return;
+  input.value = '';
+  // Add local event for prompt sent
+  state.events.push({ time: new Date(), type: 'text', data: { content: '> ' + content } });
+  const log = document.getElementById('event-log');
+  if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+  try {
+    await api('POST', `/agents/${encodeURIComponent(state.selected)}/prompt`, { content });
+  } catch (err) {
+    state.events.push({ time: new Date(), type: 'error', data: { message: 'Prompt send failed: ' + err.message } });
+    if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+  }
+}
+
+// --- Init ---
+document.getElementById('tool-mode').value = state.toolMode;
+refreshAgents();
+setInterval(refreshAgents, 10000);
+</script>
+</body>
+</html>

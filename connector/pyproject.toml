@@ -1,0 +1,16 @@
+[project]
+name = "tri-onyx-connector"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "websockets>=12.0",
+    "matrix-nio[e2e]>=0.24",
+    "pyyaml>=6.0",
+    "markdown-it-py>=3.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
+[dependency-groups]
+dev = ["pytest>=8.0", "pytest-asyncio>=0.23"]

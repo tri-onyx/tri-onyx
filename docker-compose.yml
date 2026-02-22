@@ -1,0 +1,56 @@
+services:
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway.Dockerfile
+    command: ["sh", "-c", "mix deps.get && mix run --no-halt"]
+    ports:
+      - "4000:4000"
+    environment:
+      - TRI_ONYX_CONNECTOR_TOKEN
+      - TRI_ONYX_AGENTS_DIR=/app/workspace/agent-definitions
+      - TRI_ONYX_WORKSPACE_DIR=/app/workspace
+      - TRI_ONYX_HOST_ROOT=${PWD}
+      - CLAUDE_CODE_OAUTH_TOKEN
+      # Email connector (optional — set TRI_ONYX_IMAP_HOST in .env to enable)
+      - TRI_ONYX_IMAP_HOST
+      - TRI_ONYX_IMAP_PORT
+      - TRI_ONYX_IMAP_USERNAME
+      - TRI_ONYX_IMAP_PASSWORD
+      - TRI_ONYX_IMAP_SSL
+      - TRI_ONYX_IMAP_POLL_INTERVAL
+      - TRI_ONYX_SMTP_HOST
+      - TRI_ONYX_SMTP_PORT
+      - TRI_ONYX_SMTP_USERNAME
+      - TRI_ONYX_SMTP_PASSWORD
+      - TRI_ONYX_SMTP_SSL
+      - TRI_ONYX_EMAIL_AGENT
+      # Calendar connector (optional — set TRI_ONYX_CALDAV_URL in .env to enable)
+      - TRI_ONYX_CALDAV_URL
+      - TRI_ONYX_CALDAV_USERNAME
+      - TRI_ONYX_CALDAV_PASSWORD
+      - TRI_ONYX_CALDAV_BASE_PATH
+      - TRI_ONYX_CALDAV_CALENDARS
+      - TRI_ONYX_CALDAV_POLL_INTERVAL
+      - TRI_ONYX_CALENDAR_AGENT
+    volumes:
+      - .:/app
+      - /app/_build
+      - /app/deps
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  connector:
+    build:
+      context: .
+      dockerfile: connector.Dockerfile
+    volumes:
+      - ./connector/config.yaml:/app/config.yaml:ro
+      - connector-store:/data
+    environment:
+      - TRI_ONYX_CONNECTOR_TOKEN
+      - MATRIX_ACCESS_TOKEN
+    depends_on:
+      - gateway
+
+volumes:
+  connector-store:

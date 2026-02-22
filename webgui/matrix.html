@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureClaw — Classification Matrix</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --orange: #db6d28; --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    padding: 10px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+  }
+  .header h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .header h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .header-nav { display: flex; gap: 8px; margin-left: auto; }
+  .header-nav a {
+    color: var(--muted); font-size: 12px; text-decoration: none;
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+  }
+  .header-nav a:hover { color: var(--accent); border-color: var(--accent); }
+
+  /* Main layout */
+  .page { display: flex; flex: 1; overflow: hidden; }
+
+  /* Left: master matrix table */
+  .matrix-panel {
+    flex: 1; display: flex; flex-direction: column;
+    border-right: 1px solid var(--border); min-width: 0;
+  }
+  .matrix-panel-header {
+    padding: 10px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 12px; flex-shrink: 0;
+    background: var(--surface);
+  }
+  .matrix-panel-header h2 { font-size: 13px; font-weight: 600; }
+  .matrix-panel-header p { font-size: 11px; color: var(--muted); }
+  .matrix-scroll { flex: 1; overflow-y: auto; }
+
+  table.master {
+    width: 100%; border-collapse: collapse; font-size: 12px;
+  }
+  table.master thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--surface); padding: 8px 12px;
+    text-align: left; font-size: 11px; font-weight: 600;
+    color: var(--muted); border-bottom: 1px solid var(--border);
+    white-space: nowrap;
+  }
+  table.master thead th:first-child { padding-left: 16px; }
+  table.master tbody tr {
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+    transition: background 0.1s;
+  }
+  table.master tbody tr:hover { background: rgba(88,166,255,0.04); }
+  table.master tbody tr.selected { background: rgba(88,166,255,0.09) !important; }
+  table.master tbody tr.selected td.name { color: var(--accent); }
+  table.master tbody td {
+    padding: 7px 12px; vertical-align: middle;
+  }
+  table.master tbody td:first-child { padding-left: 16px; }
+  table.master .section-header td {
+    padding: 8px 16px 4px; font-size: 10px; font-weight: 700;
+    color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+    background: var(--bg); border-bottom: none;
+  }
+  table.master .source-name {
+    font-family: monospace; font-size: 12px;
+  }
+  table.master .note {
+    font-size: 10px; color: var(--muted); margin-top: 2px;
+  }
+  table.master .col-type { color: var(--muted); font-size: 11px; }
+
+  /* Badges */
+  .badge {
+    display: inline-block; font-size: 10px; font-weight: 700;
+    padding: 2px 8px; border-radius: 10px; letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+  .badge.low   { background: rgba(63,185,80,0.15);  color: var(--green);  }
+  .badge.medium{ background: rgba(219,109,40,0.15); color: var(--orange); }
+  .badge.high  { background: rgba(248,81,73,0.15);  color: var(--red);    }
+  .badge.moderate { background: rgba(219,109,40,0.15); color: var(--orange); }
+  .badge.critical { background: rgba(248,81,73,0.2); color: var(--red); font-size: 11px; }
+  .badge.na    { background: transparent; color: var(--border); font-weight: 400; }
+
+  /* Right: selector + profile */
+  .selector-panel {
+    width: 360px; min-width: 360px; display: flex;
+    flex-direction: column; overflow: hidden;
+  }
+  .selector-section {
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .selector-section h3 {
+    padding: 10px 16px 6px; font-size: 11px; font-weight: 700;
+    color: var(--muted); letter-spacing: 0.08em; text-transform: uppercase;
+    background: var(--surface);
+  }
+
+  /* Trigger selector */
+  .trigger-grid {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 8px 12px;
+  }
+  .trigger-option {
+    display: flex; align-items: center; gap: 6px; cursor: pointer;
+    padding: 5px 8px; border-radius: 5px; border: 1px solid transparent;
+    font-size: 12px; transition: all 0.1s;
+  }
+  .trigger-option:hover { background: rgba(88,166,255,0.05); }
+  .trigger-option.selected {
+    background: rgba(88,166,255,0.1); border-color: rgba(88,166,255,0.3);
+  }
+  .trigger-option input[type="radio"] { display: none; }
+  .trigger-name { font-family: monospace; font-size: 11px; }
+
+  /* Preset buttons */
+  .presets {
+    display: flex; gap: 4px; padding: 6px 12px 8px; flex-wrap: wrap;
+  }
+  .preset-btn {
+    font-size: 10px; padding: 3px 8px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--muted); cursor: pointer; transition: all 0.1s;
+  }
+  .preset-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Tool list */
+  .tool-list-scroll { overflow-y: auto; max-height: 260px; }
+  .tool-group-label {
+    padding: 4px 12px 2px; font-size: 10px; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;
+  }
+  .tool-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 4px 12px; cursor: pointer; transition: background 0.1s;
+  }
+  .tool-row:hover { background: rgba(88,166,255,0.05); }
+  .tool-row input[type="checkbox"] { accent-color: var(--accent); cursor: pointer; flex-shrink: 0; }
+  .tool-name { font-family: monospace; font-size: 12px; flex: 1; }
+  .tool-badges { display: flex; gap: 3px; }
+  .mini-badge {
+    font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 6px;
+    white-space: nowrap;
+  }
+  .mini-badge.T.low    { background: rgba(63,185,80,0.12);  color: var(--green);  }
+  .mini-badge.T.medium { background: rgba(219,109,40,0.12); color: var(--orange); }
+  .mini-badge.T.high   { background: rgba(248,81,73,0.12);  color: var(--red);    }
+  .mini-badge.S.low    { background: rgba(139,148,158,0.1); color: var(--muted);  }
+  .mini-badge.S.medium { background: rgba(188,140,255,0.12);color: var(--purple); }
+  .mini-badge.S.high   { background: rgba(248,81,73,0.12);  color: var(--red);    }
+  .mini-badge.C.low    { background: rgba(63,185,80,0.12);  color: var(--green);  }
+  .mini-badge.C.medium { background: rgba(210,153,34,0.12); color: var(--yellow); }
+  .mini-badge.C.high   { background: rgba(248,81,73,0.12);  color: var(--red);    }
+
+  .tool-list-controls {
+    display: flex; gap: 6px; padding: 4px 12px 6px;
+  }
+  .tool-list-controls button {
+    font-size: 10px; padding: 2px 8px; border-radius: 4px;
+    border: 1px solid var(--border); background: var(--bg);
+    color: var(--muted); cursor: pointer;
+  }
+  .tool-list-controls button:hover { border-color: var(--accent); color: var(--accent); }
+
+  /* Profile outcome */
+  .profile-panel {
+    flex: 1; overflow-y: auto; padding: 12px 14px;
+    background: var(--bg);
+  }
+  .profile-empty {
+    color: var(--muted); font-size: 12px; text-align: center;
+    margin-top: 32px;
+  }
+
+  .profile-row {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 5px 0; border-bottom: 1px solid rgba(48,54,61,0.4);
+    font-size: 12px;
+  }
+  .profile-row:last-child { border-bottom: none; }
+  .profile-label { color: var(--muted); font-size: 11px; }
+  .profile-value { display: flex; align-items: center; gap: 6px; }
+
+  .profile-sub {
+    margin: 8px 0; padding: 8px 10px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--surface);
+  }
+  .profile-sub h4 { font-size: 10px; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 6px; }
+
+  /* Risk matrix display */
+  .risk-matrix {
+    display: grid; grid-template-columns: auto 1fr 1fr 1fr;
+    gap: 2px; font-size: 10px; margin-top: 6px;
+  }
+  .rm-header { color: var(--muted); text-align: center; padding: 2px 4px; }
+  .rm-label { color: var(--muted); padding: 2px 6px 2px 2px; display: flex; align-items: center; white-space: nowrap; }
+  .rm-cell {
+    padding: 4px 2px; text-align: center; border-radius: 3px;
+    font-weight: 600; font-size: 9px; cursor: default; transition: all 0.15s;
+  }
+  .rm-cell.low      { background: rgba(63,185,80,0.12);  color: var(--green);  }
+  .rm-cell.moderate { background: rgba(219,109,40,0.12); color: var(--orange); }
+  .rm-cell.high     { background: rgba(248,81,73,0.12);  color: var(--red);    }
+  .rm-cell.critical { background: rgba(248,81,73,0.18);  color: var(--red);    }
+  .rm-cell.active   { outline: 2px solid var(--accent); outline-offset: 1px; transform: scale(1.08); }
+
+  .deriv-arrow { color: var(--muted); font-size: 10px; margin: 0 2px; }
+
+  .big-risk {
+    text-align: center; padding: 14px; border-radius: 8px;
+    margin-top: 6px; border: 1px solid var(--border);
+  }
+  .big-risk .risk-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; }
+  .big-risk .risk-value { font-size: 28px; font-weight: 800; letter-spacing: 0.04em; }
+  .big-risk.low      { background: rgba(63,185,80,0.08); }
+  .big-risk.moderate { background: rgba(219,109,40,0.08); }
+  .big-risk.high     { background: rgba(248,81,73,0.08); }
+  .big-risk.critical { background: rgba(248,81,73,0.12); }
+  .big-risk.low .risk-value      { color: var(--green); }
+  .big-risk.moderate .risk-value { color: var(--orange); }
+  .big-risk.high .risk-value     { color: var(--red); }
+  .big-risk.critical .risk-value { color: var(--red); }
+
+  /* Status bar */
+  .status-bar {
+    padding: 5px 20px; font-size: 11px; color: var(--muted);
+    background: var(--surface); border-top: 1px solid var(--border);
+    display: flex; gap: 16px; flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>SecureClaw <span>Classification Matrix</span></h1>
+  <div class="header-nav">
+    <a href="graph.html">Agent Graph</a>
+    <a href="log-viewer.html">Session Logs</a>
+  </div>
+</div>
+
+<div class="page">
+
+  <!-- Left: master matrix table -->
+  <div class="matrix-panel">
+    <div class="matrix-panel-header">
+      <div>
+        <h2>TaintMatrix &amp; SensitivityMatrix</h2>
+        <p>Source-of-truth classification for every tool result and input trigger. Selected rows reflect the current agent profile.</p>
+      </div>
+    </div>
+    <div class="matrix-scroll">
+      <table class="master" id="master-table">
+        <thead>
+          <tr>
+            <th style="width:180px">Source</th>
+            <th>Type</th>
+            <th>Taint <span style="font-weight:400;opacity:0.6">(integrity)</span></th>
+            <th>Sensitivity <span style="font-weight:400;opacity:0.6">(confidentiality)</span></th>
+            <th>Capability <span style="font-weight:400;opacity:0.6">(blast radius)</span></th>
+          </tr>
+        </thead>
+        <tbody id="matrix-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Right: selector + profile -->
+  <div class="selector-panel">
+
+    <!-- Trigger -->
+    <div class="selector-section">
+      <h3>Input Trigger</h3>
+      <div class="trigger-grid" id="trigger-grid"></div>
+    </div>
+
+    <!-- Presets -->
+    <div class="selector-section">
+      <h3>Quick Presets</h3>
+      <div class="presets" id="presets"></div>
+    </div>
+
+    <!-- Tool selector -->
+    <div class="selector-section" style="flex-shrink:0">
+      <h3>Tools</h3>
+      <div class="tool-list-controls">
+        <button onclick="selectAllTools()">Select all</button>
+        <button onclick="clearTools()">Clear</button>
+      </div>
+      <div class="tool-list-scroll" id="tool-list"></div>
+    </div>
+
+    <!-- Profile outcome -->
+    <div class="selector-section" style="border-bottom:none;flex-shrink:0">
+      <h3>Agent Profile</h3>
+    </div>
+    <div class="profile-panel" id="profile-panel">
+      <div class="profile-empty">Select tools above to compute an agent profile.</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="status-bar">
+  <span>Source of truth: <code>SecureClaw.TaintMatrix</code> · <code>SecureClaw.SensitivityMatrix</code> · <code>SecureClaw.ToolRegistry</code></span>
+  <span style="margin-left:auto;display:flex;align-items:center;gap:6px">
+    Gateway:
+    <input id="gateway-url" type="text" value="http://localhost:4000"
+      style="background:var(--bg);border:1px solid var(--border);color:var(--text);font-size:11px;padding:2px 6px;border-radius:3px;width:180px">
+    <button onclick="reloadMatrix()" style="font-size:10px;padding:2px 8px;border-radius:3px;border:1px solid var(--border);background:var(--bg);color:var(--muted);cursor:pointer">Reload</button>
+  </span>
+</div>
+
+<script>
+// ── Data (loaded from /api/matrix) ──
+let TOOLS = [];
+let TOOL_BY_KEY = {};
+let TOOL_GROUP_ORDER = [];
+let TRIGGER_TAINT = {};
+let TRIGGER_SENSITIVITY = {};
+
+const PRESETS = [
+  { label: "Read-only",       trigger: "cron",                 tools: ["Read/controlled", "Grep", "Glob"] },
+  { label: "Web research",    trigger: "cron",                 tools: ["WebFetch", "WebSearch", "Read/controlled", "Write"] },
+  { label: "Code exec",       trigger: "cron",                 tools: ["Bash/isolated", "Read/controlled", "Write", "Edit"] },
+  { label: "Email agent",     trigger: "connector_unverified", tools: ["SendEmail", "MoveEmail", "CreateFolder", "Read/controlled", "Write"] },
+  { label: "Webhook handler", trigger: "webhook",              tools: ["WebFetch", "Bash/network", "Read/external", "Write"] },
+  { label: "Full agent",      trigger: "webhook",              tools: null },
+];
+
+// ── State ──
+let selectedTrigger = "cron";
+let selectedTools = new Set(["Read/controlled", "Grep", "Glob"]);
+
+// ── Helpers ──
+const RANK = { low: 0, medium: 1, high: 2 };
+
+function higher(a, b) { return RANK[a] >= RANK[b] ? a : b; }
+
+function badge(level, text) {
+  const label = text || level;
+  return `<span class="badge ${level}">${label}</span>`;
+}
+
+function miniBadge(prefix, level) {
+  return `<span class="mini-badge ${prefix} ${level}">${prefix}:${level[0].toUpperCase()}</span>`;
+}
+
+function toolLabel(tool) {
+  return tool.display + (tool.variant ? ` (${tool.variant})` : '');
+}
+
+function computeProfile() {
+  const keys = [...selectedTools];
+  const trigger = selectedTrigger;
+
+  const triggerTaint       = TRIGGER_TAINT[trigger]?.level || "low";
+  const triggerSensitivity = TRIGGER_SENSITIVITY[trigger]  || "low";
+
+  let maxToolTaint = "low", maxToolSensitivity = "low", maxToolCapability = "low";
+  const taintContrib = [], sensitivityContrib = [], capabilityContrib = [];
+
+  // Check if Bash is selected — needed for network-based capability promotion
+  const hasBash = keys.some(k => k === 'Bash');
+  // Note: we don't know the agent's network policy from the matrix page, so
+  // we show Bash as medium here. The graph page shows the actual inferred value.
+
+  for (const key of keys) {
+    const tool = TOOL_BY_KEY[key];
+    if (!tool) continue;
+    const { taint, sensitivity, capability } = tool;
+    if (RANK[taint]       > RANK[maxToolTaint])       maxToolTaint       = taint;
+    if (RANK[sensitivity] > RANK[maxToolSensitivity]) maxToolSensitivity = sensitivity;
+    if (RANK[capability]  > RANK[maxToolCapability])  maxToolCapability  = capability;
+    if (RANK[taint]       > 0) taintContrib.push(toolLabel(tool));
+    if (RANK[sensitivity] > 0) sensitivityContrib.push(tool.display);
+    if (RANK[capability]  > 0) capabilityContrib.push(tool.display);
+  }
+
+  const worstTaint       = higher(triggerTaint, maxToolTaint);
+  const worstSensitivity = higher(triggerSensitivity, maxToolSensitivity);
+  const worstCapability  = maxToolCapability;
+
+  // Step 1: 2D baseline
+  const riskMatrix = {
+    "low,low": "low",      "low,medium": "low",       "low,high": "moderate",
+    "medium,low": "low",   "medium,medium": "moderate","medium,high": "high",
+    "high,low": "moderate","high,medium": "high",      "high,high": "critical",
+  };
+  const baseline = riskMatrix[`${worstTaint},${worstSensitivity}`] || "low";
+
+  // Step 2: modulate by capability
+  const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
+  let effectiveRisk = baseline;
+  if (worstCapability === 'low') {
+    effectiveRisk = RISK_LEVELS[Math.max(0, RISK_LEVELS.indexOf(baseline) - 1)];
+  } else if (worstCapability === 'high') {
+    effectiveRisk = RISK_LEVELS[Math.min(3, RISK_LEVELS.indexOf(baseline) + 1)];
+  }
+
+  return {
+    triggerTaint, triggerSensitivity,
+    maxToolTaint, maxToolSensitivity, taintContrib, sensitivityContrib,
+    worstTaint, worstSensitivity,
+    worstCapability, maxToolCapability, capabilityContrib,
+    baseline, effectiveRisk,
+  };
+}
+
+// ── Render: master table ──
+
+function renderTable() {
+  const tbody = document.getElementById('matrix-tbody');
+  let html = '';
+
+  html += `<tr class="section-header"><td colspan="5">Tools (${TOOLS.length} entries)</td></tr>`;
+  for (const groupLabel of TOOL_GROUP_ORDER) {
+    const groupTools = TOOLS.filter(t => t.group === groupLabel);
+    for (const tool of groupTools) {
+      const sel = selectedTools.has(tool.key) ? 'selected' : '';
+      const variantHtml = tool.variant ? `<div class="note">${tool.variant}</div>` : '';
+      const noteHtml    = tool.note    ? `<div class="note">${tool.note}</div>`    : '';
+      html += `
+        <tr class="${sel}" onclick="toggleTool('${tool.key}')">
+          <td class="name">
+            <div class="source-name">${tool.display}</div>
+            ${variantHtml}${noteHtml}
+          </td>
+          <td class="col-type">tool · ${groupLabel.split('/')[0].trim().toLowerCase()}</td>
+          <td>${badge(tool.taint)}</td>
+          <td>${badge(tool.sensitivity)}</td>
+          <td>${badge(tool.capability)}</td>
+        </tr>`;
+    }
+  }
+
+  html += `<tr class="section-header"><td colspan="5">Triggers / Input Sources (${Object.keys(TRIGGER_TAINT).length})</td></tr>`;
+  for (const [trigger, taint] of Object.entries(TRIGGER_TAINT)) {
+    const sensitivity = TRIGGER_SENSITIVITY[trigger];
+    const sel = selectedTrigger === trigger ? 'selected' : '';
+    const noteHtml = taint.note ? `<div class="note">${taint.note}</div>` : '';
+    html += `
+      <tr class="${sel}" onclick="selectTrigger('${trigger}')">
+        <td class="name">
+          <div class="source-name">:${trigger}</div>
+          ${noteHtml}
+        </td>
+        <td class="col-type">trigger</td>
+        <td>${badge(taint.level)}</td>
+        <td>${badge(sensitivity)}</td>
+        <td><span class="badge na">n/a</span></td>
+      </tr>`;
+  }
+
+  tbody.innerHTML = html;
+}
+
+// ── Render: trigger selector ──
+
+function renderTriggerGrid() {
+  const grid = document.getElementById('trigger-grid');
+  let html = '';
+  for (const [trigger, taint] of Object.entries(TRIGGER_TAINT)) {
+    const sel = selectedTrigger === trigger ? 'selected' : '';
+    html += `
+      <label class="trigger-option ${sel}" onclick="selectTrigger('${trigger}')">
+        <input type="radio" name="trigger" value="${trigger}" ${sel ? 'checked' : ''}>
+        <div><div class="trigger-name">:${trigger}</div></div>
+        <span class="badge ${taint.level}" style="margin-left:auto">${taint.level[0].toUpperCase()}</span>
+      </label>`;
+  }
+  grid.innerHTML = html;
+}
+
+// ── Render: tool list ──
+
+function renderToolList() {
+  const list = document.getElementById('tool-list');
+  let html = '';
+  for (const groupLabel of TOOL_GROUP_ORDER) {
+    const groupTools = TOOLS.filter(t => t.group === groupLabel);
+    html += `<div class="tool-group-label">${groupLabel}</div>`;
+    for (const tool of groupTools) {
+      const checked = selectedTools.has(tool.key) ? 'checked' : '';
+      const variantSpan = tool.variant
+        ? `<span style="color:var(--muted);font-size:10px;margin-left:3px">${tool.variant}</span>`
+        : '';
+      html += `
+        <label class="tool-row">
+          <input type="checkbox" ${checked} onclick="toggleTool('${tool.key}')">
+          <span class="tool-name">${tool.display}${variantSpan}</span>
+          <div class="tool-badges">
+            ${miniBadge('T', tool.taint)}
+            ${miniBadge('S', tool.sensitivity)}
+            ${miniBadge('C', tool.capability)}
+          </div>
+        </label>`;
+    }
+  }
+  list.innerHTML = html;
+}
+
+// ── Render: presets ──
+
+function renderPresets() {
+  const el = document.getElementById('presets');
+  let html = '';
+  for (const p of PRESETS) {
+    html += `<button class="preset-btn" onclick="applyPreset('${p.label}')">${p.label}</button>`;
+  }
+  el.innerHTML = html;
+}
+
+// ── Render: profile ──
+
+function renderProfile() {
+  const panel = document.getElementById('profile-panel');
+  if (selectedTools.size === 0) {
+    panel.innerHTML = '<div class="profile-empty">Select at least one tool to compute an agent profile.</div>';
+    return;
+  }
+
+  const p = computeProfile();
+
+  const matrixRows = [
+    { label: "Low taint",  input: "low" },
+    { label: "Med taint",  input: "medium" },
+    { label: "High taint", input: "high" },
+  ];
+  const matrixCols = ["low", "medium", "high"];
+  const baseRiskValues = {
+    "low,low": "low",       "low,medium": "low",       "low,high": "moderate",
+    "medium,low": "low",    "medium,medium": "moderate","medium,high": "high",
+    "high,low": "moderate", "high,medium": "high",      "high,high": "critical",
+  };
+
+  // Compute the modulated matrix for the current capability level
+  const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
+  function modulateRisk(baseRisk, cap) {
+    const idx = RISK_LEVELS.indexOf(baseRisk);
+    if (cap === 'low') return RISK_LEVELS[Math.max(0, idx - 1)];
+    if (cap === 'high') return RISK_LEVELS[Math.min(3, idx + 1)];
+    return baseRisk;
+  }
+
+  let matrixHtml = '<div class="risk-matrix">';
+  matrixHtml += '<div class="rm-header"></div>';
+  for (const col of matrixCols) {
+    matrixHtml += `<div class="rm-header">${col[0].toUpperCase()} sens</div>`;
+  }
+  for (const row of matrixRows) {
+    matrixHtml += `<div class="rm-label">${row.label}</div>`;
+    for (const col of matrixCols) {
+      const baseVal = baseRiskValues[`${row.input},${col}`];
+      const val = modulateRisk(baseVal, p.worstCapability);
+      const isActive = row.input === p.worstTaint && col === p.worstSensitivity;
+      matrixHtml += `<div class="rm-cell ${val}${isActive ? ' active' : ''}">${val}</div>`;
+    }
+  }
+  matrixHtml += '</div>';
+
+  const taintSrcLabel = RANK[p.triggerTaint] >= RANK[p.maxToolTaint]
+    ? `:${selectedTrigger}` : (p.taintContrib.length ? p.taintContrib.join(', ') : '(none)');
+  const sensitivitySrcLabel = RANK[p.triggerSensitivity] >= RANK[p.maxToolSensitivity]
+    ? `:${selectedTrigger}` : (p.sensitivityContrib.length ? p.sensitivityContrib.join(', ') : '(none)');
+
+  const capModLabel = p.worstCapability === 'low' ? 'step down'
+    : p.worstCapability === 'high' ? 'step up' : 'no change';
+
+  panel.innerHTML = `
+    <div class="big-risk ${p.effectiveRisk}">
+      <div class="risk-label">Effective Risk</div>
+      <div class="risk-value">${p.effectiveRisk}</div>
+    </div>
+
+    <div class="profile-sub" style="margin-top:10px">
+      <h4>Taint (integrity)</h4>
+      <div class="profile-row">
+        <span class="profile-label">Trigger</span>
+        <span class="profile-value">${badge(p.triggerTaint)} <span style="color:var(--muted);font-size:10px">:${selectedTrigger}</span></span>
+      </div>
+      <div class="profile-row">
+        <span class="profile-label">Worst tool</span>
+        <span class="profile-value">${badge(p.maxToolTaint)} <span style="color:var(--muted);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.taintContrib.length ? p.taintContrib.join(', ') : '—'}</span></span>
+      </div>
+      <div class="profile-row" style="border-bottom:none">
+        <span class="profile-label">Combined</span>
+        <span class="profile-value">${badge(p.worstTaint)} <span style="color:var(--muted);font-size:10px">from ${taintSrcLabel}</span></span>
+      </div>
+    </div>
+
+    <div class="profile-sub">
+      <h4>Sensitivity (confidentiality)</h4>
+      <div class="profile-row">
+        <span class="profile-label">Trigger</span>
+        <span class="profile-value">${badge(p.triggerSensitivity)} <span style="color:var(--muted);font-size:10px">:${selectedTrigger}</span></span>
+      </div>
+      <div class="profile-row">
+        <span class="profile-label">Worst tool</span>
+        <span class="profile-value">${badge(p.maxToolSensitivity)} <span style="color:var(--muted);font-size:10px">${p.sensitivityContrib.length ? p.sensitivityContrib.join(', ') : '—'}</span></span>
+      </div>
+      <div class="profile-row" style="border-bottom:none">
+        <span class="profile-label">Combined</span>
+        <span class="profile-value">${badge(p.worstSensitivity)} <span style="color:var(--muted);font-size:10px">from ${sensitivitySrcLabel}</span></span>
+      </div>
+    </div>
+
+    <div class="profile-sub">
+      <h4>Capability (blast radius)</h4>
+      <div class="profile-row">
+        <span class="profile-label">Worst tool</span>
+        <span class="profile-value">${badge(p.maxToolCapability)} <span style="color:var(--muted);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.capabilityContrib.length ? p.capabilityContrib.join(', ') : '—'}</span></span>
+      </div>
+      <div class="profile-row" style="border-bottom:none">
+        <span class="profile-label">Modulation</span>
+        <span class="profile-value"><span style="color:var(--muted);font-size:10px">${capModLabel}</span></span>
+      </div>
+      <div style="font-size:9px;color:var(--muted);margin-top:4px">Bash + network = high. Network policy is not modeled here — see Agent Graph for actual inferred capability.</div>
+    </div>
+
+    <div class="profile-sub">
+      <h4>Risk matrix <span style="color:var(--accent);font-size:9px;font-weight:400">— ${p.worstCapability} capability, active cell highlighted</span></h4>
+      <div style="font-size:10px;color:var(--muted);margin-bottom:4px">effectiveRisk = modulate(riskMatrix[taint][sensitivity], capability)</div>
+      ${matrixHtml}
+    </div>
+  `;
+}
+
+// ── Interaction ──
+
+function toggleTool(key) {
+  if (selectedTools.has(key)) selectedTools.delete(key);
+  else selectedTools.add(key);
+  update();
+}
+
+function selectTrigger(trigger) {
+  selectedTrigger = trigger;
+  update();
+}
+
+function selectAllTools() {
+  selectedTools = new Set(TOOLS.map(t => t.key));
+  update();
+}
+
+function clearTools() {
+  selectedTools = new Set();
+  update();
+}
+
+function applyPreset(label) {
+  const preset = PRESETS.find(p => p.label === label);
+  if (!preset) return;
+  selectedTrigger = preset.trigger;
+  selectedTools = new Set(preset.tools === null ? TOOLS.map(t => t.key) : preset.tools);
+  update();
+}
+
+function update() {
+  renderTable();
+  renderTriggerGrid();
+  renderToolList();
+  renderProfile();
+}
+
+// ── Init ──
+
+function applyApiData(data) {
+  // Map API tools into the TOOLS structure
+  if (data.tools && Array.isArray(data.tools)) {
+    TOOLS = data.tools.map(t => ({
+      key: t.key || t.name,
+      display: t.display || t.name,
+      variant: t.variant || undefined,
+      note: t.note || undefined,
+      group: t.group || "Uncategorized",
+      taint: t.taint,
+      sensitivity: t.sensitivity,
+      capability: t.capability || 'low',
+    }));
+    TOOL_BY_KEY = Object.fromEntries(TOOLS.map(t => [t.key, t]));
+    // Derive group order from tools, preserving appearance order
+    const seen = new Set();
+    TOOL_GROUP_ORDER = [];
+    for (const t of TOOLS) {
+      if (!seen.has(t.group)) { seen.add(t.group); TOOL_GROUP_ORDER.push(t.group); }
+    }
+  }
+
+  // Map API triggers into TRIGGER_TAINT / TRIGGER_SENSITIVITY
+  if (data.triggers && Array.isArray(data.triggers)) {
+    TRIGGER_TAINT = {};
+    TRIGGER_SENSITIVITY = {};
+    for (const tr of data.triggers) {
+      TRIGGER_TAINT[tr.type] = { level: tr.taint, note: tr.note || "" };
+      TRIGGER_SENSITIVITY[tr.type] = tr.sensitivity;
+    }
+  }
+}
+
+// Show loading state, then fetch live data
+function gatewayUrl() {
+  const el = document.getElementById('gateway-url');
+  return (el ? el.value : 'http://localhost:4000').replace(/\/+$/, '');
+}
+
+function loadMatrix() {
+  const tbody = document.getElementById('matrix-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="padding:24px 16px;color:var(--muted);font-size:12px">Loading matrix data...</td></tr>';
+
+  fetch(gatewayUrl() + '/api/matrix')
+    .then(res => {
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return res.json();
+    })
+    .then(data => {
+      applyApiData(data);
+      if (!TRIGGER_TAINT[selectedTrigger]) {
+        selectedTrigger = Object.keys(TRIGGER_TAINT)[0] || "cron";
+      }
+      selectedTools = new Set([...selectedTools].filter(k => TOOL_BY_KEY[k]));
+      update();
+    })
+    .catch(err => {
+      tbody.innerHTML = `<tr><td colspan="5" style="padding:24px 16px;color:var(--red);font-size:12px">Failed to load matrix data from ${gatewayUrl()}/api/matrix: ${err.message}</td></tr>`;
+    });
+}
+
+function reloadMatrix() {
+  localStorage.setItem('gatewayUrl', gatewayUrl());
+  loadMatrix();
+}
+
+(function init() {
+  const saved = localStorage.getItem('gatewayUrl');
+  if (saved) document.getElementById('gateway-url').value = saved;
+  renderPresets();
+  loadMatrix();
+})();
+</script>
+</body>
+</html>

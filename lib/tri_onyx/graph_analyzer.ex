@@ -1,0 +1,621 @@
+defmodule TriOnyx.GraphAnalyzer do
+  @moduledoc """
+  Computes transitive risk propagation across agent topologies.
+
+  Builds a directed graph from agent filesystem overlaps (write->read edges)
+  and traces how information risk flows through agent chains. Used to compute
+  max_input_risk per agent and detect security policy violations.
+
+  Biba (integrity) checks use the **taint** axis.
+  Bell-LaPadula (confidentiality) checks use the **sensitivity** axis.
+
+  All functions are pure — no GenServer, no side effects.
+  """
+
+  alias TriOnyx.InformationClassifier
+  alias TriOnyx.RiskScorer
+
+  @type agent_analysis :: %{
+          max_input_taint: InformationClassifier.information_level(),
+          max_input_sensitivity: InformationClassifier.sensitivity_level(),
+          max_input_risk: InformationClassifier.information_level(),
+          capability_level: :low | :medium | :high,
+          incoming_edges: [%{from: String.t(), paths: [String.t()], risk_level: String.t()}],
+          risk_chain: [String.t()]
+        }
+
+  @doc """
+  Analyzes risk propagation across a set of agent definitions.
+
+  Takes a list of agent definitions and a risk manifest (map of path -> risk entry).
+  Builds write->read edges by finding filesystem path overlaps, adds messaging
+  edges from declared send_to/receive_from pairs, then traces transitive risk
+  propagation.
+
+  Returns `%{agent_name => agent_analysis}`.
+  """
+  @spec analyze([map()], map()) :: %{String.t() => agent_analysis()}
+  def analyze(definitions, risk_manifest) do
+    fs_edges = build_filesystem_edges(definitions, risk_manifest)
+    msg_edges = build_messaging_edges(definitions)
+    bctp_edges = build_bctp_edges(definitions)
+    edges = merge_edges(fs_edges, msg_edges) |> merge_edges(bctp_edges)
+
+    definitions
+    |> Enum.map(fn definition ->
+      incoming = Map.get(edges, definition.name, [])
+
+      # Compute max taint and sensitivity from incoming edges using manifest data
+      {max_taint, max_sensitivity} =
+        incoming
+        |> Enum.reduce({:low, :low}, fn edge, {t_acc, s_acc} ->
+          edge_taint = lookup_edge_taint(edge, risk_manifest)
+          edge_sensitivity = lookup_edge_sensitivity(edge, risk_manifest)
+          {InformationClassifier.higher_level(t_acc, edge_taint),
+           InformationClassifier.higher_level(s_acc, edge_sensitivity)}
+        end)
+
+      max_risk = InformationClassifier.higher_level(max_taint, max_sensitivity)
+      chain = trace_risk_chain(definition.name, edges, MapSet.new())
+      capability = RiskScorer.infer_capability(definition.tools, definition.network)
+
+      {definition.name,
+       %{
+         max_input_taint: max_taint,
+         max_input_sensitivity: max_sensitivity,
+         max_input_risk: max_risk,
+         capability_level: capability,
+         incoming_edges: incoming,
+         risk_chain: chain
+       }}
+    end)
+    |> Map.new()
+  end
+
+  @doc """
+  Detects Biba integrity violations using the **taint** axis.
+
+  A Biba violation is when a high-taint writer produces data consumed by a
+  low-taint reader. Untrusted data enters a trusted context.
+  """
+  @spec biba_violations(map(), [map()], map()) :: [map()]
+  def biba_violations(analysis, _definitions, taint_levels) do
+    analysis
+    |> Enum.flat_map(fn {reader_name, %{incoming_edges: edges}} ->
+      reader_taint = extract_taint(taint_levels, reader_name)
+
+      Enum.flat_map(edges, fn %{from: writer_name, risk_level: risk_level} ->
+        writer_taint = extract_taint(taint_levels, writer_name)
+
+        if level_rank(writer_taint) > level_rank(reader_taint) do
+          [
+            %{
+              "reader" => reader_name,
+              "writer" => writer_name,
+              "risk_level" => risk_level,
+              "description" =>
+                "Integrity violation: #{writer_name} (taint: #{writer_taint}) writes data " <>
+                  "read by #{reader_name} (taint: #{reader_taint}). Untrusted data enters trusted context."
+            }
+          ]
+        else
+          []
+        end
+      end)
+    end)
+  end
+
+  @doc """
+  Detects Bell-LaPadula confidentiality violations using the **sensitivity** axis.
+
+  A BLP violation is when a high-sensitivity writer writes to paths readable by a
+  lower-sensitivity, network-capable agent. Sensitive data could be exfiltrated.
+  """
+  @spec bell_lapadula_violations([map()], map(), map()) :: [map()]
+  def bell_lapadula_violations(definitions, risk_manifest, sensitivity_levels) do
+    fs_violations = bell_lapadula_fs_violations(definitions, risk_manifest, sensitivity_levels)
+    msg_violations = bell_lapadula_messaging_violations(definitions, sensitivity_levels)
+    fs_violations ++ msg_violations
+  end
+
+  @doc """
+  Traces risk through chains accounting for sanitization.
+
+  Walks the edge graph from a starting agent. At each hop, the risk level
+  propagates (or steps down if sanitization is configured). Returns the
+  final propagated risk level.
+  """
+  @spec propagate_risk(String.t(), map()) :: InformationClassifier.information_level()
+  def propagate_risk(agent_name, edges) do
+    do_propagate(agent_name, edges, MapSet.new())
+  end
+
+  @doc """
+  DFS through edges to find the chain of agents contributing risk to a target.
+
+  Prevents cycles with a visited set. Returns list of agent names in the chain.
+  """
+  @spec trace_risk_chain(String.t(), map(), MapSet.t()) :: [String.t()]
+  def trace_risk_chain(agent_name, edges, visited) do
+    if MapSet.member?(visited, agent_name) do
+      []
+    else
+      visited = MapSet.put(visited, agent_name)
+      incoming = Map.get(edges, agent_name, [])
+
+      Enum.flat_map(incoming, fn %{from: source} ->
+        upstream = trace_risk_chain(source, edges, visited)
+        upstream ++ [source]
+      end)
+    end
+  end
+
+  @doc """
+  Infers worst-case taint level for an agent based on its data sources.
+
+  Only factors that introduce external/untrusted data affect taint:
+  network access and tools that fetch external content.
+  """
+  @spec worst_case_taint(map()) :: InformationClassifier.information_level()
+  def worst_case_taint(definition), do: worst_case_taint(definition, %{})
+
+  @doc """
+  Infers worst-case taint with peer resolution.
+
+  When `all_definitions` is provided (name → definition map), BCTP channels
+  are resolved: a controller receiving BCTP responses from a peer inherits
+  `step_down(peer_taint)`. Without peer context, BCTP channels are ignored.
+
+  Taint sources (input quality only, never tools):
+  - Network access or WebFetch/WebSearch → `:high`
+  - Free-text messaging peers (receive_from) → `:medium`
+  - BCTP controller channel → `step_down(peer's worst-case taint)`
+  - No external inputs → `:low`
+  """
+  @spec worst_case_taint(map(), map()) :: InformationClassifier.information_level()
+  def worst_case_taint(definition, all_definitions) do
+    has_external_input =
+      Enum.any?(definition.tools, fn tool ->
+        tool in ["WebFetch", "WebSearch"]
+      end)
+
+    has_messaging_peers = definition.receive_from != []
+
+    # BCTP taint: for each controller channel, resolve peer's worst-case
+    # taint and step it down by one level.
+    bctp_taint =
+      definition.bctp_channels
+      |> Enum.filter(fn ch -> ch.role == :controller end)
+      |> Enum.map(fn ch ->
+        case Map.get(all_definitions, ch.peer) do
+          nil -> :low
+          peer_def ->
+            # Compute peer taint without all_definitions to avoid cycles
+            peer_taint = worst_case_taint(peer_def)
+            InformationClassifier.step_down(peer_taint)
+        end
+      end)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
+    base =
+      cond do
+        has_network?(definition.network) -> :high
+        has_external_input -> :high
+        has_messaging_peers -> :medium
+        true -> :low
+      end
+
+    result = InformationClassifier.higher_level(base, bctp_taint)
+
+    # Factor in base_taint from agent definition as a floor
+    base_taint_floor = Map.get(definition, :base_taint, :low)
+    InformationClassifier.higher_level(result, base_taint_floor)
+  end
+
+  @doc """
+  Infers worst-case sensitivity level for an agent based on its tool metadata.
+
+  Currently returns `:low` for all built-in tools since the gateway doesn't
+  attach credentials yet.
+  """
+  @spec worst_case_sensitivity(map()) :: InformationClassifier.sensitivity_level()
+  def worst_case_sensitivity(definition) do
+    definition.tools
+    |> Enum.map(fn tool_name ->
+      meta = TriOnyx.ToolRegistry.tool_meta(tool_name)
+      InformationClassifier.classify_tool_sensitivity(tool_name, meta)
+    end)
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  end
+
+  @doc """
+  Infers worst-case information level. Returns `max(taint, sensitivity)`.
+
+  Kept for backward compat.
+  """
+  @spec worst_case_level(map()) :: InformationClassifier.information_level()
+  def worst_case_level(definition) do
+    InformationClassifier.higher_level(
+      worst_case_taint(definition),
+      worst_case_sensitivity(definition)
+    )
+  end
+
+  # --- Private Functions ---
+
+  # Extract taint from a levels map that may contain either the new two-axis
+  # format or the legacy single-axis format.
+  @spec extract_taint(map(), String.t()) :: InformationClassifier.information_level()
+  defp extract_taint(levels, agent_name) do
+    case Map.get(levels, agent_name) do
+      %{taint: taint} -> taint
+      level when level in [:low, :medium, :high] -> level
+      _ -> :low
+    end
+  end
+
+  @spec extract_sensitivity(map(), String.t()) :: InformationClassifier.sensitivity_level()
+  defp extract_sensitivity(levels, agent_name) do
+    case Map.get(levels, agent_name) do
+      %{sensitivity: sensitivity} -> sensitivity
+      # Legacy single-axis: treat as sensitivity for BLP checks
+      level when level in [:low, :medium, :high] -> level
+      _ -> :low
+    end
+  end
+
+  # Look up taint level from an edge's paths in the manifest
+  @spec lookup_edge_taint(map(), map()) :: InformationClassifier.information_level()
+  defp lookup_edge_taint(%{paths: paths}, risk_manifest) do
+    paths
+    |> Enum.map(fn path -> lookup_manifest_taint(path, risk_manifest) end)
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  end
+
+  @spec lookup_edge_sensitivity(map(), map()) :: InformationClassifier.sensitivity_level()
+  defp lookup_edge_sensitivity(%{paths: paths}, risk_manifest) do
+    paths
+    |> Enum.map(fn path -> lookup_manifest_sensitivity(path, risk_manifest) end)
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  end
+
+  @spec build_filesystem_edges([map()], map()) :: %{String.t() => [map()]}
+  defp build_filesystem_edges(definitions, risk_manifest) do
+    for writer <- definitions,
+        reader <- definitions,
+        writer.name != reader.name,
+        writer.fs_write != [],
+        reader.fs_read != [],
+        reduce: %{} do
+      acc ->
+        overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read, risk_manifest)
+
+        if overlapping != [] do
+          paths = Enum.map(overlapping, fn {path, _} -> path end)
+
+          max_risk =
+            overlapping
+            |> Enum.map(fn {_, risk} -> risk end)
+            |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
+          edge = %{
+            from: writer.name,
+            paths: paths,
+            risk_level: to_string(max_risk),
+            edge_type: :filesystem
+          }
+
+          Map.update(acc, reader.name, [edge], &[edge | &1])
+        else
+          acc
+        end
+    end
+  end
+
+  @spec build_messaging_edges([map()]) :: %{String.t() => [map()]}
+  defp build_messaging_edges(definitions) do
+    def_map = Map.new(definitions, &{&1.name, &1})
+
+    for sender <- definitions,
+        target_name <- Map.get(sender, :send_to, []),
+        receiver = Map.get(def_map, target_name),
+        receiver != nil,
+        sender.name in Map.get(receiver, :receive_from, []),
+        reduce: %{} do
+      acc ->
+        edge = %{
+          from: sender.name,
+          paths: [],
+          risk_level: "low",
+          edge_type: :messaging
+        }
+
+        Map.update(acc, target_name, [edge], &[edge | &1])
+    end
+  end
+
+  # Builds directed edges from BCTP channel declarations.
+  #
+  # A BCTP channel between a controller and a reader creates an edge from
+  # the reader to the controller (information flows from reader to controller
+  # in the BCTP model — the reader extracts data, the controller consumes it).
+  @spec build_bctp_edges([map()]) :: %{String.t() => [map()]}
+  defp build_bctp_edges(definitions) do
+    def_map = Map.new(definitions, &{&1.name, &1})
+
+    for definition <- definitions,
+        channel <- Map.get(definition, :bctp_channels, []),
+        channel.role == :controller,
+        Map.has_key?(def_map, channel.peer),
+        reduce: %{} do
+      acc ->
+        edge = %{
+          from: channel.peer,
+          paths: [],
+          risk_level: bctp_risk_level(channel.max_category),
+          edge_type: :bctp
+        }
+
+        Map.update(acc, definition.name, [edge], &[edge | &1])
+    end
+  end
+
+  defp bctp_risk_level(1), do: "low"
+  defp bctp_risk_level(2), do: "medium"
+  defp bctp_risk_level(3), do: "high"
+
+  @doc """
+  Validates BCTP role symmetry across agent definitions.
+
+  If agent A declares `role: controller` toward B, then B should declare
+  `role: reader` toward A. Returns a list of warning maps for mismatches.
+  """
+  @spec validate_bctp_roles([map()]) :: [map()]
+  def validate_bctp_roles(definitions) do
+    def_map = Map.new(definitions, &{&1.name, &1})
+
+    for definition <- definitions,
+        channel <- Map.get(definition, :bctp_channels, []),
+        channel.role == :controller,
+        reduce: [] do
+      acc ->
+        peer_def = Map.get(def_map, channel.peer)
+
+        if peer_def == nil do
+          [
+            %{
+              agent: definition.name,
+              peer: channel.peer,
+              warning: "BCTP channel declares peer '#{channel.peer}' which does not exist"
+            }
+            | acc
+          ]
+        else
+          peer_channels = Map.get(peer_def, :bctp_channels, [])
+
+          has_reader_decl =
+            Enum.any?(peer_channels, fn ch ->
+              ch.peer == definition.name and ch.role == :reader
+            end)
+
+          if has_reader_decl do
+            acc
+          else
+            [
+              %{
+                agent: definition.name,
+                peer: channel.peer,
+                warning:
+                  "Agent '#{definition.name}' declares controller role toward '#{channel.peer}', " <>
+                    "but '#{channel.peer}' does not declare reader role toward '#{definition.name}'"
+              }
+              | acc
+            ]
+          end
+        end
+    end
+  end
+
+  @spec merge_edges(map(), map()) :: map()
+  defp merge_edges(edges_a, edges_b) do
+    Map.merge(edges_a, edges_b, fn _key, list_a, list_b -> list_a ++ list_b end)
+  end
+
+  defp bell_lapadula_fs_violations(definitions, risk_manifest, sensitivity_levels) do
+    network_readers =
+      Enum.filter(definitions, fn def ->
+        has_network?(def.network)
+      end)
+
+    writers =
+      Enum.filter(definitions, fn def ->
+        def.fs_write != []
+      end)
+
+    Enum.flat_map(writers, fn writer ->
+      writer_sensitivity = extract_sensitivity(sensitivity_levels, writer.name)
+
+      Enum.flat_map(network_readers, fn reader ->
+        reader_sensitivity = extract_sensitivity(sensitivity_levels, reader.name)
+
+        if writer.name != reader.name and level_rank(writer_sensitivity) > level_rank(reader_sensitivity) do
+          overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read, risk_manifest)
+
+          if overlapping != [] do
+            [
+              %{
+                "writer" => writer.name,
+                "reader" => reader.name,
+                "paths" => Enum.map(overlapping, fn {path, _} -> path end),
+                "edge_type" => "filesystem",
+                "description" =>
+                  "Sensitivity violation: #{writer.name} (sensitivity: #{writer_sensitivity}) writes to paths " <>
+                    "readable by #{reader.name} (sensitivity: #{reader_sensitivity}, network-capable). " <>
+                    "Data could be exfiltrated."
+              }
+            ]
+          else
+            []
+          end
+        else
+          []
+        end
+      end)
+    end)
+  end
+
+  defp bell_lapadula_messaging_violations(definitions, sensitivity_levels) do
+    def_map = Map.new(definitions, &{&1.name, &1})
+
+    network_agents =
+      definitions
+      |> Enum.filter(&has_network?(&1.network))
+      |> MapSet.new(& &1.name)
+
+    for sender <- definitions,
+        target_name <- Map.get(sender, :send_to, []),
+        receiver = Map.get(def_map, target_name),
+        receiver != nil,
+        sender.name in Map.get(receiver, :receive_from, []),
+        sender_sensitivity = extract_sensitivity(sensitivity_levels, sender.name),
+        receiver_sensitivity = extract_sensitivity(sensitivity_levels, target_name),
+        level_rank(sender_sensitivity) > level_rank(receiver_sensitivity),
+        MapSet.member?(network_agents, target_name) do
+      %{
+        "writer" => sender.name,
+        "reader" => target_name,
+        "paths" => [],
+        "edge_type" => "messaging",
+        "description" =>
+          "Sensitivity violation: #{sender.name} (sensitivity: #{sender_sensitivity}) can message " <>
+            "#{target_name} (sensitivity: #{receiver_sensitivity}, network-capable) via declared messaging link. " <>
+            "Data could be exfiltrated."
+      }
+    end
+  end
+
+  @spec find_overlapping_paths([String.t()], [String.t()], map()) ::
+          [{String.t(), InformationClassifier.information_level()}]
+  defp find_overlapping_paths(write_patterns, read_patterns, risk_manifest) do
+    for write_pat <- write_patterns,
+        read_pat <- read_patterns,
+        paths_overlap?(write_pat, read_pat),
+        reduce: [] do
+      acc ->
+        # Determine the canonical overlap pattern for manifest lookup
+        overlap_pat = shorter_pattern(write_pat, read_pat)
+        risk = lookup_manifest_risk(overlap_pat, risk_manifest)
+        [{overlap_pat, risk} | acc]
+    end
+    |> Enum.uniq_by(fn {path, _} -> path end)
+  end
+
+  # Two glob patterns overlap if one is a prefix of the other (stripping glob
+  # suffixes), or they share a common directory prefix. This is intentionally
+  # conservative — it flags potential overlaps for human review.
+  @spec paths_overlap?(String.t(), String.t()) :: boolean()
+  defp paths_overlap?(pattern_a, pattern_b) do
+    dir_a = strip_glob(pattern_a)
+    dir_b = strip_glob(pattern_b)
+
+    String.starts_with?(dir_a, dir_b) or
+      String.starts_with?(dir_b, dir_a)
+  end
+
+  @spec strip_glob(String.t()) :: String.t()
+  defp strip_glob(pattern) do
+    pattern
+    |> String.replace(~r/\*\*.*$/, "")
+    |> String.replace(~r/\*.*$/, "")
+    |> String.trim_trailing("/")
+  end
+
+  @spec shorter_pattern(String.t(), String.t()) :: String.t()
+  defp shorter_pattern(a, b) do
+    if String.length(a) <= String.length(b), do: a, else: b
+  end
+
+  @spec lookup_manifest_risk(String.t(), map()) :: InformationClassifier.information_level()
+  defp lookup_manifest_risk(path, risk_manifest) do
+    # Look for exact match first, then prefix matches
+    case Map.get(risk_manifest, path) do
+      %{"risk_level" => level} ->
+        safe_to_level(level)
+
+      nil ->
+        # Check if any manifest path is a prefix of or shares prefix with this path
+        risk_manifest
+        |> Enum.filter(fn {manifest_path, _} ->
+          paths_overlap?(path, manifest_path)
+        end)
+        |> Enum.map(fn {_, entry} ->
+          level = Map.get(entry, "risk_level", "low")
+          safe_to_level(level)
+        end)
+        |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+    end
+  end
+
+  @spec lookup_manifest_taint(String.t(), map()) :: InformationClassifier.information_level()
+  defp lookup_manifest_taint(path, risk_manifest) do
+    case Map.get(risk_manifest, path) do
+      %{"taint_level" => level} -> safe_to_level(level)
+      %{"risk_level" => level} -> safe_to_level(level)
+      nil -> lookup_prefix_level(path, risk_manifest, "taint_level")
+    end
+  end
+
+  @spec lookup_manifest_sensitivity(String.t(), map()) :: InformationClassifier.sensitivity_level()
+  defp lookup_manifest_sensitivity(path, risk_manifest) do
+    case Map.get(risk_manifest, path) do
+      %{"sensitivity_level" => level} -> safe_to_level(level)
+      _ -> lookup_prefix_level(path, risk_manifest, "sensitivity_level")
+    end
+  end
+
+  @spec lookup_prefix_level(String.t(), map(), String.t()) :: InformationClassifier.information_level()
+  defp lookup_prefix_level(path, risk_manifest, field) do
+    risk_manifest
+    |> Enum.filter(fn {manifest_path, _} -> paths_overlap?(path, manifest_path) end)
+    |> Enum.map(fn {_, entry} -> safe_to_level(Map.get(entry, field, "low")) end)
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  end
+
+  @spec safe_to_level(String.t() | atom()) :: InformationClassifier.information_level()
+  defp safe_to_level(:low), do: :low
+  defp safe_to_level(:medium), do: :medium
+  defp safe_to_level(:high), do: :high
+  defp safe_to_level("low"), do: :low
+  defp safe_to_level("medium"), do: :medium
+  defp safe_to_level("high"), do: :high
+  defp safe_to_level(_), do: :low
+
+  @spec has_network?(atom() | [String.t()]) :: boolean()
+  defp has_network?(:none), do: false
+  defp has_network?(:outbound), do: true
+  defp has_network?(hosts) when is_list(hosts) and hosts != [], do: true
+  defp has_network?(_), do: false
+
+  @spec level_rank(InformationClassifier.information_level()) :: non_neg_integer()
+  defp level_rank(:low), do: 0
+  defp level_rank(:medium), do: 1
+  defp level_rank(:high), do: 2
+
+  @spec do_propagate(String.t(), map(), MapSet.t()) :: InformationClassifier.information_level()
+  defp do_propagate(agent_name, edges, visited) do
+    if MapSet.member?(visited, agent_name) do
+      :low
+    else
+      visited = MapSet.put(visited, agent_name)
+      incoming = Map.get(edges, agent_name, [])
+
+      incoming
+      |> Enum.map(fn %{from: source, risk_level: risk_level} ->
+        upstream_risk = do_propagate(source, edges, visited)
+        edge_risk = safe_to_level(risk_level)
+        InformationClassifier.higher_level(upstream_risk, edge_risk)
+      end)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+    end
+  end
+end

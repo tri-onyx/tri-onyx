@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SecureClaw — Session Logs</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --orange: #db6d28;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    background: var(--bg); color: var(--text);
+    display: flex; height: 100vh;
+  }
+
+  /* Sidebar */
+  .sidebar {
+    width: 260px; min-width: 260px;
+    background: var(--surface); border-right: 1px solid var(--border);
+    display: flex; flex-direction: column;
+  }
+  .sidebar-header {
+    padding: 16px; border-bottom: 1px solid var(--border);
+    font-size: 14px; font-weight: 600;
+  }
+  .sidebar-header span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .nav-list { flex: 1; overflow-y: auto; padding: 8px; }
+  .nav-item {
+    padding: 8px 12px; border-radius: 6px; cursor: pointer;
+    margin-bottom: 2px; border: 1px solid transparent;
+    font-size: 13px;
+  }
+  .nav-item:hover { background: rgba(88,166,255,0.05); }
+  .nav-item.active { background: rgba(88,166,255,0.1); border-color: var(--accent); }
+  .nav-item .meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .back-btn {
+    padding: 8px 12px; font-size: 12px; color: var(--accent);
+    cursor: pointer; border-bottom: 1px solid var(--border);
+  }
+  .back-btn:hover { text-decoration: underline; }
+
+  .settings-bar {
+    padding: 8px 16px; border-top: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px; font-size: 12px;
+  }
+  .settings-bar label { color: var(--muted); }
+  .settings-bar input[type="text"] {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 4px;
+    font-size: 12px; width: 180px;
+  }
+
+  /* Main content */
+  .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+  .toolbar {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface); flex-wrap: wrap;
+  }
+  .toolbar .title { font-size: 15px; font-weight: 600; flex: 1; min-width: 200px; }
+
+  /* Filter bar */
+  .filter-bar {
+    padding: 8px 16px; border-bottom: 1px solid var(--border);
+    background: var(--surface); display: flex; align-items: center;
+    gap: 12px; flex-wrap: wrap;
+  }
+  .filter-bar label {
+    font-size: 11px; color: var(--muted); cursor: pointer;
+    display: flex; align-items: center; gap: 3px;
+  }
+  .filter-bar input[type="checkbox"] { accent-color: var(--accent); }
+  .search-input {
+    background: var(--bg); border: 1px solid var(--border);
+    color: var(--text); padding: 4px 8px; border-radius: 4px;
+    font-size: 12px; width: 200px; font-family: inherit;
+  }
+  .search-input:focus { outline: none; border-color: var(--accent); }
+  .search-input::placeholder { color: var(--muted); }
+
+  /* Event log */
+  .event-log {
+    flex: 1; overflow-y: auto; padding: 16px;
+    font-family: 'SF Mono', 'Fira Code', monospace; font-size: 13px;
+    line-height: 1.6;
+  }
+  .event {
+    padding: 4px 0; border-bottom: 1px solid rgba(48,54,61,0.4);
+  }
+  .event.hidden { display: none; }
+  .event-time { color: var(--muted); font-size: 11px; margin-right: 8px; }
+  .event-type {
+    display: inline-block; font-size: 10px; font-weight: 600;
+    padding: 1px 6px; border-radius: 3px; margin-right: 6px;
+    text-transform: uppercase;
+  }
+  .event-type.session_start { background: rgba(63,185,80,0.2); color: var(--green); }
+  .event-type.session_stop { background: rgba(248,81,73,0.2); color: var(--red); }
+  .event-type.ready { background: rgba(63,185,80,0.2); color: var(--green); }
+  .event-type.text { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .event-type.tool_use { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .event-type.tool_result { background: rgba(139,148,158,0.2); color: var(--muted); }
+  .event-type.result { background: rgba(63,185,80,0.2); color: var(--green); }
+  .event-type.error { background: rgba(248,81,73,0.2); color: var(--red); }
+  .event-type.port_down { background: rgba(248,81,73,0.2); color: var(--red); }
+  .event-type.send_message { background: rgba(88,166,255,0.2); color: var(--accent); }
+  .event-type.heartbeat_result { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .event-type.user_prompt { background: rgba(63,185,80,0.15); color: var(--green); }
+  .event-content { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+  .event-content.tool { color: var(--yellow); }
+  .event-content.err { color: var(--red); }
+
+  /* Empty state */
+  .empty-state {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 14px; text-align: center;
+  }
+
+  /* Event count */
+  .event-count {
+    font-size: 11px; color: var(--muted); padding: 4px 16px;
+    border-top: 1px solid var(--border); background: var(--surface);
+  }
+</style>
+</head>
+<body>
+
+<div class="sidebar">
+  <div class="sidebar-header">
+    SecureClaw <span>Session Logs</span>
+    <div style="display:flex;gap:4px;margin-top:8px">
+      <a href="graph.html" style="color:var(--muted);font-size:11px;text-decoration:none;padding:3px 8px;border-radius:4px;border:1px solid var(--border)">Graph</a>
+      <a href="matrix.html" style="color:var(--muted);font-size:11px;text-decoration:none;padding:3px 8px;border-radius:4px;border:1px solid var(--border)">Matrix</a>
+    </div>
+  </div>
+  <div id="sidebar-back"></div>
+  <div class="nav-list" id="nav-list"></div>
+  <div class="settings-bar">
+    <label>Gateway:</label>
+    <input type="text" id="gateway-url" value="http://localhost:4000"
+           onchange="loadAgents()">
+  </div>
+</div>
+
+<div class="main" id="main-area">
+  <div class="empty-state">Select an agent from the sidebar to browse session logs.</div>
+</div>
+
+<script>
+const state = {
+  agents: [],
+  selectedAgent: null,
+  sessions: [],
+  selectedSession: null,
+  events: [],
+  filterTypes: new Set(),
+  searchQuery: '',
+};
+
+const ALL_EVENT_TYPES = [
+  'session_start', 'session_stop', 'ready', 'user_prompt', 'text', 'tool_use',
+  'tool_result', 'result', 'error', 'port_down', 'send_message',
+  'heartbeat_result'
+];
+
+// Enable all types by default
+ALL_EVENT_TYPES.forEach(t => state.filterTypes.add(t));
+
+function gatewayUrl() {
+  return document.getElementById('gateway-url').value.replace(/\/+$/, '');
+}
+
+async function api(path) {
+  const resp = await fetch(gatewayUrl() + path);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp;
+}
+
+// --- Agent list ---
+
+async function loadAgents() {
+  state.selectedAgent = null;
+  state.selectedSession = null;
+  try {
+    const resp = await api('/logs');
+    const data = await resp.json();
+    state.agents = data.agents || [];
+  } catch {
+    state.agents = [];
+  }
+  renderNav();
+  renderMain();
+}
+
+function renderNav() {
+  const backEl = document.getElementById('sidebar-back');
+  const navEl = document.getElementById('nav-list');
+
+  if (state.selectedAgent && !state.selectedSession) {
+    // Showing sessions — add back button
+    backEl.innerHTML = '<div class="back-btn" onclick="loadAgents()">&larr; All agents</div>';
+    navEl.innerHTML = state.sessions.length
+      ? state.sessions.map(s => {
+          const active = s.session_id === state.selectedSession ? 'active' : '';
+          const size = formatBytes(s.size_bytes);
+          return `<div class="nav-item ${active}" onclick="selectSession('${s.session_id}')">
+            <div>${s.session_id}</div>
+            <div class="meta">${size} &middot; ${formatTime(s.modified_at)}</div>
+          </div>`;
+        }).join('')
+      : '<div style="padding:12px;color:var(--muted);font-size:12px;">No sessions found.</div>';
+  } else if (state.selectedSession) {
+    backEl.innerHTML = `<div class="back-btn" onclick="selectAgent('${state.selectedAgent}')">&larr; ${state.selectedAgent} sessions</div>`;
+    navEl.innerHTML = state.sessions.map(s => {
+      const active = s.session_id === state.selectedSession ? 'active' : '';
+      const size = formatBytes(s.size_bytes);
+      return `<div class="nav-item ${active}" onclick="selectSession('${s.session_id}')">
+        <div>${s.session_id}</div>
+        <div class="meta">${size} &middot; ${formatTime(s.modified_at)}</div>
+      </div>`;
+    }).join('');
+  } else {
+    // Showing agents
+    backEl.innerHTML = '';
+    navEl.innerHTML = state.agents.length
+      ? state.agents.map(a => {
+          const active = a === state.selectedAgent ? 'active' : '';
+          return `<div class="nav-item ${active}" onclick="selectAgent('${a}')">${a}</div>`;
+        }).join('')
+      : '<div style="padding:12px;color:var(--muted);font-size:12px;">No logs found. Run an agent session first.</div>';
+  }
+}
+
+// --- Session list ---
+
+async function selectAgent(name) {
+  state.selectedAgent = name;
+  state.selectedSession = null;
+  state.events = [];
+  try {
+    const resp = await api(`/logs/${encodeURIComponent(name)}`);
+    const data = await resp.json();
+    state.sessions = data.sessions || [];
+  } catch {
+    state.sessions = [];
+  }
+  renderNav();
+  renderMain();
+}
+
+// --- Session detail ---
+
+async function selectSession(sessionId) {
+  state.selectedSession = sessionId;
+  state.events = [];
+  try {
+    const resp = await api(`/logs/${encodeURIComponent(state.selectedAgent)}/${encodeURIComponent(sessionId)}`);
+    const text = await resp.text();
+    state.events = text.trim().split('\n')
+      .filter(line => line.trim())
+      .map(line => {
+        try { return JSON.parse(line); } catch { return null; }
+      })
+      .filter(Boolean);
+  } catch {
+    state.events = [];
+  }
+  renderNav();
+  renderMain();
+}
+
+function renderMain() {
+  const main = document.getElementById('main-area');
+
+  if (state.selectedSession) {
+    main.innerHTML = `
+      <div class="toolbar">
+        <div class="title">${state.selectedAgent} / ${state.selectedSession}</div>
+      </div>
+      <div class="filter-bar">
+        <span style="font-size:11px;color:var(--muted)">Filter:</span>
+        ${ALL_EVENT_TYPES.map(t => `
+          <label>
+            <input type="checkbox" ${state.filterTypes.has(t) ? 'checked' : ''}
+                   onchange="toggleFilter('${t}', this.checked)">
+            ${t}
+          </label>
+        `).join('')}
+        <input type="text" class="search-input" placeholder="Search events..."
+               value="${escapeAttr(state.searchQuery)}"
+               oninput="updateSearch(this.value)">
+      </div>
+      <div class="event-log" id="event-log">${renderEvents()}</div>
+      <div class="event-count" id="event-count">${eventCountText()}</div>`;
+  } else if (state.selectedAgent) {
+    main.innerHTML = `
+      <div class="toolbar">
+        <div class="title">${state.selectedAgent}</div>
+      </div>
+      <div class="empty-state">Select a session from the sidebar.</div>`;
+  } else {
+    main.innerHTML = '<div class="empty-state">Select an agent from the sidebar to browse session logs.</div>';
+  }
+}
+
+function renderEvents() {
+  if (!state.events.length) {
+    return '<div style="padding:12px;color:var(--muted)">No events in this session.</div>';
+  }
+  return state.events.map((e, i) => {
+    const type = e.type || 'unknown';
+    const hidden = !state.filterTypes.has(type) || !matchesSearch(e);
+    const cls = ['error','port_down','session_stop'].includes(type) ? 'err' :
+                ['tool_use','tool_result'].includes(type) ? 'tool' : '';
+    const time = e.timestamp ? formatTimestamp(e.timestamp) : '';
+    return `<div class="event ${hidden ? 'hidden' : ''}" data-idx="${i}">
+      <span class="event-time">${time}</span>
+      <span class="event-type ${type}">${type}</span>
+      <span class="event-content ${cls}">${formatEvent(e)}</span>
+    </div>`;
+  }).join('');
+}
+
+function formatEvent(e) {
+  switch (e.type) {
+    case 'session_start':
+      return `agent=${escapeHtml(e.agent_name || '')} model=${escapeHtml(e.model || '')} ` +
+             `trigger=${escapeHtml(e.trigger_type || '')} risk=${escapeHtml(e.effective_risk || '')}`;
+    case 'session_stop':
+      return `reason=${escapeHtml(e.reason || '')} taint=${escapeHtml(e.taint_level || '')} ` +
+             `sensitivity=${escapeHtml(e.sensitivity_level || e.secrecy_level || '')}`;
+    case 'ready':
+      return 'Runtime ready';
+    case 'user_prompt':
+      return escapeHtml(truncate(e.content || '', 500));
+    case 'text':
+      return escapeHtml(e.content || '');
+    case 'tool_use':
+      return formatToolUse(e);
+    case 'tool_result': {
+      const tag = e.is_error ? '[ERROR] ' : '';
+      return tag + escapeHtml(truncate(e.content || '', 500));
+    }
+    case 'result':
+      return `Done: ${e.num_turns} turns, ${e.duration_ms}ms, $${e.cost_usd}`;
+    case 'error':
+      return escapeHtml(e.message || JSON.stringify(e));
+    case 'port_down':
+      return escapeHtml(e.reason || '');
+    case 'send_message':
+      return `${escapeHtml(e.from || '')} &rarr; ${escapeHtml(e.to || '')} (${escapeHtml(e.message_type || '')})`;
+    case 'heartbeat_result':
+      return `${escapeHtml(e.classification || '')} agent=${escapeHtml(e.agent_name || '')}`;
+    default:
+      return escapeHtml(JSON.stringify(e));
+  }
+}
+
+function formatToolUse(d) {
+  const input = d.input || {};
+  let detail = '';
+  switch (d.name) {
+    case 'Read':
+      detail = input.file_path || '';
+      if (input.offset) detail += `:${input.offset}`;
+      break;
+    case 'Write':
+      detail = input.file_path || '';
+      break;
+    case 'Edit':
+      detail = input.file_path || '';
+      if (input.old_string) detail += ` (replacing ${truncate(input.old_string, 40)})`;
+      break;
+    case 'Bash':
+      detail = truncate(input.command || input.description || '', 120);
+      break;
+    case 'Glob':
+      detail = input.pattern || '';
+      if (input.path) detail += ` in ${input.path}`;
+      break;
+    case 'Grep':
+      detail = `/${input.pattern || ''}/${input.glob ? ' ' + input.glob : ''}`;
+      if (input.path) detail += ` in ${input.path}`;
+      break;
+    case 'WebFetch':
+      detail = input.url || '';
+      break;
+    case 'WebSearch':
+      detail = input.query || '';
+      break;
+    case 'Task':
+      detail = input.description || (input.prompt ? truncate(input.prompt, 80) : '');
+      break;
+    default: {
+      const keys = Object.keys(input);
+      if (keys.length) detail = truncate(JSON.stringify(input), 120);
+    }
+  }
+  return `${escapeHtml(d.name || '')}${detail ? ' — ' + escapeHtml(detail) : ''}`;
+}
+
+// --- Filtering ---
+
+function toggleFilter(type, checked) {
+  if (checked) state.filterTypes.add(type);
+  else state.filterTypes.delete(type);
+  applyFilters();
+}
+
+function updateSearch(query) {
+  state.searchQuery = query;
+  applyFilters();
+}
+
+function matchesSearch(e) {
+  if (!state.searchQuery) return true;
+  const q = state.searchQuery.toLowerCase();
+  const text = JSON.stringify(e).toLowerCase();
+  return text.includes(q);
+}
+
+function applyFilters() {
+  const log = document.getElementById('event-log');
+  if (!log) return;
+  const items = log.querySelectorAll('.event');
+  let visible = 0;
+  items.forEach(el => {
+    const idx = parseInt(el.dataset.idx);
+    const e = state.events[idx];
+    if (!e) return;
+    const show = state.filterTypes.has(e.type || 'unknown') && matchesSearch(e);
+    el.classList.toggle('hidden', !show);
+    if (show) visible++;
+  });
+  const countEl = document.getElementById('event-count');
+  if (countEl) countEl.textContent = `${visible} / ${state.events.length} events`;
+}
+
+function eventCountText() {
+  const visible = state.events.filter(e =>
+    state.filterTypes.has(e.type || 'unknown') && matchesSearch(e)
+  ).length;
+  return `${visible} / ${state.events.length} events`;
+}
+
+// --- Helpers ---
+
+function escapeHtml(s) {
+  if (typeof s !== 'string') s = String(s);
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function escapeAttr(s) {
+  return s.replace(/"/g, '&quot;');
+}
+
+function truncate(s, n) { return s.length > n ? s.slice(0, n) + '...' : s; }
+
+function formatTimestamp(ts) {
+  try {
+    return new Date(ts).toLocaleTimeString();
+  } catch {
+    return ts;
+  }
+}
+
+function formatTime(ts) {
+  try {
+    const d = new Date(ts);
+    return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+  } catch {
+    return ts;
+  }
+}
+
+function formatBytes(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+// --- Init ---
+loadAgents();
+</script>
+</body>
+</html>
