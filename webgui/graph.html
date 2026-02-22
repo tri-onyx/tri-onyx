@@ -88,9 +88,13 @@
     border: 1px solid var(--border); border-radius: 5px;
     padding: 6px 8px; margin-top: 6px; background: rgba(13,17,23,0.5);
   }
+  .tooltip .section-header {
+    display: flex; justify-content: space-between; align-items: center;
+    margin-bottom: 4px;
+  }
   .tooltip .section-title {
     font-size: 10px; text-transform: uppercase; color: var(--muted);
-    letter-spacing: 0.5px; margin-bottom: 4px;
+    letter-spacing: 0.5px;
   }
   .tooltip .axis-row {
     display: flex; justify-content: space-between; align-items: center;
@@ -1132,33 +1136,28 @@ function renderGraph() {
       </div>
 
       <div class="section">
-        <div class="section-title">☣️ Taint (integrity)</div>
-        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>
+        <div class="section-header"><div class="section-title">☣️ Taint (integrity)</div><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.taintDrivers)}</div></div>
         ${sourcesRow}
         ${bashNetNote}
       </div>
 
       <div class="section">
-        <div class="section-title">🔒 Sensitivity (confidentiality)</div>
-        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>
+        <div class="section-header"><div class="section-title">🔒 Sensitivity (confidentiality)</div><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.sensitivityDrivers)}</div></div>
         ${sourcesRow}
       </div>
 
       <div class="section">
-        <div class="section-title">🦾 Capability (blast radius)</div>
-        <div class="axis-row"><span class="axis-label">Rating</span><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
+        <div class="section-header"><div class="section-title">🦾 Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>
         <div class="axis-row"><span class="axis-label">Network</span><span>${formatNetwork(a.network)}</span></div>
       </div>
 
       <div class="section">
-        <div class="section-title">Effective Risk</div>
+        <div class="section-header"><div class="section-title">Effective Risk</div><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
         <div class="derivation">T:${d.taintLevel} × S:${d.sensitivityLevel} → ${b.baseline}</div>
         <div class="derivation">cap:${d.capabilityLevel} → ${b.capMod}</div>
-        <hr style="border:none;border-top:1px solid var(--border);margin:4px 0">
-        <div class="axis-row"><span class="axis-label" style="font-weight:600">Effective risk</span><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
         ${maxInputNote}
         ${chainHtml}
       </div>
