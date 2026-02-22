@@ -97,7 +97,7 @@
     letter-spacing: 0.5px;
   }
   .tooltip .axis-row {
-    display: flex; justify-content: space-between; align-items: center;
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
     margin-top: 2px; font-size: 11px;
   }
   .tooltip .axis-row .axis-label { color: var(--muted); }
@@ -115,16 +115,16 @@
     font-size: 10px; color: var(--muted); margin-top: 3px; font-family: monospace;
   }
   .tooltip .header-row {
-    display: flex; gap: 10px; align-items: flex-start;
+    display: flex; gap: 10px; align-items: stretch;
   }
   .tooltip .header-info { flex: 1; min-width: 0; }
   .tooltip .risk-square {
-    width: 64px; height: 64px; border-radius: 6px; flex-shrink: 0;
+    width: 80px; flex-shrink: 0; border-radius: 6px;
     display: flex; flex-direction: column; align-items: center; justify-content: center;
-    font-weight: 700; font-size: 10px; text-transform: uppercase; letter-spacing: 0.3px;
+    font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: 0.3px;
     line-height: 1.2;
   }
-  .tooltip .risk-square .risk-icon { font-size: 24px; margin-bottom: 2px; }
+  .tooltip .risk-square .risk-icon { font-size: 28px; margin-bottom: 3px; }
   .tooltip .risk-square.low { background: rgba(63,185,80,0.2); color: var(--green); }
   .tooltip .risk-square.moderate { background: rgba(210,153,34,0.2); color: var(--yellow); }
   .tooltip .risk-square.high { background: rgba(219,109,40,0.2); color: var(--orange); }
@@ -418,6 +418,8 @@ function buildGraph() {
       sendTo: a.send_to || [],
       receiveFrom: a.receive_from || [],
       bctpChannels: a.bctp_channels || [],
+      maxInputTaint: aa.max_input_taint || null,
+      maxInputSensitivity: aa.max_input_sensitivity || null,
       maxInputRisk: aa.max_input_risk || null,
       riskChain: aa.risk_chain || [],
       incomingEdges: aa.incoming_edges || [],
@@ -638,6 +640,49 @@ function renderDriverBadges(drivers) {
   return drivers.map(d =>
     `<span class="driver-badge ${d.level}">${d.tool}</span>`
   ).join('');
+}
+
+function renderAllToolsByLevel(tools, toolMap, hasNetwork) {
+  const items = tools.map(tool => {
+    let level = toolMap[tool] || 'low';
+    if (tool === 'Bash' && hasNetwork) level = 'high';
+    return { tool, level };
+  });
+  items.sort((a, b) => (LEVEL_RANK[b.level] || 0) - (LEVEL_RANK[a.level] || 0));
+  return items.map(d =>
+    `<span class="driver-badge ${d.level}">${d.tool}</span>`
+  ).join('');
+}
+
+const EDGE_TYPE_LABELS = { write_read: 'filesystem', messaging: 'messaging', bctp: 'BCTP' };
+
+function getIncomingConnections(nodeId) {
+  return graphData.links.filter(l => {
+    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
+    return tgt === nodeId;
+  }).map(l => {
+    const src = typeof l.source === 'object' ? l.source.id : l.source;
+    const srcNode = graphData.nodes.find(n => n.id === src);
+    return {
+      from: src,
+      type: EDGE_TYPE_LABELS[l.type] || l.type,
+      taint: srcNode ? srcNode.taintLevel : 'low',
+      sensitivity: srcNode ? srcNode.sensitivityLevel : 'low',
+      capability: srcNode ? srcNode.capabilityLevel : 'low',
+    };
+  });
+}
+
+function renderInherited(connections, axis) {
+  const elevated = connections.filter(c => LEVEL_RANK[c[axis]] > 0);
+  if (!elevated.length) return '';
+  return '<div style="margin-top:3px;">' +
+    elevated.map(c =>
+      `<div style="font-size:10px;color:var(--muted);margin-top:1px;">` +
+      `← <span class="badge ${c[axis]}">${c[axis]}</span> ` +
+      `<span style="color:var(--text)">${c.from}</span> ` +
+      `<span style="font-style:italic">(${c.type})</span></div>`
+    ).join('') + '</div>';
 }
 
 function riskIcon(level) {
@@ -1104,6 +1149,14 @@ function renderGraph() {
   node.on('mouseenter', (event, d) => {
     const a = d.agent;
     const b = buildRatingBreakdown(d);
+    const incoming = getIncomingConnections(d.id);
+
+    // Effective levels = max(own, inherited from connections)
+    const maxInTaint = incoming.reduce((acc, c) => LEVEL_RANK[c.taint] > LEVEL_RANK[acc] ? c.taint : acc, 'low');
+    const maxInSens = incoming.reduce((acc, c) => LEVEL_RANK[c.sensitivity] > LEVEL_RANK[acc] ? c.sensitivity : acc, 'low');
+    const effTaint = LEVEL_RANK[maxInTaint] > LEVEL_RANK[d.taintLevel] ? maxInTaint : d.taintLevel;
+    const effSens = LEVEL_RANK[maxInSens] > LEVEL_RANK[d.sensitivityLevel] ? maxInSens : d.sensitivityLevel;
+
     const sources = (a.information_sources && a.information_sources.length) ? a.information_sources : [];
     const sourcesRow = sources.length
       ? `<div class="axis-row"><span class="axis-label">Sources</span><span class="paths">${sources.join(', ')}</span></div>`
@@ -1112,6 +1165,9 @@ function renderGraph() {
     const bashNetNote = (b.hasNetwork && d.tools.includes('Bash'))
       ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network → high taint &amp; capability</div>'
       : '';
+
+    const inheritedTaint = renderInherited(incoming, 'taint');
+    const inheritedSens = renderInherited(incoming, 'sensitivity');
 
     const chainHtml = (d.riskChain && d.riskChain.length)
       ? `<div class="axis-row"><span class="axis-label">Risk chain</span><span class="risk-chain" style="margin:0">${d.riskChain.join(' → ')}</span></div>`
@@ -1137,26 +1193,29 @@ function renderGraph() {
       </div>
 
       <div class="section">
-        <div class="section-header"><div class="section-title">☣️ Taint (integrity)</div><span class="badge ${d.taintLevel}">${d.taintLevel}</span></div>
+        <div class="section-header"><div class="section-title">☣️ Taint (integrity)</div><span class="badge ${effTaint}">${effTaint}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.taintDrivers)}</div></div>
         ${sourcesRow}
         ${bashNetNote}
+        ${inheritedTaint}
       </div>
 
       <div class="section">
-        <div class="section-header"><div class="section-title">🔒 Sensitivity (confidentiality)</div><span class="badge ${d.sensitivityLevel}">${d.sensitivityLevel}</span></div>
+        <div class="section-header"><div class="section-title">🔒 Sensitivity (confidentiality)</div><span class="badge ${effSens}">${effSens}</span></div>
         <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.sensitivityDrivers)}</div></div>
         ${sourcesRow}
+        ${inheritedSens}
       </div>
 
       <div class="section">
         <div class="section-header"><div class="section-title">🦾 Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
-        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>
+        <div style="margin-top:2px;font-size:11px;"><span class="axis-label">Tools</span></div>
+        <div class="driver-list">${renderAllToolsByLevel(d.tools, TOOL_CAPABILITY, b.hasNetwork)}</div>
       </div>
 
       <div class="section">
         <div class="section-header"><div class="section-title">Effective Risk</div><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
-        <div class="derivation">T:${d.taintLevel} × S:${d.sensitivityLevel} → ${b.baseline}</div>
+        <div class="derivation">T:${effTaint} × S:${effSens} → ${RISK_MATRIX_2D[LEVEL_RANK[effTaint]][LEVEL_RANK[effSens]]}</div>
         <div class="derivation">cap:${d.capabilityLevel} → ${b.capMod}</div>
         ${maxInputNote}
         ${chainHtml}
