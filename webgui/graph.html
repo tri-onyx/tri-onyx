@@ -343,19 +343,7 @@ async function loadGraph() {
       api('GET', '/graph/analysis')
     ]);
 
-    if (agentData.status === 'fulfilled') {
-      agents = agentData.value.agents || [];
-      // Fetch full details for each agent (includes fs_read/fs_write)
-      const details = await Promise.allSettled(
-        agents.map(a => api('GET', `/agents/${encodeURIComponent(a.name)}`))
-      );
-      agents = details.map((r, i) =>
-        r.status === 'fulfilled' ? { ...agents[i], ...r.value } : agents[i]
-      );
-    } else {
-      agents = [];
-    }
-
+    agents = (agentData.status === 'fulfilled') ? (agentData.value.agents || []) : [];
     analysisData = (analysis.status === 'fulfilled') ? analysis.value : null;
 
     document.getElementById('status-text').className = 'connected';
@@ -375,7 +363,6 @@ async function loadGraph() {
 // ── Graph construction ──
 
 function buildGraph() {
-  // Build analysis lookup
   const agentAnalysis = {};
   if (analysisData && analysisData.agents) {
     for (const [name, data] of Object.entries(analysisData.agents)) {
@@ -399,206 +386,67 @@ function buildGraph() {
 
   const nodes = agents.map(a => {
     const aa = agentAnalysis[a.name] || {};
-    // Support new two-axis fields, fall back to legacy single-axis
     const taint = normalizeLevel(a.taint_level || a.information_level || 'low');
-    const sensitivity = normalizeLevel(a.sensitivity_level || a.secrecy_level || 'low');
-    const capability = normalizeLevel(aa.capability_level || a.capability_level || inferCapability(a.tools || [], a.network));
+    const sensitivity = normalizeLevel(a.sensitivity_level || 'low');
+    const capability = normalizeLevel(aa.capability_level || 'low');
     return {
       id: a.name,
       agent: a,
       taintLevel: taint,
       sensitivityLevel: sensitivity,
       capabilityLevel: capability,
-      effectiveRisk: normalizeRisk(a.effective_risk || computeEffectiveRisk(taint, sensitivity, capability)),
+      effectiveRisk: normalizeRisk(aa.effective_risk || 'low'),
       active: a.status && a.status !== 'inactive',
       network: a.network || 'none',
       tools: a.tools || [],
-      fsRead: a.fs_read || [],
-      fsWrite: a.fs_write || [],
-      sendTo: a.send_to || [],
-      receiveFrom: a.receive_from || [],
-      bcpChannels: a.bcp_channels || [],
       maxInputTaint: aa.max_input_taint || null,
       maxInputSensitivity: aa.max_input_sensitivity || null,
       maxInputRisk: aa.max_input_risk || null,
       riskChain: aa.risk_chain || [],
-      incomingEdges: aa.incoming_edges || [],
+      toolDrivers: aa.tool_drivers || null,
     };
   });
 
-  const links = [];
   const nodeMap = Object.fromEntries(nodes.map(n => [n.id, n]));
 
-  // Compute filesystem overlap edges
-  for (let i = 0; i < nodes.length; i++) {
-    for (let j = 0; j < nodes.length; j++) {
-      if (i === j) continue;
-      const a = nodes[i], b = nodes[j];
+  // Build links directly from server-computed flat edges
+  const links = [];
+  const serverEdges = (analysisData && analysisData.edges) || [];
+  for (const edge of serverEdges) {
+    if (!nodeMap[edge.from] || !nodeMap[edge.to]) continue;
+    const edgeType = edge.edge_type || 'filesystem';
+    const type = edgeType === 'filesystem' ? 'write_read' : edgeType;
+    const sourceNode = nodeMap[edge.from];
 
-      // Write -> Read: agent A writes to paths that agent B reads
-      const writeReadOverlap = findGlobOverlap(a.fsWrite, b.fsRead);
-      if (writeReadOverlap.length > 0) {
-        const key = `${a.id}|${b.id}`;
-        const isBibaViolation = bibaViolations.has(key);
-        const isBlpViolation = blpViolations.has(key);
-
-        links.push({
-          source: a.id, target: b.id,
-          type: 'write_read',
-          paths: writeReadOverlap,
-          taintLevel: a.taintLevel,
-          sensitivityLevel: a.sensitivityLevel,
-          bibaViolation: isBibaViolation,
-          blpViolation: isBlpViolation,
-        });
-      }
-    }
-  }
-
-  // Compute messaging edges from agent detail data (send_to/receive_from)
-  const addedMsgEdges = new Set();
-  for (const sender of nodes) {
-    for (const targetName of sender.sendTo) {
-      const receiver = nodeMap[targetName];
-      if (!receiver) continue;
-      if (!receiver.receiveFrom.includes(sender.id)) continue;
-
-      const key = `${sender.id}|${targetName}`;
-      addedMsgEdges.add(key);
-      const isBibaViolation = bibaViolations.has(key);
-      const isBlpViolation = blpViolations.has(key);
-
-      links.push({
-        source: sender.id, target: targetName,
-        type: 'messaging',
-        paths: [`${sender.id} → ${targetName} (messaging)`],
-        taintLevel: sender.taintLevel,
-        sensitivityLevel: sender.sensitivityLevel,
-        bibaViolation: isBibaViolation,
-        blpViolation: isBlpViolation,
-      });
-    }
-  }
-
-  // Compute BCP edges from agent detail data (bcp_channels)
-  const addedBcpEdges = new Set();
-  for (const controller of nodes) {
-    for (const channel of controller.bcpChannels) {
-      if (channel.role !== 'controller') continue;
-      const reader = nodeMap[channel.peer];
-      if (!reader) continue;
-
-      // Verify the peer declares a matching reader role back
-      const peerChannel = reader.bcpChannels.find(
-        ch => ch.peer === controller.id && ch.role === 'reader'
-      );
-      if (!peerChannel) continue;
-
-      const key = `${channel.peer}|${controller.id}`;
-      addedBcpEdges.add(key);
-      const isBibaViolation = bibaViolations.has(key);
-      const isBlpViolation = blpViolations.has(key);
-
-      links.push({
-        source: channel.peer, target: controller.id,
-        type: 'bcp',
-        paths: [`${channel.peer} → ${controller.id} (BCP cat-${channel.max_category})`],
-        taintLevel: 'low',  // BCP is always taint-neutral
-        sensitivityLevel: 'low',
-        bibaViolation: isBibaViolation,
-        blpViolation: isBlpViolation,
-        maxCategory: channel.max_category,
-        budgetBits: channel.budget_bits,
-      });
-    }
-  }
-
-  // Fallback: derive messaging and BCP edges from /graph/analysis incoming_edges
-  // when agent detail data (send_to/receive_from/bcp_channels) is unavailable.
-  for (const target of nodes) {
-    for (const edge of target.incomingEdges) {
-      const edgeType = edge.edge_type || 'filesystem';
-      if (edgeType === 'filesystem') continue; // already computed client-side
-      if (!nodeMap[edge.from]) continue;
-
-      const key = `${edge.from}|${target.id}`;
-      if (edgeType === 'messaging' && addedMsgEdges.has(key)) continue;
-      if (edgeType === 'bcp' && addedBcpEdges.has(key)) continue;
-
-      const source = nodeMap[edge.from];
-      const isBibaViolation = bibaViolations.has(key);
-      const isBlpViolation = blpViolations.has(key);
-
-      if (edgeType === 'messaging') {
-        links.push({
-          source: edge.from, target: target.id,
-          type: 'messaging',
-          paths: [`${edge.from} → ${target.id} (messaging)`],
-          taintLevel: source.taintLevel,
-          sensitivityLevel: source.sensitivityLevel,
-          bibaViolation: isBibaViolation,
-          blpViolation: isBlpViolation,
-        });
-      } else if (edgeType === 'bcp') {
-        links.push({
-          source: edge.from, target: target.id,
-          type: 'bcp',
-          paths: [`${edge.from} → ${target.id} (BCP)`],
-          taintLevel: 'low',
-          sensitivityLevel: 'low',
-          bibaViolation: isBibaViolation,
-          blpViolation: isBlpViolation,
-          maxCategory: null,
-          budgetBits: null,
-        });
-      }
-    }
+    links.push({
+      source: edge.from,
+      target: edge.to,
+      type: type,
+      paths: edge.paths || [],
+      taintLevel: type === 'bcp' ? 'low' : (sourceNode ? sourceNode.taintLevel : 'low'),
+      sensitivityLevel: type === 'bcp' ? 'low' : (sourceNode ? sourceNode.sensitivityLevel : 'low'),
+      bibaViolation: edge.biba_violation || false,
+      blpViolation: edge.blp_violation || false,
+      maxCategory: edge.max_category,
+      budgetBits: edge.budget_bits,
+    });
   }
 
   graphData = { nodes, links, bibaViolations, blpViolations };
 
-  // Use server-propagated taint/sensitivity levels (transitive, with BCP step-down).
+  // Use server-propagated taint/sensitivity levels
   for (const node of nodes) {
     const aa = agentAnalysis[node.id] || {};
-    node.effTaintLevel = aa.propagated_taint || node.taintLevel;
-    node.effSensitivityLevel = aa.propagated_sensitivity || node.sensitivityLevel;
+    node.effTaintLevel = normalizeLevel(aa.propagated_taint) || node.taintLevel;
+    node.effSensitivityLevel = normalizeLevel(aa.propagated_sensitivity) || node.sensitivityLevel;
     node.taintSources = aa.taint_sources || [];
     node.sensitivitySources = aa.sensitivity_sources || [];
-    node.effectiveRisk = normalizeRisk(computeEffectiveRisk(node.effTaintLevel, node.effSensitivityLevel, node.capabilityLevel));
   }
   document.getElementById('agent-count').textContent = `${nodes.length} agents`;
   document.getElementById('edge-count').textContent = `${links.length} edges`;
 
   updateViolationCount();
 }
-
-// Client-side capability inference (fallback when server doesn't provide it)
-// Mirrors RiskScorer.infer_capability/2 from the gateway.
-const TOOL_CAPABILITY = {
-  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
-  Bash: 'medium', WebFetch: 'medium', WebSearch: 'medium',
-  SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
-  CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
-};
-
-// Tool taint levels — mirrors TaintMatrix @tool_taint
-const TOOL_TAINT = {
-  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
-  Bash: 'low', WebFetch: 'high', WebSearch: 'high',
-  SendEmail: 'low', MoveEmail: 'low', CreateFolder: 'low',
-  CalendarQuery: 'low', CalendarCreate: 'low', CalendarUpdate: 'low', CalendarDelete: 'low',
-};
-
-// Tool sensitivity levels — mirrors SensitivityMatrix @tool_sensitivity
-const TOOL_SENSITIVITY = {
-  Read: 'low', Grep: 'low', Glob: 'low', Write: 'low', Edit: 'low', NotebookEdit: 'low',
-  SendMessage: 'low', BCPQuery: 'low', BCPRespond: 'low', RestartAgent: 'low',
-  Bash: 'low', WebFetch: 'low', WebSearch: 'low',
-  SendEmail: 'medium', MoveEmail: 'medium', CreateFolder: 'medium',
-  CalendarQuery: 'medium', CalendarCreate: 'medium', CalendarUpdate: 'medium', CalendarDelete: 'medium',
-};
 
 const LEVEL_RANK = { low: 0, medium: 1, high: 2 };
 const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
@@ -611,19 +459,11 @@ const RISK_MATRIX_2D = [
 function buildRatingBreakdown(d) {
   const hasNetwork = d.network && d.network !== 'none' && !(Array.isArray(d.network) && d.network.length === 0);
 
-  function getDrivers(toolMap, tools) {
-    const drivers = [];
-    for (const tool of tools) {
-      let level = toolMap[tool] || 'low';
-      if (tool === 'Bash' && hasNetwork) level = 'high';
-      if (LEVEL_RANK[level] > 0) drivers.push({ tool, level });
-    }
-    return drivers;
-  }
-
-  const taintDrivers = getDrivers(TOOL_TAINT, d.tools);
-  const sensitivityDrivers = getDrivers(TOOL_SENSITIVITY, d.tools);
-  const capDrivers = getDrivers(TOOL_CAPABILITY, d.tools);
+  // Use server-provided tool_drivers when available
+  const td = d.toolDrivers || {};
+  const taintDrivers = (td.taint_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
+  const sensitivityDrivers = (td.sensitivity_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
+  const capDrivers = (td.capability_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
 
   const tI = LEVEL_RANK[d.taintLevel] || 0;
   const sI = LEVEL_RANK[d.sensitivityLevel] || 0;
@@ -652,12 +492,10 @@ function renderDriverBadges(drivers) {
   ).join('');
 }
 
-function renderAllToolsByLevel(tools, toolMap, hasNetwork) {
-  const items = tools.map(tool => {
-    let level = toolMap[tool] || 'low';
-    if (tool === 'Bash' && hasNetwork) level = 'high';
-    return { tool, level };
-  });
+function renderAllToolsByLevel(capDrivers, tools) {
+  // Build a map from cap drivers, fill in remaining tools as low
+  const driverMap = Object.fromEntries((capDrivers || []).map(d => [d.tool, d.level]));
+  const items = tools.map(tool => ({ tool, level: driverMap[tool] || 'low' }));
   items.sort((a, b) => (LEVEL_RANK[b.level] || 0) - (LEVEL_RANK[a.level] || 0));
   return items.map(d =>
     `<span class="driver-badge ${d.level}">${d.tool}</span>`
@@ -711,44 +549,6 @@ function riskIcon(level) {
   return icons[level] || '●';
 }
 
-function inferCapability(tools, network) {
-  const hasNetwork = network && network !== 'none' && !(Array.isArray(network) && network.length === 0);
-  const rank = { low: 0, medium: 1, high: 2 };
-  let max = 0;
-  for (const tool of tools) {
-    let level = TOOL_CAPABILITY[tool] || 'low';
-    if (tool === 'Bash' && hasNetwork && level === 'medium') level = 'high';
-    max = Math.max(max, rank[level] || 0);
-  }
-  return ['low', 'medium', 'high'][max];
-}
-
-// Client-side effective risk computation (fallback when server doesn't provide it)
-// 3-axis: taint x sensitivity x capability (lethal trifecta, ADR-010)
-function computeEffectiveRisk(taint, sensitivity, capability) {
-  const levelRank = { low: 0, medium: 1, high: 2 };
-  const taintIdx = levelRank[taint] || 0;
-  const sensIdx = levelRank[sensitivity] || 0;
-  const cap = capability || 'medium';
-
-  // Step 1: 2D baseline
-  const matrix = [
-    ['low', 'low', 'moderate'],
-    ['low', 'moderate', 'high'],
-    ['moderate', 'high', 'critical'],
-  ];
-  const baseline = matrix[taintIdx][sensIdx];
-
-  // Step 2: modulate by capability
-  if (cap === 'medium') return baseline;
-
-  const riskLevels = ['low', 'moderate', 'high', 'critical'];
-  const riskIdx = riskLevels.indexOf(baseline);
-  if (cap === 'low') return riskLevels[Math.max(0, riskIdx - 1)];
-  if (cap === 'high') return riskLevels[Math.min(3, riskIdx + 1)];
-  return baseline;
-}
-
 function normalizeLevel(l) {
   if (!l) return 'low';
   const s = String(l).toLowerCase();
@@ -764,25 +564,6 @@ function normalizeRisk(r) {
   if (s.startsWith('high')) return 'high';
   if (s.startsWith('moderate') || s.startsWith('medium')) return 'moderate';
   return 'low';
-}
-
-// Simple glob overlap detection
-function findGlobOverlap(patternsA, patternsB) {
-  const overlaps = [];
-  for (const a of patternsA) {
-    for (const b of patternsB) {
-      if (globsOverlap(a, b)) {
-        overlaps.push(`${a} <-> ${b}`);
-      }
-    }
-  }
-  return overlaps;
-}
-
-function globsOverlap(a, b) {
-  const pa = a.replace(/\/?\*\*.*$/, '').replace(/\/?\*$/, '');
-  const pb = b.replace(/\/?\*\*.*$/, '').replace(/\/?\*$/, '');
-  return pa.startsWith(pb) || pb.startsWith(pa);
 }
 
 // ── D3 rendering ──
@@ -1207,7 +988,7 @@ function renderGraph() {
       <div class="section">
         <div class="section-header"><div class="section-title">🦾 Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
         <div style="margin-top:2px;font-size:11px;"><span class="axis-label">Tools</span></div>
-        <div class="driver-list">${renderAllToolsByLevel(d.tools, TOOL_CAPABILITY, b.hasNetwork)}</div>
+        <div class="driver-list">${renderAllToolsByLevel(b.capDrivers, d.tools)}</div>
       </div>
 
       <div class="section">

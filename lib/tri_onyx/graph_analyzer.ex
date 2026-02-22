@@ -14,6 +14,9 @@ defmodule TriOnyx.GraphAnalyzer do
 
   alias TriOnyx.InformationClassifier
   alias TriOnyx.RiskScorer
+  alias TriOnyx.TaintMatrix
+  alias TriOnyx.SensitivityMatrix
+  alias TriOnyx.ToolRegistry
 
   @type agent_analysis :: %{
           max_input_taint: InformationClassifier.information_level(),
@@ -451,7 +454,9 @@ defmodule TriOnyx.GraphAnalyzer do
           from: channel.peer,
           paths: [],
           risk_level: bcp_risk_level(channel.max_category),
-          edge_type: :bcp
+          edge_type: :bcp,
+          max_category: channel.max_category,
+          budget_bits: channel.budget_bits
         }
 
         Map.update(acc, definition.name, [edge], &[edge | &1])
@@ -461,6 +466,53 @@ defmodule TriOnyx.GraphAnalyzer do
   defp bcp_risk_level(1), do: "low"
   defp bcp_risk_level(2), do: "medium"
   defp bcp_risk_level(3), do: "high"
+
+  @doc """
+  Computes per-tool driver breakdowns for tooltip display.
+
+  Returns a map with taint_drivers, sensitivity_drivers, and capability_drivers,
+  each listing tools with level > :low. Bash is promoted to :high for taint
+  and capability when the agent has network access.
+  """
+  @spec tool_drivers(map()) :: %{
+          taint_drivers: [%{tool: String.t(), level: atom()}],
+          sensitivity_drivers: [%{tool: String.t(), level: atom()}],
+          capability_drivers: [%{tool: String.t(), level: atom()}]
+        }
+  def tool_drivers(definition) do
+    has_net = has_network?(definition.network)
+
+    taint_drivers =
+      definition.tools
+      |> Enum.map(fn tool ->
+        level = TaintMatrix.tool_taint(tool)
+        level = if tool == "Bash" and has_net, do: :high, else: level
+        %{tool: tool, level: level}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    sensitivity_drivers =
+      definition.tools
+      |> Enum.map(fn tool ->
+        %{tool: tool, level: SensitivityMatrix.tool_sensitivity(tool)}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    capability_drivers =
+      definition.tools
+      |> Enum.map(fn tool ->
+        level = ToolRegistry.capability_level(tool)
+        level = if tool == "Bash" and has_net and level == :medium, do: :high, else: level
+        %{tool: tool, level: level}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    %{
+      taint_drivers: taint_drivers,
+      sensitivity_drivers: sensitivity_drivers,
+      capability_drivers: capability_drivers
+    }
+  end
 
   @doc """
   Validates BCP role symmetry across agent definitions.
