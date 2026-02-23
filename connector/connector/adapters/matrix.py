@@ -12,6 +12,7 @@ from typing import Any
 from nio import (
     AsyncClient,
     AsyncClientConfig,
+    DownloadResponse,
     InviteMemberEvent,
     JoinError,
     KeyVerificationCancel,
@@ -21,7 +22,9 @@ from nio import (
     LoginResponse,
     MatrixRoom,
     MegolmEvent,
+    RoomEncryptedAudio,
     RoomKeyRequestError,
+    RoomMessageAudio,
     RoomMessageText,
     RoomSendResponse,
     ReactionEvent,
@@ -29,6 +32,7 @@ from nio import (
     UnknownEvent,
     UnknownToDeviceEvent,
 )
+from nio.crypto import decrypt_attachment
 
 from connector.adapters.base import BaseAdapter, OnMessageCallback, OnReactionCallback
 from connector.config import AdapterConfig, RoomConfig
@@ -48,8 +52,9 @@ class MatrixAdapter(BaseAdapter):
     trust mapping, rich formatting, and standard Matrix event types.
     """
 
-    def __init__(self, config: AdapterConfig) -> None:
+    def __init__(self, config: AdapterConfig, transcriber: Any | None = None) -> None:
         self._config = config
+        self._transcriber = transcriber
         self._client: AsyncClient | None = None
         self._on_message: OnMessageCallback | None = None
         self._running = False
@@ -131,6 +136,9 @@ class MatrixAdapter(BaseAdapter):
 
         # Register event callbacks
         self._client.add_event_callback(self._on_room_message, RoomMessageText)
+        if self._transcriber is not None:
+            self._client.add_event_callback(self._on_room_audio, RoomMessageAudio)
+            self._client.add_event_callback(self._on_room_audio, RoomEncryptedAudio)
         self._client.add_event_callback(self._on_megolm_event, MegolmEvent)
         self._client.add_event_callback(self._on_invite, InviteMemberEvent)
         self._client.add_event_callback(self._on_reaction_event, ReactionEvent)
@@ -296,6 +304,92 @@ class MatrixAdapter(BaseAdapter):
 
         self._merge_tasks[room.room_id] = asyncio.create_task(
             self._flush_merge_buffer(room.room_id, room_cfg, thread_id, merge_window)
+        )
+
+    async def _on_room_audio(
+        self, room: MatrixRoom, event: RoomMessageAudio | RoomEncryptedAudio
+    ) -> None:
+        """Handle an incoming voice/audio message by transcribing it."""
+        if not self._initial_sync_done:
+            return
+
+        if event.sender == self._config.user_id:
+            return
+
+        if event.event_id in self._own_event_ids:
+            self._own_event_ids.discard(event.event_id)
+            return
+
+        room_cfg = self._rooms.get(room.room_id)
+        if room_cfg is None:
+            return
+
+        assert self._client is not None
+        assert self._transcriber is not None
+
+        mxc_url = event.url
+        if not mxc_url:
+            logger.warning("Audio event %s has no URL", event.event_id)
+            return
+
+        logger.info(
+            "Voice message from %s in %s (%s), downloading...",
+            event.sender,
+            room.room_id,
+            type(event).__name__,
+        )
+
+        resp = await self._client.download(mxc_url)
+        if not isinstance(resp, DownloadResponse):
+            logger.error("Failed to download audio: %s", resp)
+            return
+
+        audio_data = resp.body
+
+        # Decrypt if this is an encrypted media event
+        if isinstance(event, RoomEncryptedAudio):
+            try:
+                key = event.key.get("k", "")
+                sha256_hash = event.hashes.get("sha256", "")
+                audio_data = decrypt_attachment(audio_data, key, sha256_hash, event.iv)
+            except Exception:
+                logger.exception("Failed to decrypt audio for event %s", event.event_id)
+                return
+
+        # Transcribe in executor to avoid blocking the event loop
+        loop = asyncio.get_running_loop()
+        try:
+            text = await loop.run_in_executor(
+                None, self._transcriber.transcribe_bytes, audio_data
+            )
+        except Exception:
+            logger.exception("Transcription failed for event %s", event.event_id)
+            return
+
+        if not text:
+            logger.info("Transcription returned empty text for event %s", event.event_id)
+            return
+
+        logger.info(
+            "Transcribed voice message: %.100s (from %s in %s)",
+            text,
+            event.sender,
+            room.room_id,
+        )
+
+        # Feed into merge buffer (same path as text messages).
+        # Voice messages bypass mention gating since you can't @-mention in audio.
+        now_ms = time.monotonic() * 1000
+        merge_window = room_cfg.merge_window_ms
+
+        buf = self._merge_buffers.setdefault(room.room_id, [])
+        buf.append((now_ms, event.sender, text))
+
+        if room.room_id in self._merge_tasks:
+            self._merge_tasks[room.room_id].cancel()
+
+        self._merge_tasks[room.room_id] = asyncio.create_task(
+            self._flush_merge_buffer(room.room_id, room_cfg, None, merge_window)
         )
 
     async def _on_megolm_event(self, room: MatrixRoom, event: MegolmEvent) -> None:
