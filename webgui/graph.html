@@ -520,15 +520,6 @@ function renderSourceBadgesUnified(sources) {
   }).join('');
 }
 
-function renderAllToolsByLevel(capDrivers, tools) {
-  // Build a map from cap drivers, fill in remaining tools as low
-  const driverMap = Object.fromEntries((capDrivers || []).map(d => [d.tool, d.level]));
-  const items = tools.map(tool => ({ tool, level: driverMap[tool] || 'low' }));
-  items.sort((a, b) => (LEVEL_RANK[b.level] || 0) - (LEVEL_RANK[a.level] || 0));
-  return items.map(d =>
-    `<span class="driver-badge ${d.level}">${d.tool}</span>`
-  ).join('');
-}
 
 function riskIcon(level) {
   const icons = { low: '●', moderate: '◆', high: '▲', critical: '⬟' };
@@ -971,8 +962,9 @@ function renderGraph() {
 
       <div class="section">
         <div class="section-header"><div class="section-title">\uD83E\uDDBE Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
-        <div style="margin-top:2px;font-size:11px;"><span class="axis-label">Tools</span></div>
-        <div class="driver-list">${renderAllToolsByLevel(b.capDrivers, d.tools)}</div>
+        ${b.capDrivers.length ? `<div class="axis-row"><span class="axis-label">Drivers</span><div class="driver-list">${renderDriverBadges(b.capDrivers)}</div></div>` : ''}
+        ${b.hasNetwork ? `<div class="axis-row"><span class="axis-label">Network</span><span style="color:var(--orange);font-size:10px;">${formatNetwork(d.network)}</span></div>` : ''}
+        ${!b.capDrivers.length && !b.hasNetwork ? '<div class="axis-row"><span class="axis-label">Drivers</span><span style="color:var(--muted);font-size:10px;">all tools low</span></div>' : ''}
       </div>
 
       <div class="section">
