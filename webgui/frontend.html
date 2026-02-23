@@ -33,7 +33,20 @@
   .agent-card {
     padding: 10px 12px; border-radius: 6px; cursor: pointer;
     margin-bottom: 4px; border: 1px solid transparent;
+    display: flex; align-items: stretch; gap: 10px;
   }
+  .agent-card .agent-info { flex: 1; min-width: 0; }
+  .agent-card .risk-square {
+    width: 44px; flex-shrink: 0; border-radius: 6px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    font-weight: 700; font-size: 9px; text-transform: uppercase; letter-spacing: 0.3px;
+    line-height: 1.2;
+  }
+  .agent-card .risk-square .risk-icon { font-size: 20px; margin-bottom: 2px; }
+  .agent-card .risk-square.low { background: rgba(63,185,80,0.2); color: var(--green); }
+  .agent-card .risk-square.moderate { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .agent-card .risk-square.high { background: rgba(219,109,40,0.2); color: var(--orange); }
+  .agent-card .risk-square.critical { background: rgba(248,81,73,0.25); color: var(--red); }
   .agent-card:hover { background: rgba(88,166,255,0.05); }
   .agent-card.active { background: rgba(88,166,255,0.1); border-color: var(--accent); }
   .agent-name { font-size: 13px; font-weight: 600; }
@@ -245,19 +258,26 @@ function renderAgentList() {
   el.innerHTML = state.agents.map(a => {
     const active = a.name === state.selected ? 'active' : '';
     const status = a.status || 'inactive';
-    const risk = (a.effective_risk || '').toLowerCase().replace(/[^a-z]/g, '') || 'low';
     const aa = state.analysis[a.name] || {};
+    const riskRaw = (aa.effective_risk || a.effective_risk || '').toLowerCase().replace(/[^a-z]/g, '') || 'low';
+    const risk = riskRaw === 'medium' ? 'moderate' : riskRaw;
     const taint = aa.propagated_taint || a.taint_level || 'none';
     const sens = aa.propagated_sensitivity || a.sensitivity_level || 'none';
     const cap = aa.capability_level || a.capability_level || 'none';
     const norm = v => v.toLowerCase().replace(/[^a-z]/g, '');
     let badges = `<span class="axis-badge ${norm(taint)}">T:${taint}</span> `
       + `<span class="axis-badge ${norm(sens)}">S:${sens}</span> `
-      + `<span class="axis-badge ${norm(cap)}">C:${cap}</span> `
-      + `<span class="risk-badge ${risk}">${a.effective_risk || 'low'}</span>`;
+      + `<span class="axis-badge ${norm(cap)}">C:${cap}</span>`;
+    const riskIcons = { low: '●', moderate: '◆', high: '▲', critical: '⬟' };
     return `<div class="agent-card ${active}" onclick="selectAgent('${a.name}')">
-      <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
-      <div class="agent-meta">${a.model} &middot; ${status} ${badges}</div>
+      <div class="agent-info">
+        <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
+        <div class="agent-meta">${a.model} &middot; ${status} ${badges}</div>
+      </div>
+      <div class="risk-square ${risk}">
+        <span class="risk-icon">${riskIcons[risk] || '●'}</span>
+        ${risk}
+      </div>
     </div>`;
   }).join('');
 }
