@@ -751,8 +751,15 @@ defmodule TriOnyx.Router do
       |> Enum.map(fn session -> {session.definition.name, session.sensitivity_level} end)
       |> Map.new()
 
-    taint_levels = Map.merge(worst_case_taints, live_taints)
-    sensitivity_levels = Map.merge(worst_case_sensitivities, live_sensitivities)
+    taint_levels =
+      Map.merge(worst_case_taints, live_taints, fn _k, wc, live ->
+        InformationClassifier.higher_level(wc, live)
+      end)
+
+    sensitivity_levels =
+      Map.merge(worst_case_sensitivities, live_sensitivities, fn _k, wc, live ->
+        InformationClassifier.higher_level(wc, live)
+      end)
 
     # Combined levels map for backward compat with analyze/2
     info_levels =
