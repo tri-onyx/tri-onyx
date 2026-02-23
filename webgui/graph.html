@@ -920,10 +920,6 @@ function renderGraph() {
       ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network access → high taint &amp; capability</div>'
       : '';
 
-    const chainHtml = (d.riskChain && d.riskChain.length)
-      ? `<div class="axis-row"><span class="axis-label">Risk chain</span><span class="risk-chain" style="margin:0">${d.riskChain.join(' → ')}</span></div>`
-      : '';
-
     const maxInputNote = d.maxInputRisk
       ? `<div class="axis-row"><span class="axis-label">Max input risk</span><span class="badge ${d.maxInputRisk}">${d.maxInputRisk}</span></div>`
       : '';
@@ -973,7 +969,6 @@ function renderGraph() {
         <div class="derivation">Adjusted: \uD83E\uDDBE <span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span> capability \u2192 ${b.capMod}</div>
         <div class="derivation">Final: <span class="badge ${d.effectiveRisk}" style="font-size:11px;">${d.effectiveRisk}</span></div>
         ${maxInputNote}
-        ${chainHtml}
       </div>
     `;
     tooltip.classList.add('visible');
