@@ -21,8 +21,8 @@ defmodule TriOnyx.SensitivityMatrix do
   | Tool          | Sensitivity | Reason                                          |
   |---------------|-------------|-------------------------------------------------|
   | SendEmail     | medium      | Uses gateway-injected SMTP credentials          |
-  | MoveEmail     | medium      | Uses gateway-injected IMAP credentials          |
-  | CreateFolder  | medium      | Uses gateway-injected IMAP credentials          |
+  | MoveEmail     | low         | Folder move, no sensitive data exposed           |
+  | CreateFolder  | low         | Folder creation, no sensitive data exposed       |
   | CalendarQuery | medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarCreate| medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarUpdate| medium      | Uses gateway-injected CalDAV credentials        |
@@ -39,9 +39,9 @@ defmodule TriOnyx.SensitivityMatrix do
   | Source                | Sensitivity | Reason                           |
   |-----------------------|-------------|----------------------------------|
   | :webhook              | low         | Event metadata only              |
-  | :connector_unverified | medium      | Unverified source, may carry PII |
+  | :unverified_input | medium      | Unverified source, may carry PII |
   | :external_message     | low         | API-key authenticated, no auth data |
-  | :connector_verified   | low         | Platform-verified sender, no auth data |
+  | :verified_input   | low         | Platform-verified sender, no auth data |
   | :cron                 | low         | Internal schedule signal         |
   | :heartbeat            | low         | Internal timer signal            |
   | unknown               | low         | Default for unregistered types   |
@@ -64,8 +64,8 @@ defmodule TriOnyx.SensitivityMatrix do
     "WebFetch" => :low,
     "WebSearch" => :low,
     "SendEmail" => :medium,
-    "MoveEmail" => :medium,
-    "CreateFolder" => :medium,
+    "MoveEmail" => :low,
+    "CreateFolder" => :low,
     "CalendarQuery" => :medium,
     "CalendarCreate" => :medium,
     "CalendarUpdate" => :medium,
@@ -74,9 +74,9 @@ defmodule TriOnyx.SensitivityMatrix do
 
   @trigger_sensitivity %{
     webhook: :low,
-    connector_unverified: :medium,
+    unverified_input: :medium,
     external_message: :low,
-    connector_verified: :low,
+    verified_input: :low,
     cron: :low,
     heartbeat: :low
   }

@@ -132,8 +132,8 @@ defmodule TriOnyx.RiskScorer do
   Infers input sensitivity from agent tool configuration.
 
   Returns the worst-case sensitivity across the agent's tool list, sourced from
-  `SensitivityMatrix`. Email tools (SendEmail, MoveEmail, CreateFolder) that
-  require gateway-injected credentials return `:medium`.
+  `SensitivityMatrix`. SendEmail returns `:medium` (gateway-injected SMTP
+  credentials). MoveEmail and CreateFolder are `:low`.
   """
   @spec infer_sensitivity([String.t()]) :: atom()
   def infer_sensitivity(tools) when is_list(tools) do
