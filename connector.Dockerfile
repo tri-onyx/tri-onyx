@@ -14,6 +14,6 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 COPY connector/connector/ ./connector/
 
-ENV SECURECLAW_CONNECTOR_CONFIG=/app/config.yaml
+ENV TRI_ONYX_CONNECTOR_CONFIG=/app/config.yaml
 
 CMD ["uv", "run", "python", "-m", "connector.main"]

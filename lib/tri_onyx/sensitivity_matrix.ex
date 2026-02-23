@@ -40,8 +40,8 @@ defmodule TriOnyx.SensitivityMatrix do
   |-----------------------|-------------|----------------------------------|
   | :webhook              | low         | Event metadata only              |
   | :connector_unverified | medium      | Unverified source, may carry PII |
-  | :external_message     | low         | Verified message, no auth data   |
-  | :connector_verified   | low         | Verified message, no auth data   |
+  | :external_message     | low         | API-key authenticated, no auth data |
+  | :connector_verified   | low         | Platform-verified sender, no auth data |
   | :cron                 | low         | Internal schedule signal         |
   | :heartbeat            | low         | Internal timer signal            |
   | unknown               | low         | Default for unregistered types   |

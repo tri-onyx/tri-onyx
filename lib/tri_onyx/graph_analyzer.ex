@@ -529,7 +529,7 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.map(fn tool ->
         level = TaintMatrix.tool_taint(tool)
         level = if tool == "Bash" and has_net, do: :high, else: level
-        %{source: tool, level: level}
+        %{source: tool, level: level, kind: :tool}
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
@@ -537,7 +537,7 @@ defmodule TriOnyx.GraphAnalyzer do
     tool_sensitivity =
       definition.tools
       |> Enum.map(fn tool ->
-        %{source: tool, level: SensitivityMatrix.tool_sensitivity(tool)}
+        %{source: tool, level: SensitivityMatrix.tool_sensitivity(tool), kind: :tool}
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
@@ -545,25 +545,25 @@ defmodule TriOnyx.GraphAnalyzer do
     input_taint =
       Map.get(definition, :input_sources, [])
       |> Enum.map(fn src ->
-        %{source: to_string(src), level: TaintMatrix.trigger_taint(src)}
+        %{source: to_string(src), level: TaintMatrix.trigger_taint(src), kind: :input}
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
     input_sensitivity =
       Map.get(definition, :input_sources, [])
       |> Enum.map(fn src ->
-        %{source: to_string(src), level: SensitivityMatrix.trigger_sensitivity(src)}
+        %{source: to_string(src), level: SensitivityMatrix.trigger_sensitivity(src), kind: :input}
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
     # receive_from peers → :medium taint
     peer_taint =
       definition.receive_from
-      |> Enum.map(fn peer -> %{source: "receive_from:#{peer}", level: :medium} end)
+      |> Enum.map(fn peer -> %{source: "receive_from:#{peer}", level: :medium, kind: :input} end)
 
     # Network → :high taint
     network_taint =
-      if has_net, do: [%{source: "network:outbound", level: :high}], else: []
+      if has_net, do: [%{source: "network:outbound", level: :high, kind: :input}], else: []
 
     # BCP controller channels → step_down(peer_worst_case_taint) for taint,
     # peer sensitivity for sensitivity
@@ -572,10 +572,10 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.filter(fn ch -> ch.role == :controller end)
       |> Enum.map(fn ch ->
         case Map.get(all_definitions, ch.peer) do
-          nil -> %{source: "bcp:#{ch.peer}", level: :low}
+          nil -> %{source: "bcp:#{ch.peer}", level: :low, kind: :input}
           peer_def ->
             peer_taint = worst_case_taint(peer_def)
-            %{source: "bcp:#{ch.peer}", level: InformationClassifier.step_down(peer_taint)}
+            %{source: "bcp:#{ch.peer}", level: InformationClassifier.step_down(peer_taint), kind: :input}
         end
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
@@ -585,8 +585,8 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.filter(fn ch -> ch.role == :controller end)
       |> Enum.map(fn ch ->
         case Map.get(all_definitions, ch.peer) do
-          nil -> %{source: "bcp:#{ch.peer}", level: :low}
-          peer_def -> %{source: "bcp:#{ch.peer}", level: worst_case_sensitivity(peer_def)}
+          nil -> %{source: "bcp:#{ch.peer}", level: :low, kind: :input}
+          peer_def -> %{source: "bcp:#{ch.peer}", level: worst_case_sensitivity(peer_def), kind: :input}
         end
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
@@ -594,7 +594,7 @@ defmodule TriOnyx.GraphAnalyzer do
     # base_taint floor
     base_taint_floor = Map.get(definition, :base_taint, :low)
     base_taint_entry =
-      if base_taint_floor != :low, do: [%{source: "base_taint", level: base_taint_floor}], else: []
+      if base_taint_floor != :low, do: [%{source: "base_taint", level: base_taint_floor, kind: :input}], else: []
 
     # Capability drivers (tools only, unchanged)
     capability_drivers =

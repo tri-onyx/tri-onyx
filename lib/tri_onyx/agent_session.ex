@@ -362,23 +362,31 @@ defmodule TriOnyx.AgentSession do
     state = %{state | status: :ready}
 
     # Flush any BCP queries that arrived while the runtime was starting
-    state =
+    {state, had_bcp_queries} =
       case Map.get(state, :pending_bcp_queries, []) do
-        [] -> state
+        [] -> {state, false}
         queries ->
           Enum.each(queries, fn {query_id, category, from_agent, spec} ->
             Logger.info("AgentSession #{state.id}: flushing queued BCP query #{query_id}")
             AgentPort.send_bcp_query(state.port, query_id, category, from_agent, spec)
           end)
-          Map.delete(state, :pending_bcp_queries)
+          {Map.delete(state, :pending_bcp_queries), true}
       end
 
-    # Flush any prompt that arrived while the runtime was starting
+    # Flush any prompt that arrived while the runtime was starting.
+    # If BCP queries were flushed, discard the trigger prompt — the BCP
+    # query message already contains the full spec and the runtime formats
+    # it into a proper prompt.  Sending the trigger payload too would
+    # override the structured query with a useless summary string.
     case state.pending_prompt do
-      {content, metadata} ->
+      {content, metadata} when had_bcp_queries == false ->
         Logger.info("AgentSession #{state.id}: flushing queued prompt (#{byte_size(content)} bytes)")
         broadcast_event(state, %{"type" => "user_prompt", "content" => content})
         AgentPort.send_prompt(state.port, content, metadata)
+        {:noreply, %{state | status: :running, pending_prompt: nil}}
+
+      {_content, _metadata} ->
+        Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP queries already flushed)")
         {:noreply, %{state | status: :running, pending_prompt: nil}}
 
       nil ->
