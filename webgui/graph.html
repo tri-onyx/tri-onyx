@@ -920,10 +920,6 @@ function renderGraph() {
       ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network access → high taint &amp; capability</div>'
       : '';
 
-    const maxInputNote = d.maxInputRisk
-      ? `<div class="axis-row"><span class="axis-label">Max input risk</span><span class="badge ${d.maxInputRisk}">${d.maxInputRisk}</span></div>`
-      : '';
-
     tooltip.innerHTML = `
       <div class="header-row">
         <div class="header-info">
@@ -968,7 +964,6 @@ function renderGraph() {
         <div class="derivation">Baseline: \u2623\uFE0F <span class="badge ${b.effT}">${b.effT}</span> \u00D7 \uD83D\uDD12 <span class="badge ${b.effS}">${b.effS}</span> = <span class="badge ${b.baseline}">${b.baseline}</span></div>
         <div class="derivation">Adjusted: \uD83E\uDDBE <span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span> capability \u2192 ${b.capMod}</div>
         <div class="derivation">Final: <span class="badge ${d.effectiveRisk}" style="font-size:11px;">${d.effectiveRisk}</span></div>
-        ${maxInputNote}
       </div>
     `;
     tooltip.classList.add('visible');
