@@ -593,8 +593,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
   describe "trace_risk_chain/3 cycle handling" do
     test "A -> B -> A does not infinite loop" do
       edges = %{
-        "A" => [%{from: "B", paths: ["/shared/**"], risk_level: "medium"}],
-        "B" => [%{from: "A", paths: ["/shared/**"], risk_level: "medium"}]
+        "A" => [%{from: "B", paths: ["/shared/**"]}],
+        "B" => [%{from: "A", paths: ["/shared/**"]}]
       }
 
       chain_a = GraphAnalyzer.trace_risk_chain("A", edges, MapSet.new())
@@ -633,28 +633,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
       edge = hd(controller_incoming)
       assert edge.from == "reader"
       assert edge.edge_type == :bcp
-      assert edge.risk_level == "medium"
 
       # Reader has no incoming bcp edges (only controller receives)
       assert result["reader"].incoming_edges == []
-    end
-
-    test "bcp edge risk level matches max_category" do
-      for {cat, expected_risk} <- [{1, "low"}, {2, "medium"}, {3, "high"}] do
-        controller = make_def(%{
-          name: "ctrl",
-          bcp_channels: [
-            %{peer: "rdr", role: :controller, max_category: cat, budget_bits: 100,
-              max_cat2_queries: 0, max_cat3_queries: 0}
-          ]
-        })
-
-        reader = make_def(%{name: "rdr"})
-
-        result = GraphAnalyzer.analyze([controller, reader], %{})
-        edge = hd(result["ctrl"].incoming_edges)
-        assert edge.risk_level == expected_risk
-      end
     end
 
     test "no bcp edge when peer does not exist" do
@@ -778,7 +759,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
       definitions = [controller, reader]
       # BCP edge: reader → controller
-      edges = %{"ctrl" => [%{from: "rdr", paths: [], risk_level: "medium", edge_type: :bcp}]}
+      edges = %{"ctrl" => [%{from: "rdr", paths: [], edge_type: :bcp}]}
 
       base_levels = %{
         "ctrl" => %{taint: :low, sensitivity: :low},
@@ -797,7 +778,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       ctrl = make_def(%{name: "ctrl"})
       rdr = make_def(%{name: "rdr"})
 
-      edges = %{"ctrl" => [%{from: "rdr", paths: [], risk_level: "low", edge_type: :bcp}]}
+      edges = %{"ctrl" => [%{from: "rdr", paths: [], edge_type: :bcp}]}
       base_levels = %{
         "ctrl" => %{taint: :low, sensitivity: :low},
         "rdr" => %{taint: :low, sensitivity: :high}
@@ -811,7 +792,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       a = make_def(%{name: "a"})
       b = make_def(%{name: "b"})
 
-      edges = %{"b" => [%{from: "a", paths: [], risk_level: "low", edge_type: :filesystem}]}
+      edges = %{"b" => [%{from: "a", paths: [], edge_type: :filesystem}]}
       base_levels = %{
         "a" => %{taint: :high, sensitivity: :low},
         "b" => %{taint: :low, sensitivity: :low}
@@ -828,8 +809,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
       b = make_def(%{name: "b"})
 
       edges = %{
-        "a" => [%{from: "b", paths: [], risk_level: "low", edge_type: :filesystem}],
-        "b" => [%{from: "a", paths: [], risk_level: "low", edge_type: :filesystem}]
+        "a" => [%{from: "b", paths: [], edge_type: :filesystem}],
+        "b" => [%{from: "a", paths: [], edge_type: :filesystem}]
       }
       base_levels = %{
         "a" => %{taint: :high, sensitivity: :low},
@@ -1010,28 +991,4 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
   end
 
-  describe "propagate_risk/2" do
-    test "propagates risk level from source through chain" do
-      edges = %{
-        "sink" => [%{from: "middle", paths: ["/b/**"], risk_level: "medium"}],
-        "middle" => [%{from: "source", paths: ["/a/**"], risk_level: "high"}]
-      }
-
-      assert :high == GraphAnalyzer.propagate_risk("sink", edges)
-    end
-
-    test "returns low for agent with no incoming edges" do
-      assert :low == GraphAnalyzer.propagate_risk("isolated", %{})
-    end
-
-    test "handles cycles without infinite loop" do
-      edges = %{
-        "A" => [%{from: "B", paths: ["/x/**"], risk_level: "high"}],
-        "B" => [%{from: "A", paths: ["/y/**"], risk_level: "medium"}]
-      }
-
-      result = GraphAnalyzer.propagate_risk("A", edges)
-      assert result in [:low, :medium, :high]
-    end
-  end
 end

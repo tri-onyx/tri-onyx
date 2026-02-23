@@ -23,7 +23,7 @@ defmodule TriOnyx.GraphAnalyzer do
           max_input_sensitivity: InformationClassifier.sensitivity_level(),
           max_input_risk: InformationClassifier.information_level(),
           capability_level: :low | :medium | :high,
-          incoming_edges: [%{from: String.t(), paths: [String.t()], risk_level: String.t()}],
+          incoming_edges: [%{from: String.t(), paths: [String.t()]}],
           risk_chain: [String.t()]
         }
 
@@ -111,7 +111,7 @@ defmodule TriOnyx.GraphAnalyzer do
     |> Enum.flat_map(fn {reader_name, %{incoming_edges: edges}} ->
       reader_taint = extract_taint(taint_levels, reader_name)
 
-      Enum.flat_map(edges, fn %{from: writer_name, risk_level: risk_level} ->
+      Enum.flat_map(edges, fn %{from: writer_name} ->
         writer_taint = extract_taint(taint_levels, writer_name)
 
         if level_rank(writer_taint) > level_rank(reader_taint) do
@@ -119,7 +119,6 @@ defmodule TriOnyx.GraphAnalyzer do
             %{
               "reader" => reader_name,
               "writer" => writer_name,
-              "risk_level" => risk_level,
               "description" =>
                 "Integrity violation: #{writer_name} (taint: #{writer_taint}) writes data " <>
                   "read by #{reader_name} (taint: #{reader_taint}). Untrusted data enters trusted context."
@@ -143,18 +142,6 @@ defmodule TriOnyx.GraphAnalyzer do
     fs_violations = bell_lapadula_fs_violations(definitions, risk_manifest, sensitivity_levels)
     msg_violations = bell_lapadula_messaging_violations(definitions, sensitivity_levels)
     fs_violations ++ msg_violations
-  end
-
-  @doc """
-  Traces risk through chains accounting for sanitization.
-
-  Walks the edge graph from a starting agent. At each hop, the risk level
-  propagates (or steps down if sanitization is configured). Returns the
-  final propagated risk level.
-  """
-  @spec propagate_risk(String.t(), map()) :: InformationClassifier.information_level()
-  def propagate_risk(agent_name, edges) do
-    do_propagate(agent_name, edges, MapSet.new())
   end
 
   @doc """
@@ -396,7 +383,7 @@ defmodule TriOnyx.GraphAnalyzer do
   end
 
   @spec build_filesystem_edges([map()], map()) :: %{String.t() => [map()]}
-  defp build_filesystem_edges(definitions, risk_manifest) do
+  defp build_filesystem_edges(definitions, _risk_manifest) do
     for writer <- definitions,
         reader <- definitions,
         writer.name != reader.name,
@@ -404,20 +391,12 @@ defmodule TriOnyx.GraphAnalyzer do
         reader.fs_read != [],
         reduce: %{} do
       acc ->
-        overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read, risk_manifest)
+        overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read)
 
         if overlapping != [] do
-          paths = Enum.map(overlapping, fn {path, _} -> path end)
-
-          max_risk =
-            overlapping
-            |> Enum.map(fn {_, risk} -> risk end)
-            |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
-
           edge = %{
             from: writer.name,
-            paths: paths,
-            risk_level: to_string(max_risk),
+            paths: overlapping,
             edge_type: :filesystem
           }
 
@@ -442,7 +421,6 @@ defmodule TriOnyx.GraphAnalyzer do
         edge = %{
           from: sender.name,
           paths: [],
-          risk_level: "low",
           edge_type: :messaging
         }
 
@@ -468,7 +446,6 @@ defmodule TriOnyx.GraphAnalyzer do
         edge = %{
           from: channel.peer,
           paths: [],
-          risk_level: bcp_risk_level(channel.max_category),
           edge_type: :bcp,
           max_category: channel.max_category,
           budget_bits: channel.budget_bits
@@ -477,10 +454,6 @@ defmodule TriOnyx.GraphAnalyzer do
         Map.update(acc, definition.name, [edge], &[edge | &1])
     end
   end
-
-  defp bcp_risk_level(1), do: "low"
-  defp bcp_risk_level(2), do: "medium"
-  defp bcp_risk_level(3), do: "high"
 
   @doc """
   Computes per-tool driver breakdowns for tooltip display.
@@ -697,7 +670,7 @@ defmodule TriOnyx.GraphAnalyzer do
     Map.merge(edges_a, edges_b, fn _key, list_a, list_b -> list_a ++ list_b end)
   end
 
-  defp bell_lapadula_fs_violations(definitions, risk_manifest, sensitivity_levels) do
+  defp bell_lapadula_fs_violations(definitions, _risk_manifest, sensitivity_levels) do
     network_readers =
       Enum.filter(definitions, fn def ->
         has_network?(def.network)
@@ -715,14 +688,14 @@ defmodule TriOnyx.GraphAnalyzer do
         reader_sensitivity = extract_sensitivity(sensitivity_levels, reader.name)
 
         if writer.name != reader.name and level_rank(writer_sensitivity) > level_rank(reader_sensitivity) do
-          overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read, risk_manifest)
+          overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read)
 
           if overlapping != [] do
             [
               %{
                 "writer" => writer.name,
                 "reader" => reader.name,
-                "paths" => Enum.map(overlapping, fn {path, _} -> path end),
+                "paths" => overlapping,
                 "edge_type" => "filesystem",
                 "description" =>
                   "Sensitivity violation: #{writer.name} (sensitivity: #{writer_sensitivity}) writes to paths " <>
@@ -770,20 +743,17 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
-  @spec find_overlapping_paths([String.t()], [String.t()], map()) ::
-          [{String.t(), InformationClassifier.information_level()}]
-  defp find_overlapping_paths(write_patterns, read_patterns, risk_manifest) do
+  @spec find_overlapping_paths([String.t()], [String.t()]) :: [String.t()]
+  defp find_overlapping_paths(write_patterns, read_patterns) do
     for write_pat <- write_patterns,
         read_pat <- read_patterns,
         paths_overlap?(write_pat, read_pat),
         reduce: [] do
       acc ->
-        # Determine the canonical overlap pattern for manifest lookup
         overlap_pat = shorter_pattern(write_pat, read_pat)
-        risk = lookup_manifest_risk(overlap_pat, risk_manifest)
-        [{overlap_pat, risk} | acc]
+        [overlap_pat | acc]
     end
-    |> Enum.uniq_by(fn {path, _} -> path end)
+    |> Enum.uniq()
   end
 
   # Two glob patterns overlap if one is a prefix of the other (stripping glob
@@ -809,27 +779,6 @@ defmodule TriOnyx.GraphAnalyzer do
   @spec shorter_pattern(String.t(), String.t()) :: String.t()
   defp shorter_pattern(a, b) do
     if String.length(a) <= String.length(b), do: a, else: b
-  end
-
-  @spec lookup_manifest_risk(String.t(), map()) :: InformationClassifier.information_level()
-  defp lookup_manifest_risk(path, risk_manifest) do
-    # Look for exact match first, then prefix matches
-    case Map.get(risk_manifest, path) do
-      %{"risk_level" => level} ->
-        safe_to_level(level)
-
-      nil ->
-        # Check if any manifest path is a prefix of or shares prefix with this path
-        risk_manifest
-        |> Enum.filter(fn {manifest_path, _} ->
-          paths_overlap?(path, manifest_path)
-        end)
-        |> Enum.map(fn {_, entry} ->
-          level = Map.get(entry, "risk_level", "low")
-          safe_to_level(level)
-        end)
-        |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
-    end
   end
 
   @spec lookup_manifest_taint(String.t(), map()) :: InformationClassifier.information_level()
@@ -877,21 +826,4 @@ defmodule TriOnyx.GraphAnalyzer do
   defp level_rank(:medium), do: 1
   defp level_rank(:high), do: 2
 
-  @spec do_propagate(String.t(), map(), MapSet.t()) :: InformationClassifier.information_level()
-  defp do_propagate(agent_name, edges, visited) do
-    if MapSet.member?(visited, agent_name) do
-      :low
-    else
-      visited = MapSet.put(visited, agent_name)
-      incoming = Map.get(edges, agent_name, [])
-
-      incoming
-      |> Enum.map(fn %{from: source, risk_level: risk_level} ->
-        upstream_risk = do_propagate(source, edges, visited)
-        edge_risk = safe_to_level(risk_level)
-        InformationClassifier.higher_level(upstream_risk, edge_risk)
-      end)
-      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
-    end
-  end
 end

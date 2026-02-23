@@ -140,7 +140,7 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
         edge_strs = []
         for e in incoming:
             et = e.get("edge_type", "filesystem")
-            edge_strs.append(f"{e['from']} ({et}, risk:{e.get('risk_level', '?')})")
+            edge_strs.append(f"{e['from']} ({et})")
         lines.append(f"  Inputs:      {'; '.join(edge_strs)}")
 
     return "\n".join(lines)
