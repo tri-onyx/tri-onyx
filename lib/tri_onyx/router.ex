@@ -674,13 +674,13 @@ defmodule TriOnyx.Router do
       end)
 
     # Triggers in a stable display order
-    trigger_order = ~w(webhook connector_unverified inter_agent external_message connector_verified cron heartbeat)
+    trigger_order = ~w(webhook unverified_input inter_agent external_message verified_input cron heartbeat)
     trigger_notes = %{
       "webhook"              => "untrusted external HTTP payload",
-      "connector_unverified" => "unverified email or chat message",
+      "unverified_input" => "unverified email or chat message",
       "inter_agent"          => "sender taint propagated at runtime",
       "external_message"     => "API-key authenticated programmatic message",
-      "connector_verified"   => "chat platform message with verified sender identity",
+      "verified_input"   => "chat platform message with verified sender identity",
       "cron"                 => "internal schedule (no external input)",
       "heartbeat"            => "internal timer (no external input)"
     }

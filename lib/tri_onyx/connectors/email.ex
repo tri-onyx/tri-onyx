@@ -595,7 +595,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
   1. Fetches and parses the MIME structure
   2. Writes `{workspace}/agents/{agent_name}/inbox/{uid}/message.json` + attachments
   3. Updates the risk manifest with `taint_level: :high`
-  4. Dispatches a `:connector_unverified` trigger via `TriggerRouter`
+  4. Dispatches a `:unverified_input` trigger via `TriggerRouter`
   """
 
   use GenServer
@@ -723,7 +723,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
                       "Path: /workspace/agents/#{state.agent_name}/inbox/#{uid}/message.json"
 
                   TriggerRouter.dispatch(%{
-                    type: :connector_unverified,
+                    type: :unverified_input,
                     agent_name: state.agent_name,
                     payload: trigger_payload
                   })

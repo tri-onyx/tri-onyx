@@ -643,9 +643,9 @@ defmodule TriOnyx.ConnectorHandler do
   # --- Private Helpers ---
 
   @spec trust_to_trigger(map()) :: atom()
-  defp trust_to_trigger(%{"level" => "verified"}), do: :connector_verified
-  defp trust_to_trigger(%{"level" => "unverified"}), do: :connector_unverified
-  defp trust_to_trigger(_), do: :connector_unverified
+  defp trust_to_trigger(%{"level" => "verified"}), do: :verified_input
+  defp trust_to_trigger(%{"level" => "unverified"}), do: :unverified_input
+  defp trust_to_trigger(_), do: :unverified_input
 
   @spec compute_channel_hash(map()) :: String.t()
   defp compute_channel_hash(channel) when is_map(channel) do

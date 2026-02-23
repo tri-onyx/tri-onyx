@@ -165,7 +165,7 @@ workspace/agents/email/inbox/
 ```
 
 4. The risk manifest is updated with `taint_level: :high` (email is untrusted)
-5. A `:connector_unverified` trigger dispatches to the email agent
+5. A `:unverified_input` trigger dispatches to the email agent
 6. The agent wakes and processes the new email
 
 ### Outbound flow
@@ -214,7 +214,7 @@ into folders.
 
 ### Taint tracking
 
-Email inbound uses the `:connector_unverified` trigger, which gives the
+Email inbound uses the `:unverified_input` trigger, which gives the
 session **high taint** from the start. This is correct — email content is
 untrusted and may contain prompt injection attempts.
 
