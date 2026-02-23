@@ -506,7 +506,7 @@ defmodule TriOnyx.AgentDefinition do
           invalid = Enum.reject(list, &(&1 in @valid_input_sources))
 
           if invalid == [] do
-            {:ok, Enum.map(list, &String.to_existing_atom/1)}
+            {:ok, Enum.map(list, &String.to_atom/1)}
           else
             {:error, {:invalid_input_sources, invalid, @valid_input_sources}}
           end
