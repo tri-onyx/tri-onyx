@@ -182,18 +182,32 @@ defmodule TriOnyx.GraphAnalyzer do
 
   Taint sources (input quality only, never tools):
   - Network access or WebFetch/WebSearch → `:high`
-  - Free-text messaging peers (receive_from) → `:medium`
+  - Free-text messaging peers (receive_from) → sender's worst-case taint (falls back to `:medium` for unknown peers)
   - BCP controller channel → `step_down(peer's worst-case taint)`
   - No external inputs → `:low`
   """
   @spec worst_case_taint(map(), map()) :: InformationClassifier.information_level()
   def worst_case_taint(definition, all_definitions) do
+    # Remove self from all_definitions to prevent infinite recursion
+    # when peers reference us back (A receives from B, B receives from A).
+    peer_definitions = Map.delete(all_definitions, definition.name)
+
     has_external_input =
       Enum.any?(definition.tools, fn tool ->
         tool in ["WebFetch", "WebSearch"]
       end)
 
-    has_messaging_peers = definition.receive_from != []
+    # Messaging peer taint: resolve each peer's worst-case taint from
+    # all_definitions, falling back to :medium for unknown peers.
+    messaging_taint =
+      definition.receive_from
+      |> Enum.map(fn peer ->
+        case Map.get(peer_definitions, peer) do
+          nil -> :medium
+          peer_def -> worst_case_taint(peer_def, peer_definitions)
+        end
+      end)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
 
     # BCP taint: for each controller channel, resolve peer's worst-case
     # taint and step it down by one level.
@@ -201,11 +215,10 @@ defmodule TriOnyx.GraphAnalyzer do
       definition.bcp_channels
       |> Enum.filter(fn ch -> ch.role == :controller end)
       |> Enum.map(fn ch ->
-        case Map.get(all_definitions, ch.peer) do
+        case Map.get(peer_definitions, ch.peer) do
           nil -> :low
           peer_def ->
-            # Compute peer taint without all_definitions to avoid cycles
-            peer_taint = worst_case_taint(peer_def)
+            peer_taint = worst_case_taint(peer_def, peer_definitions)
             InformationClassifier.step_down(peer_taint)
         end
       end)
@@ -215,7 +228,6 @@ defmodule TriOnyx.GraphAnalyzer do
       cond do
         has_network?(definition.network) -> :high
         has_external_input -> :high
-        has_messaging_peers -> :medium
         true -> :low
       end
 
@@ -226,6 +238,7 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
 
     result = InformationClassifier.higher_level(base, bcp_taint)
+    result = InformationClassifier.higher_level(result, messaging_taint)
     result = InformationClassifier.higher_level(result, input_source_taint)
 
     # Factor in base_taint from agent definition as a floor
@@ -521,6 +534,7 @@ defmodule TriOnyx.GraphAnalyzer do
           capability_drivers: [%{tool: String.t(), level: atom()}]
         }
   def rating_drivers(definition, all_definitions \\ %{}) do
+    peer_definitions = Map.delete(all_definitions, definition.name)
     has_net = has_network?(definition.network)
 
     # Tool taint sources
@@ -556,10 +570,18 @@ defmodule TriOnyx.GraphAnalyzer do
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
-    # receive_from peers → :medium taint
+    # receive_from peers → sender's worst-case taint
     peer_taint =
       definition.receive_from
-      |> Enum.map(fn peer -> %{source: "receive_from:#{peer}", level: :medium, kind: :input} end)
+      |> Enum.map(fn peer ->
+        level =
+          case Map.get(peer_definitions, peer) do
+            nil -> :medium
+            peer_def -> worst_case_taint(peer_def, peer_definitions)
+          end
+
+        %{source: "receive_from:#{peer}", level: level, kind: :input}
+      end)
 
     # Network → :high taint
     network_taint =
@@ -571,10 +593,10 @@ defmodule TriOnyx.GraphAnalyzer do
       definition.bcp_channels
       |> Enum.filter(fn ch -> ch.role == :controller end)
       |> Enum.map(fn ch ->
-        case Map.get(all_definitions, ch.peer) do
+        case Map.get(peer_definitions, ch.peer) do
           nil -> %{source: "bcp:#{ch.peer}", level: :low, kind: :input}
           peer_def ->
-            peer_taint = worst_case_taint(peer_def)
+            peer_taint = worst_case_taint(peer_def, peer_definitions)
             %{source: "bcp:#{ch.peer}", level: InformationClassifier.step_down(peer_taint), kind: :input}
         end
       end)

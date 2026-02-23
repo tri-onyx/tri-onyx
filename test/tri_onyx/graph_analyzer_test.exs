@@ -527,9 +527,23 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert :high = GraphAnalyzer.worst_case_taint(agent)
     end
 
-    test "agent receiving messages has medium taint" do
+    test "agent receiving messages has medium taint when peer is unknown" do
       agent = make_def(%{name: "receiver", receive_from: ["other"]})
       assert :medium = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "agent receiving messages inherits low taint from low-taint peer" do
+      sender = make_def(%{name: "sender", tools: ["Read"]})
+      receiver = make_def(%{name: "receiver", receive_from: ["sender"]})
+      all_defs = %{"sender" => sender, "receiver" => receiver}
+      assert :low = GraphAnalyzer.worst_case_taint(receiver, all_defs)
+    end
+
+    test "agent receiving messages inherits high taint from high-taint peer" do
+      sender = make_def(%{name: "sender", tools: ["Read", "WebFetch"]})
+      receiver = make_def(%{name: "receiver", receive_from: ["sender"]})
+      all_defs = %{"sender" => sender, "receiver" => receiver}
+      assert :high = GraphAnalyzer.worst_case_taint(receiver, all_defs)
     end
 
     test "Bash-only agent with no inputs has low taint" do
@@ -955,6 +969,17 @@ defmodule TriOnyx.GraphAnalyzerTest do
       peer = Enum.find(result.taint_sources, & &1.source == "receive_from:main")
       assert peer != nil
       assert peer.kind == :input
+    end
+
+    test "receive_from peer taint matches sender's worst-case taint" do
+      sender = make_def(%{name: "sender", tools: ["Read"]})
+      receiver = make_def(%{name: "receiver", tools: ["Read"], receive_from: ["sender"]})
+      all_defs = %{"sender" => sender, "receiver" => receiver}
+      result = GraphAnalyzer.rating_drivers(receiver, all_defs)
+
+      peer = Enum.find(result.taint_sources, & &1.source == "receive_from:sender")
+      assert peer != nil
+      assert peer.level == :low
     end
 
     test "includes network as taint source with kind :input" do
