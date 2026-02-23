@@ -41,6 +41,21 @@ def _build_adapters(
     config: ConnectorConfig,
 ) -> dict[str, Any]:
     """Instantiate enabled adapters from config."""
+    # Create transcriber if voice is enabled
+    transcriber = None
+    if config.voice.enabled:
+        from connector.transcriber import Transcriber
+
+        transcriber = Transcriber(
+            model_size=config.voice.whisper_model,
+            language=config.voice.language,
+        )
+        logger.info(
+            "Voice transcription enabled (model=%s, language=%s)",
+            config.voice.whisper_model,
+            config.voice.language,
+        )
+
     adapters: dict[str, Any] = {}
     for name, adapter_cfg in config.adapters.items():
         if not adapter_cfg.enabled:
@@ -50,7 +65,7 @@ def _build_adapters(
         if cls is None:
             logger.warning("Unknown adapter type: %s", name)
             continue
-        adapters[name] = cls(adapter_cfg)
+        adapters[name] = cls(adapter_cfg, transcriber=transcriber)
         logger.info("Created adapter: %s", name)
     return adapters
 
