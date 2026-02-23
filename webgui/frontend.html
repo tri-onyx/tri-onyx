@@ -61,6 +61,15 @@
     border-radius: 10px; font-weight: 600;
     background: rgba(248,81,73,0.15); color: var(--red);
   }
+  .axis-badge {
+    display: inline-block; font-size: 9px; padding: 1px 5px;
+    border-radius: 8px; font-weight: 600; letter-spacing: 0.3px;
+  }
+  .axis-badge.low { background: rgba(63,185,80,0.2); color: var(--green); }
+  .axis-badge.medium { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .axis-badge.high { background: rgba(219,109,40,0.2); color: var(--orange); }
+  .axis-badge.critical { background: rgba(248,81,73,0.2); color: var(--red); }
+  .axis-badge.none { background: rgba(139,148,158,0.15); color: var(--muted); }
 
   /* Main content */
   .main { flex: 1; display: flex; flex-direction: column; }
@@ -185,6 +194,7 @@
 <script>
 const state = {
   agents: [],
+  analysis: {},      // keyed by agent name, from /graph/analysis
   selected: null,   // agent name
   eventSource: null,
   events: [],        // {time, type, data}
@@ -214,8 +224,12 @@ async function api(method, path, body) {
 
 async function refreshAgents() {
   try {
-    const data = await api('GET', '/agents');
-    state.agents = data.agents || [];
+    const [agentData, analysisData] = await Promise.all([
+      api('GET', '/agents'),
+      api('GET', '/graph/analysis').catch(() => ({ analysis: {} }))
+    ]);
+    state.agents = agentData.agents || [];
+    state.analysis = analysisData.agents || {};
   } catch {
     state.agents = [];
   }
@@ -232,8 +246,15 @@ function renderAgentList() {
     const active = a.name === state.selected ? 'active' : '';
     const status = a.status || 'inactive';
     const risk = (a.effective_risk || '').toLowerCase().replace(/[^a-z]/g, '') || 'low';
-    let badges = `<span class="risk-badge ${risk}">${a.effective_risk || 'low'}</span>`;
-    if (a.taint_status === 'tainted') badges += ` <span class="taint-badge">tainted</span>`;
+    const aa = state.analysis[a.name] || {};
+    const taint = aa.propagated_taint || a.taint_level || 'none';
+    const sens = aa.propagated_sensitivity || a.sensitivity_level || 'none';
+    const cap = aa.capability_level || a.capability_level || 'none';
+    const norm = v => v.toLowerCase().replace(/[^a-z]/g, '');
+    let badges = `<span class="axis-badge ${norm(taint)}">T:${taint}</span> `
+      + `<span class="axis-badge ${norm(sens)}">S:${sens}</span> `
+      + `<span class="axis-badge ${norm(cap)}">C:${cap}</span> `
+      + `<span class="risk-badge ${risk}">${a.effective_risk || 'low'}</span>`;
     return `<div class="agent-card ${active}" onclick="selectAgent('${a.name}')">
       <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
       <div class="agent-meta">${a.model} &middot; ${status} ${badges}</div>
