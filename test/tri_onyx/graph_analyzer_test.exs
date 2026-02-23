@@ -933,37 +933,46 @@ defmodule TriOnyx.GraphAnalyzerTest do
   end
 
   describe "rating_drivers/2" do
-    test "includes tool and input source taint" do
+    test "includes tool and input source taint with kind field" do
       agent = make_def(%{name: "cal", tools: ["Read", "WebFetch"], input_sources: [:connector_unverified]})
       result = GraphAnalyzer.rating_drivers(agent)
 
       sources = Enum.map(result.taint_sources, & &1.source)
       assert "WebFetch" in sources
       assert "connector_unverified" in sources
+
+      # Assert kind field
+      tool_src = Enum.find(result.taint_sources, & &1.source == "WebFetch")
+      assert tool_src.kind == :tool
+      input_src = Enum.find(result.taint_sources, & &1.source == "connector_unverified")
+      assert input_src.kind == :input
     end
 
-    test "includes receive_from peers as taint sources" do
+    test "includes receive_from peers as taint sources with kind :input" do
       agent = make_def(%{name: "a", tools: ["Read"], receive_from: ["main"]})
       result = GraphAnalyzer.rating_drivers(agent)
 
-      sources = Enum.map(result.taint_sources, & &1.source)
-      assert "receive_from:main" in sources
+      peer = Enum.find(result.taint_sources, & &1.source == "receive_from:main")
+      assert peer != nil
+      assert peer.kind == :input
     end
 
-    test "includes network as taint source" do
+    test "includes network as taint source with kind :input" do
       agent = make_def(%{name: "a", tools: ["Read"], network: :outbound})
       result = GraphAnalyzer.rating_drivers(agent)
 
-      sources = Enum.map(result.taint_sources, & &1.source)
-      assert "network:outbound" in sources
+      net = Enum.find(result.taint_sources, & &1.source == "network:outbound")
+      assert net != nil
+      assert net.kind == :input
     end
 
-    test "includes base_taint when above low" do
+    test "includes base_taint when above low with kind :input" do
       agent = make_def(%{name: "a", tools: ["Read"], base_taint: :medium})
       result = GraphAnalyzer.rating_drivers(agent)
 
-      sources = Enum.map(result.taint_sources, & &1.source)
-      assert "base_taint" in sources
+      base = Enum.find(result.taint_sources, & &1.source == "base_taint")
+      assert base != nil
+      assert base.kind == :input
     end
 
     test "excludes base_taint when low" do
@@ -974,12 +983,20 @@ defmodule TriOnyx.GraphAnalyzerTest do
       refute "base_taint" in sources
     end
 
-    test "includes input source sensitivity" do
+    test "includes input source sensitivity with kind :input" do
       agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:connector_unverified]})
       result = GraphAnalyzer.rating_drivers(agent)
 
-      sources = Enum.map(result.sensitivity_sources, & &1.source)
-      assert "connector_unverified" in sources
+      src = Enum.find(result.sensitivity_sources, & &1.source == "connector_unverified")
+      assert src != nil
+      assert src.kind == :input
+    end
+
+    test "tool sensitivity sources have kind :tool" do
+      agent = make_def(%{name: "a", tools: ["Read", "WebFetch"]})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      assert Enum.all?(result.sensitivity_sources, fn d -> d.kind == :tool end)
     end
 
     test "capability_drivers only include tools" do

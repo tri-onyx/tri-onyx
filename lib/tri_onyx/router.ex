@@ -813,12 +813,34 @@ defmodule TriOnyx.Router do
 
         drivers = GraphAnalyzer.rating_drivers(definition, all_defs)
 
+        # Merge topology edge sources into driver lists
+        entry = analysis[name] || %{}
+        edge_taint_sources =
+          Map.get(entry, :taint_sources, [])
+          |> Enum.map(fn src ->
+            %{source: "edge:#{src.from}", level: src.contributed, kind: :input, edge_type: src.edge_type}
+          end)
+
+        edge_sensitivity_sources =
+          Map.get(entry, :sensitivity_sources, [])
+          |> Enum.map(fn src ->
+            %{source: "edge:#{src.from}", level: src.contributed, kind: :input, edge_type: src.edge_type}
+          end)
+
+        merged_taint = drivers.taint_sources ++ edge_taint_sources
+        merged_sensitivity = drivers.sensitivity_sources ++ edge_sensitivity_sources
+
+        serialize_source = fn d ->
+          base = %{"source" => d.source, "level" => to_string(d.level), "kind" => to_string(d.kind)}
+          if Map.has_key?(d, :edge_type), do: Map.put(base, "edge_type", to_string(d.edge_type)), else: base
+        end
+
         {name, Map.merge(data, %{
           "effective_risk" => RiskScorer.format_risk(eff_risk),
           "worst_case_taint" => to_string(wc_t),
           "worst_case_sensitivity" => to_string(wc_s),
-          "taint_sources" => Enum.map(drivers.taint_sources, fn d -> %{"source" => d.source, "level" => to_string(d.level)} end),
-          "sensitivity_sources" => Enum.map(drivers.sensitivity_sources, fn d -> %{"source" => d.source, "level" => to_string(d.level)} end),
+          "taint_sources" => Enum.map(merged_taint, serialize_source),
+          "sensitivity_sources" => Enum.map(merged_sensitivity, serialize_source),
           "capability_drivers" => Enum.map(drivers.capability_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end)
         })}
       end)
@@ -1121,24 +1143,10 @@ defmodule TriOnyx.Router do
          "max_input_taint" => to_string(entry.max_input_taint),
          "max_input_sensitivity" => to_string(entry.max_input_sensitivity),
          "max_input_risk" => to_string(entry.max_input_risk),
-         "incoming_edges" =>
-           Enum.map(entry.incoming_edges, fn edge ->
-             %{
-               "from" => edge.from,
-               "paths" => edge.paths,
-               "edge_type" => to_string(Map.get(edge, :edge_type, :filesystem))
-             }
-           end),
          "capability_level" => to_string(entry.capability_level),
          "risk_chain" => entry.risk_chain,
          "propagated_taint" => if(entry[:propagated_taint], do: to_string(entry.propagated_taint), else: nil),
-         "propagated_sensitivity" => if(entry[:propagated_sensitivity], do: to_string(entry.propagated_sensitivity), else: nil),
-         "taint_sources" => Enum.map(Map.get(entry, :taint_sources, []), fn src ->
-           %{"from" => src.from, "contributed" => to_string(src.contributed), "edge_type" => to_string(src.edge_type)}
-         end),
-         "sensitivity_sources" => Enum.map(Map.get(entry, :sensitivity_sources, []), fn src ->
-           %{"from" => src.from, "contributed" => to_string(src.contributed), "edge_type" => to_string(src.edge_type)}
-         end)
+         "propagated_sensitivity" => if(entry[:propagated_sensitivity], do: to_string(entry.propagated_sensitivity), else: nil)
        }}
     end)
   end
