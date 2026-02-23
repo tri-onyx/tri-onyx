@@ -1,0 +1,11 @@
+[project]
+name = "tri-onyx-docs"
+version = "0.1.0"
+description = "TriOnyx documentation"
+requires-python = ">=3.11"
+
+[dependency-groups]
+docs = [
+    "mkdocs",
+    "mkdocs-material",
+]
