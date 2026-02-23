@@ -394,18 +394,24 @@ defmodule TriOnyx.ConnectorHandler do
       {channel, agent_name} = session_entry
       case Map.get(event, "type") do
         "text" ->
+          content = Map.get(event, "content", "")
 
+          # Filter out HEARTBEAT_OK responses — these are internal acks
+          # that should never be forwarded to users.
+          if String.contains?(content, "HEARTBEAT_OK") do
+            {:ok, state}
+          else
+            frame =
+              Jason.encode!(%{
+                "type" => "agent_text",
+                "agent_name" => agent_name,
+                "session_id" => session_id,
+                "content" => content,
+                "channel" => channel
+              })
 
-          frame =
-            Jason.encode!(%{
-              "type" => "agent_text",
-              "agent_name" => agent_name,
-              "session_id" => session_id,
-              "content" => Map.get(event, "content", ""),
-              "channel" => channel
-            })
-
-          {:push, [{:text, frame}], state}
+            {:push, [{:text, frame}], state}
+          end
 
         "ready" ->
 
