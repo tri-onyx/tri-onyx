@@ -44,13 +44,10 @@ services:
       context: .
       dockerfile: connector.Dockerfile
     volumes:
-      - ./connector/config.yaml:/app/config.yaml:ro
-      - connector-store:/data
+      - ./secrets/connector-config.yaml:/app/config.yaml:ro
+      - ./secrets/matrix-store:/data
     environment:
       - TRI_ONYX_CONNECTOR_TOKEN
       - MATRIX_ACCESS_TOKEN
     depends_on:
       - gateway
-
-volumes:
-  connector-store:
