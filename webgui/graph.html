@@ -915,14 +915,14 @@ function renderGraph() {
     // Worst-case vs live session notes (matches explain-risk.py logic)
     const wcT = d.worstCaseTaint || 'low';
     const wcS = d.worstCaseSensitivity || 'low';
-    let taintNote = `topology: ${wcT}`;
+    let taintNote = `static: ${wcT}`;
     if (b.liveTaintElevated) {
       const infoSources = a.information_sources || [];
-      taintNote += `; live: ${d.taintLevel}` + (infoSources.length ? ` via ${infoSources[0]}` : '');
+      taintNote += `; live session: ${d.taintLevel}` + (infoSources.length ? ` via ${infoSources[0]}` : '');
     }
-    let sensNote = `topology: ${wcS}`;
+    let sensNote = `static: ${wcS}`;
     if (b.liveSensElevated) {
-      sensNote += `; live: ${d.sensitivityLevel}`;
+      sensNote += `; live session: ${d.sensitivityLevel}`;
     }
 
     const bashNetNote = (b.hasNetwork && d.tools.includes('Bash'))
