@@ -45,6 +45,15 @@ class AdapterConfig:
 
 
 @dataclass(slots=True)
+class VoiceConfig:
+    """Voice-to-text transcription configuration."""
+
+    enabled: bool = False
+    whisper_model: str = "tiny"
+    language: str = "no"
+
+
+@dataclass(slots=True)
 class ConnectorConfig:
     """Top-level connector configuration."""
 
@@ -52,6 +61,7 @@ class ConnectorConfig:
     connector_id: str = ""
     connector_token: str = ""
     adapters: dict[str, AdapterConfig] = field(default_factory=dict)
+    voice: VoiceConfig = field(default_factory=VoiceConfig)
 
 
 def _interpolate(value: Any) -> Any:
@@ -127,9 +137,17 @@ def load_config(path: str | Path | None = None) -> ConnectorConfig:
         if isinstance(adapter_raw, dict):
             adapters[name] = _parse_adapter(name, adapter_raw)
 
+    voice_raw = raw.get("voice", {}) or {}
+    voice = VoiceConfig(
+        enabled=bool(voice_raw.get("enabled", False)),
+        whisper_model=str(voice_raw.get("whisper_model", "tiny")),
+        language=str(voice_raw.get("language", "no")),
+    )
+
     return ConnectorConfig(
         gateway_url=str(gateway.get("url", "ws://gateway:4000/connectors/ws")),
         connector_id=str(gateway.get("connector_id", "")),
         connector_token=str(gateway.get("token", "")),
         adapters=adapters,
+        voice=voice,
     )
