@@ -107,8 +107,8 @@ uses `matrix-nio` with the `libolm` crypto backend.
 ### Persistent Crypto State
 
 The connector stores E2E key material in a directory that must persist across
-restarts. The `docker-compose.yml` mounts a named volume at `/data` for this
-purpose. Configure the store path in `config.yaml`:
+restarts. The `docker-compose.yml` bind-mounts `secrets/matrix-store/` at `/data` for this
+purpose. Configure the store path in `secrets/connector-config.yaml`:
 
 ```yaml
 matrix:
@@ -130,7 +130,7 @@ devices only.
 
 ## 6. Configure the Connector
 
-Create `connector/config.yaml` with room-to-agent mappings:
+Create `secrets/connector-config.yaml` with room-to-agent mappings:
 
 ```yaml
 gateway:
@@ -283,9 +283,9 @@ identity and verification metadata; the gateway applies the policy.
 - Ensure the crypto store path (`/data/crypto-store`) is on a persistent
   volume — losing the store means losing session keys
 - Verify the bot device in Element or another client
-- If the store is corrupted, delete the volume and re-verify:
+- If the store is corrupted, delete the store directory and re-verify:
   ```bash
-  docker compose down -v
+  rm -rf secrets/matrix-store/*
   docker compose up --build
   ```
   Then re-verify the bot device from another client.

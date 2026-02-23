@@ -16,7 +16,9 @@ fuse/tri-onyx-fs
 .env
 .env.*
 !.env.example
-connector/config.yaml
+secrets/*
+!secrets/.gitkeep
+!secrets/*.example
 
 # Test artifacts
 test/tmp/
