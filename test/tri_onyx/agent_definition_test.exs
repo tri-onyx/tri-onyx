@@ -712,6 +712,82 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "input_sources parsing" do
+    test "parses valid input_sources" do
+      content = """
+      ---
+      name: cal-agent
+      tools: Read
+      input_sources:
+        - connector_unverified
+        - webhook
+      ---
+
+      Calendar agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.input_sources == [:connector_unverified, :webhook]
+    end
+
+    test "defaults to empty list when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.input_sources == []
+    end
+
+    test "rejects invalid input source values" do
+      content = """
+      ---
+      name: bad-agent
+      tools: Read
+      input_sources:
+        - invalid_source
+      ---
+
+      Bad agent.
+      """
+
+      assert {:error, {:invalid_input_sources, ["invalid_source"], _}} =
+               AgentDefinition.parse(content)
+    end
+
+    test "auto-includes :cron when cron_schedules present" do
+      content = """
+      ---
+      name: cron-agent
+      tools: Read
+      cron_schedules:
+        - schedule: "0 9 * * *"
+          message: "Morning"
+      ---
+
+      Cron agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert :cron in def.input_sources
+    end
+
+    test "does not duplicate :cron when already declared" do
+      content = """
+      ---
+      name: cron-agent
+      tools: Read
+      input_sources:
+        - cron
+      cron_schedules:
+        - schedule: "0 9 * * *"
+          message: "Morning"
+      ---
+
+      Cron agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert Enum.count(def.input_sources, &(&1 == :cron)) == 1
+    end
+  end
+
   describe "parse!/1" do
     test "returns definition on success" do
       assert %AgentDefinition{name: "simple-agent"} = AgentDefinition.parse!(@minimal_definition)

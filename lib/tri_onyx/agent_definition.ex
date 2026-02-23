@@ -64,7 +64,8 @@ defmodule TriOnyx.AgentDefinition do
           bcp_channels: [bcp_channel()],
           cron_schedules: [cron_schedule()],
           skills: [String.t()],
-          base_taint: :low | :medium | :high
+          base_taint: :low | :medium | :high,
+          input_sources: [atom()]
         }
 
   @enforce_keys [:name, :tools, :system_prompt]
@@ -85,7 +86,8 @@ defmodule TriOnyx.AgentDefinition do
     bcp_channels: [],
     cron_schedules: [],
     skills: [],
-    base_taint: :low
+    base_taint: :low,
+    input_sources: []
   ]
 
   @doc """
@@ -161,7 +163,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, bcp_channels} <- parse_bcp_channels(yaml),
          {:ok, cron_schedules} <- parse_cron_schedules(yaml),
          {:ok, skills} <- parse_string_list(yaml, "skills"),
-         {:ok, base_taint} <- parse_base_taint(yaml) do
+         {:ok, base_taint} <- parse_base_taint(yaml),
+         {:ok, input_sources} <- parse_input_sources(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -194,7 +197,8 @@ defmodule TriOnyx.AgentDefinition do
          bcp_channels: bcp_channels,
          cron_schedules: cron_schedules,
          skills: skills,
-         base_taint: base_taint
+         base_taint: base_taint,
+         input_sources: auto_include_cron(input_sources, cron_schedules)
        }}
     end
   end
@@ -486,6 +490,41 @@ defmodule TriOnyx.AgentDefinition do
 
       _other ->
         {:error, {:invalid_field_type, key, :expected_list}}
+    end
+  end
+
+  @valid_input_sources ~w(connector_unverified connector_verified webhook external_message cron heartbeat)
+
+  @spec parse_input_sources(map()) :: {:ok, [atom()]} | {:error, term()}
+  defp parse_input_sources(yaml) do
+    case Map.get(yaml, "input_sources") do
+      nil ->
+        {:ok, []}
+
+      list when is_list(list) ->
+        if Enum.all?(list, &is_binary/1) do
+          invalid = Enum.reject(list, &(&1 in @valid_input_sources))
+
+          if invalid == [] do
+            {:ok, Enum.map(list, &String.to_existing_atom/1)}
+          else
+            {:error, {:invalid_input_sources, invalid, @valid_input_sources}}
+          end
+        else
+          {:error, {:invalid_field_type, "input_sources", :expected_string_list}}
+        end
+
+      _other ->
+        {:error, {:invalid_field_type, "input_sources", :expected_list}}
+    end
+  end
+
+  @spec auto_include_cron([atom()], [cron_schedule()]) :: [atom()]
+  defp auto_include_cron(input_sources, cron_schedules) do
+    if cron_schedules != [] and :cron not in input_sources do
+      [:cron | input_sources]
+    else
+      input_sources
     end
   end
 end

@@ -232,7 +232,14 @@ defmodule TriOnyx.GraphAnalyzer do
         true -> :low
       end
 
+    # Factor in input_sources
+    input_source_taint =
+      Map.get(definition, :input_sources, [])
+      |> Enum.map(&TaintMatrix.trigger_taint/1)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
     result = InformationClassifier.higher_level(base, bcp_taint)
+    result = InformationClassifier.higher_level(result, input_source_taint)
 
     # Factor in base_taint from agent definition as a floor
     base_taint_floor = Map.get(definition, :base_taint, :low)
@@ -247,12 +254,20 @@ defmodule TriOnyx.GraphAnalyzer do
   """
   @spec worst_case_sensitivity(map()) :: InformationClassifier.sensitivity_level()
   def worst_case_sensitivity(definition) do
-    definition.tools
-    |> Enum.map(fn tool_name ->
-      meta = TriOnyx.ToolRegistry.tool_meta(tool_name)
-      InformationClassifier.classify_tool_sensitivity(tool_name, meta)
-    end)
-    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+    tool_sensitivity =
+      definition.tools
+      |> Enum.map(fn tool_name ->
+        meta = TriOnyx.ToolRegistry.tool_meta(tool_name)
+        InformationClassifier.classify_tool_sensitivity(tool_name, meta)
+      end)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
+    input_source_sensitivity =
+      Map.get(definition, :input_sources, [])
+      |> Enum.map(&SensitivityMatrix.trigger_sensitivity/1)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
+    InformationClassifier.higher_level(tool_sensitivity, input_source_sensitivity)
   end
 
   @doc """
@@ -473,6 +488,8 @@ defmodule TriOnyx.GraphAnalyzer do
   Returns a map with taint_drivers, sensitivity_drivers, and capability_drivers,
   each listing tools with level > :low. Bash is promoted to :high for taint
   and capability when the agent has network access.
+
+  Deprecated: use `rating_drivers/2` for unified source tracking.
   """
   @spec tool_drivers(map()) :: %{
           taint_drivers: [%{tool: String.t(), level: atom()}],
@@ -510,6 +527,115 @@ defmodule TriOnyx.GraphAnalyzer do
     %{
       taint_drivers: taint_drivers,
       sensitivity_drivers: sensitivity_drivers,
+      capability_drivers: capability_drivers
+    }
+  end
+
+  @doc """
+  Computes unified rating drivers for an agent, including tools, input sources,
+  messaging peers, network, BCP channels, and base_taint.
+
+  Returns a map with:
+  - `taint_sources` — all taint contributors (tools + inputs + peers + network + BCP + base_taint)
+  - `sensitivity_sources` — all sensitivity contributors (tools + inputs)
+  - `capability_drivers` — tools only (unchanged from tool_drivers)
+
+  Only entries with level > :low are included.
+  """
+  @spec rating_drivers(map(), map()) :: %{
+          taint_sources: [%{source: String.t(), level: atom()}],
+          sensitivity_sources: [%{source: String.t(), level: atom()}],
+          capability_drivers: [%{tool: String.t(), level: atom()}]
+        }
+  def rating_drivers(definition, all_definitions \\ %{}) do
+    has_net = has_network?(definition.network)
+
+    # Tool taint sources
+    tool_taint =
+      definition.tools
+      |> Enum.map(fn tool ->
+        level = TaintMatrix.tool_taint(tool)
+        level = if tool == "Bash" and has_net, do: :high, else: level
+        %{source: tool, level: level}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    # Tool sensitivity sources
+    tool_sensitivity =
+      definition.tools
+      |> Enum.map(fn tool ->
+        %{source: tool, level: SensitivityMatrix.tool_sensitivity(tool)}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    # Input sources (from definition.input_sources)
+    input_taint =
+      Map.get(definition, :input_sources, [])
+      |> Enum.map(fn src ->
+        %{source: to_string(src), level: TaintMatrix.trigger_taint(src)}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    input_sensitivity =
+      Map.get(definition, :input_sources, [])
+      |> Enum.map(fn src ->
+        %{source: to_string(src), level: SensitivityMatrix.trigger_sensitivity(src)}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    # receive_from peers → :medium taint
+    peer_taint =
+      definition.receive_from
+      |> Enum.map(fn peer -> %{source: "receive_from:#{peer}", level: :medium} end)
+
+    # Network → :high taint
+    network_taint =
+      if has_net, do: [%{source: "network:outbound", level: :high}], else: []
+
+    # BCP controller channels → step_down(peer_worst_case_taint) for taint,
+    # peer sensitivity for sensitivity
+    bcp_taint =
+      definition.bcp_channels
+      |> Enum.filter(fn ch -> ch.role == :controller end)
+      |> Enum.map(fn ch ->
+        case Map.get(all_definitions, ch.peer) do
+          nil -> %{source: "bcp:#{ch.peer}", level: :low}
+          peer_def ->
+            peer_taint = worst_case_taint(peer_def)
+            %{source: "bcp:#{ch.peer}", level: InformationClassifier.step_down(peer_taint)}
+        end
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    bcp_sensitivity =
+      definition.bcp_channels
+      |> Enum.filter(fn ch -> ch.role == :controller end)
+      |> Enum.map(fn ch ->
+        case Map.get(all_definitions, ch.peer) do
+          nil -> %{source: "bcp:#{ch.peer}", level: :low}
+          peer_def -> %{source: "bcp:#{ch.peer}", level: worst_case_sensitivity(peer_def)}
+        end
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    # base_taint floor
+    base_taint_floor = Map.get(definition, :base_taint, :low)
+    base_taint_entry =
+      if base_taint_floor != :low, do: [%{source: "base_taint", level: base_taint_floor}], else: []
+
+    # Capability drivers (tools only, unchanged)
+    capability_drivers =
+      definition.tools
+      |> Enum.map(fn tool ->
+        level = ToolRegistry.capability_level(tool)
+        level = if tool == "Bash" and has_net and level == :medium, do: :high, else: level
+        %{tool: tool, level: level}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
+    %{
+      taint_sources: tool_taint ++ input_taint ++ peer_taint ++ network_taint ++ bcp_taint ++ base_taint_entry,
+      sensitivity_sources: tool_sensitivity ++ input_sensitivity ++ bcp_sensitivity,
       capability_drivers: capability_drivers
     }
   end

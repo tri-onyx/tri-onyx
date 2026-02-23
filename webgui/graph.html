@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SecureClaw — Agent Graph</title>
+<title>TriOnyx — Agent Graph</title>
 <script src="https://d3js.org/d3.v7.min.js"></script>
 <style>
   :root {
@@ -199,7 +199,7 @@
 <body>
 
 <div class="header">
-  <h1>SecureClaw <span>Agent Graph</span></h1>
+  <h1>TriOnyx <span>Agent Graph</span></h1>
   <div style="display:flex;gap:8px;margin-left:8px">
     <a href="matrix.html" style="color:var(--muted);font-size:12px;text-decoration:none;padding:4px 10px;border-radius:4px;border:1px solid var(--border)">Classification Matrix</a>
     <a href="log-viewer.html" style="color:var(--muted);font-size:12px;text-decoration:none;padding:4px 10px;border-radius:4px;border:1px solid var(--border)">Session Logs</a>
@@ -403,7 +403,9 @@ function buildGraph() {
       maxInputSensitivity: aa.max_input_sensitivity || null,
       maxInputRisk: aa.max_input_risk || null,
       riskChain: aa.risk_chain || [],
-      toolDrivers: aa.tool_drivers || null,
+      taintSourcesUnified: aa.taint_sources || [],
+      sensitivitySourcesUnified: aa.sensitivity_sources || [],
+      capabilityDrivers: aa.capability_drivers || [],
     };
   });
 
@@ -459,11 +461,10 @@ const RISK_MATRIX_2D = [
 function buildRatingBreakdown(d) {
   const hasNetwork = d.network && d.network !== 'none' && !(Array.isArray(d.network) && d.network.length === 0);
 
-  // Use server-provided tool_drivers when available
-  const td = d.toolDrivers || {};
-  const taintDrivers = (td.taint_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
-  const sensitivityDrivers = (td.sensitivity_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
-  const capDrivers = (td.capability_drivers || []).map(x => ({ tool: x.tool, level: x.level }));
+  // Use server-provided unified sources
+  const taintSources = (d.taintSourcesUnified || []).map(x => ({ source: x.source, level: x.level }));
+  const sensitivitySources = (d.sensitivitySourcesUnified || []).map(x => ({ source: x.source, level: x.level }));
+  const capDrivers = (d.capabilityDrivers || []).map(x => ({ tool: x.tool, level: x.level }));
 
   const tI = LEVEL_RANK[d.taintLevel] || 0;
   const sI = LEVEL_RANK[d.sensitivityLevel] || 0;
@@ -482,13 +483,20 @@ function buildRatingBreakdown(d) {
     finalRisk = baseline;
   }
 
-  return { taintDrivers, sensitivityDrivers, capDrivers, hasNetwork, baseline, capMod, finalRisk };
+  return { taintSources, sensitivitySources, capDrivers, hasNetwork, baseline, capMod, finalRisk };
 }
 
 function renderDriverBadges(drivers) {
   if (!drivers.length) return '<span style="color:var(--muted);font-size:10px;">all tools low</span>';
   return drivers.map(d =>
-    `<span class="driver-badge ${d.level}">${d.tool}</span>`
+    `<span class="driver-badge ${d.level}">${d.tool || d.source}</span>`
+  ).join('');
+}
+
+function renderSourceBadgesUnified(sources) {
+  if (!sources.length) return '<span style="color:var(--muted);font-size:10px;">none above low</span>';
+  return sources.map(d =>
+    `<span class="driver-badge ${d.level}">${d.source}</span>`
   ).join('');
 }
 
@@ -972,16 +980,14 @@ function renderGraph() {
 
       <div class="section">
         <div class="section-header"><div class="section-title">☣️ Taint (integrity)</div><span class="badge ${effTaint}">${effTaint}</span></div>
-        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.taintDrivers)}</div></div>
-        ${sourcesRow}
+        <div class="axis-row"><span class="axis-label">Sources</span><div class="driver-list">${renderSourceBadgesUnified(b.taintSources)}</div></div>
         ${bashNetNote}
         ${inheritedTaint}
       </div>
 
       <div class="section">
         <div class="section-header"><div class="section-title">🔒 Sensitivity (confidentiality)</div><span class="badge ${effSens}">${effSens}</span></div>
-        <div class="axis-row"><span class="axis-label">Tool drivers</span><div class="driver-list">${renderDriverBadges(b.sensitivityDrivers)}</div></div>
-        ${sourcesRow}
+        <div class="axis-row"><span class="axis-label">Sources</span><div class="driver-list">${renderSourceBadgesUnified(b.sensitivitySources)}</div></div>
         ${inheritedSens}
       </div>
 
