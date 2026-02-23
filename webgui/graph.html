@@ -320,6 +320,22 @@ let analysisData = null;
 let graphData = { nodes: [], links: [] };
 let simulation = null;
 
+const POSITIONS_KEY = 'trionyx-graph-positions';
+
+function savePositions() {
+  const positions = {};
+  for (const n of graphData.nodes) {
+    if (n.x != null && n.y != null) {
+      positions[n.id] = { x: n.x, y: n.y };
+    }
+  }
+  try { localStorage.setItem(POSITIONS_KEY, JSON.stringify(positions)); } catch {}
+}
+
+function loadPositions() {
+  try { return JSON.parse(localStorage.getItem(POSITIONS_KEY)) || {}; } catch { return {}; }
+}
+
 function gatewayUrl() {
   return document.getElementById('gateway-url').value.replace(/\/+$/, '');
 }
@@ -742,17 +758,17 @@ function renderGraph() {
 
   // Links (paths to support curved parallel edges)
   const linkGroup = g.append('g').attr('class', 'links');
-  const link = linkGroup.selectAll('path')
+
+  // Invisible wider hit areas for easier hover (drawn first, behind visible edges)
+  const linkHitArea = linkGroup.selectAll('path.edge-hit')
     .data(graphData.links)
     .join('path')
+    .attr('class', d => `edge-hit edge-hit-${d.type}`)
     .attr('fill', 'none')
-    .attr('stroke', d => edgeColor(d))
-    .attr('stroke-opacity', d => edgeOpacity(d))
-    .attr('stroke-width', d => edgeWidth(d))
-    .attr('stroke-dasharray', d => d.type === 'messaging' ? '6,4' : d.type === 'bcp' ? '3,3' : null)
-    .attr('marker-end', d => edgeMarker(d))
-    .attr('class', d => `edge-${d.type}`)
+    .attr('stroke', 'transparent')
+    .attr('stroke-width', 16)
     .style('pointer-events', 'stroke')
+    .style('cursor', 'pointer')
     .on('mouseenter', (event, d) => {
       const src = typeof d.source === 'object' ? d.source.id : d.source;
       const tgt = typeof d.target === 'object' ? d.target.id : d.target;
@@ -798,6 +814,19 @@ function renderGraph() {
     .on('mouseleave', () => {
       tooltip.classList.remove('visible');
     });
+
+  // Visible edge paths (no pointer events — hit areas handle interaction)
+  const link = linkGroup.selectAll('path.edge-visible')
+    .data(graphData.links)
+    .join('path')
+    .attr('class', d => `edge-visible edge-${d.type}`)
+    .attr('fill', 'none')
+    .attr('stroke', d => edgeColor(d))
+    .attr('stroke-opacity', d => edgeOpacity(d))
+    .attr('stroke-width', d => edgeWidth(d))
+    .attr('stroke-dasharray', d => d.type === 'messaging' ? '6,4' : d.type === 'bcp' ? '3,3' : null)
+    .attr('marker-end', d => edgeMarker(d))
+    .style('pointer-events', 'none');
 
   // Edge labels
   const edgeLabelGroup = g.append('g').attr('class', 'edge-labels');
@@ -873,20 +902,6 @@ function renderGraph() {
       .attr('stroke-width', 2)
       .style('filter', d.active ? 'drop-shadow(0 0 6px rgba(88,166,255,0.3))' : null);
   });
-
-  // Status indicator (small dot)
-  node.filter(d => d.active)
-    .append('circle')
-    .attr('r', 4)
-    .attr('cx', d => (nodeRadius(d)) - 3)
-    .attr('cy', d => -(nodeRadius(d)) + 3)
-    .attr('fill', d => {
-      const s = d.agent.status;
-      if (s === 'running') return '#58a6ff';
-      if (s === 'ready') return '#3fb950';
-      if (s === 'starting') return '#d29922';
-      return '#8b949e';
-    });
 
   // Labels
   const labels = node.append('text')
@@ -989,6 +1004,7 @@ function renderGraph() {
     .force('collision', d3.forceCollide().radius(d => (nodeRadius(d)) + 50).iterations(3))
     .alphaDecay(0.015)
     .on('tick', () => {
+      linkHitArea.attr('d', d => linkPath(d));
       link.attr('d', d => linkPath(d));
       node.attr('transform', d => `translate(${d.x},${d.y})`);
       edgeLabels
@@ -996,16 +1012,28 @@ function renderGraph() {
         .attr('y', d => linkMidpoint(d).y - 4);
     });
 
+  // Restore saved positions
+  const saved = loadPositions();
+  for (const n of graphData.nodes) {
+    if (saved[n.id]) {
+      n.x = n.fx = saved[n.id].x;
+      n.y = n.fy = saved[n.id].y;
+    }
+  }
+
   // Warm start: pre-tick so the layout is already spread before first paint
   simulation.stop();
   for (let i = 0; i < 200; i++) simulation.tick();
   simulation.restart();
 
+  // Save positions periodically as simulation settles
+  simulation.on('end', savePositions);
+
   // Apply toggles
   applyToggles();
 
   // Store refs
-  window._graphRefs = { link, edgeLabels, node, labels, svg, g, zoom };
+  window._graphRefs = { link, linkHitArea, edgeLabels, node, labels, svg, g, zoom };
 }
 
 function applyToggles() {
@@ -1015,9 +1043,9 @@ function applyToggles() {
   const showLabels = document.getElementById('toggle-labels').checked;
   const showMatrix = document.getElementById('toggle-matrix').checked;
 
-  d3.selectAll('.edge-write_read').attr('visibility', showFs ? 'visible' : 'hidden');
-  d3.selectAll('.edge-messaging').attr('visibility', showMsg ? 'visible' : 'hidden');
-  d3.selectAll('.edge-bcp').attr('visibility', showBcp ? 'visible' : 'hidden');
+  d3.selectAll('.edge-write_read, .edge-hit-write_read').attr('visibility', showFs ? 'visible' : 'hidden');
+  d3.selectAll('.edge-messaging, .edge-hit-messaging').attr('visibility', showMsg ? 'visible' : 'hidden');
+  d3.selectAll('.edge-bcp, .edge-hit-bcp').attr('visibility', showBcp ? 'visible' : 'hidden');
 
   d3.selectAll('.edge-label').attr('visibility', (showFs || showMsg || showBcp) ? 'visible' : 'hidden');
   d3.selectAll('.node-label').attr('visibility', showLabels ? 'visible' : 'hidden');
@@ -1134,10 +1162,13 @@ function dragStart(event, d) {
 function dragging(event, d) { d.fx = event.x; d.fy = event.y; }
 function dragEnd(event, d) {
   if (!event.active) simulation.alphaTarget(0);
-  d.fx = null; d.fy = null;
+  // Keep the node pinned where the user dropped it
+  d.fx = d.x; d.fy = d.y;
+  savePositions();
 }
 
 function resetLayout() {
+  try { localStorage.removeItem(POSITIONS_KEY); } catch {}
   if (simulation) {
     graphData.nodes.forEach(n => { n.fx = null; n.fy = null; });
     simulation.alpha(1).restart();
