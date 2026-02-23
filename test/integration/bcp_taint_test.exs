@@ -138,6 +138,57 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     end
   end
 
+  # ── Context field ────────────────────────────────────────────────────
+
+  describe "context field" do
+    test "context is preserved through Cat-1 query creation" do
+      {:ok, query} =
+        Query.new(%{
+          category: 1,
+          from: "bcp-controller",
+          to: "bcp-reader",
+          session_id: "test-session-context-cat1",
+          context: "Check the email from alice@example.com received today",
+          fields: [
+            %{name: "is_urgent", type: :boolean, options: nil, min: nil, max: nil}
+          ]
+        })
+
+      assert query.context == "Check the email from alice@example.com received today"
+    end
+
+    test "context is preserved through Cat-2 query creation" do
+      {:ok, query} =
+        Query.new(%{
+          category: 2,
+          from: "bcp-controller",
+          to: "bcp-reader",
+          session_id: "test-session-context-cat2",
+          context: "Look at the latest invoice PDF in the workspace",
+          questions: [
+            %{name: "sender_name", format: :person_name, max_words: 5}
+          ]
+        })
+
+      assert query.context == "Look at the latest invoice PDF in the workspace"
+    end
+
+    test "context defaults to nil for backwards compatibility" do
+      {:ok, query} =
+        Query.new(%{
+          category: 1,
+          from: "bcp-controller",
+          to: "bcp-reader",
+          session_id: "test-session-context-nil",
+          fields: [
+            %{name: "flag", type: :boolean, options: nil, min: nil, max: nil}
+          ]
+        })
+
+      assert query.context == nil
+    end
+  end
+
   # ── Cat-1 validation ──────────────────────────────────────────────────
 
   describe "cat-1 validation" do

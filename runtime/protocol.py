@@ -128,6 +128,7 @@ class BCPQueryMessage:
     query_id: str
     category: int
     from_agent: str
+    context: str | None = None
     fields: list[dict[str, Any]] | None = None
     questions: list[dict[str, Any]] | None = None
     directive: str | None = None
@@ -139,6 +140,7 @@ class BCPQueryMessage:
             query_id=data.get("query_id", ""),
             category=data.get("category", 0),
             from_agent=data.get("from_agent", ""),
+            context=data.get("context"),
             fields=data.get("fields"),
             questions=data.get("questions"),
             directive=data.get("directive"),
