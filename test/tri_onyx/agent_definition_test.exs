@@ -719,7 +719,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       name: cal-agent
       tools: Read
       input_sources:
-        - connector_unverified
+        - unverified_input
         - webhook
       ---
 
@@ -727,7 +727,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       """
 
       assert {:ok, def} = AgentDefinition.parse(content)
-      assert def.input_sources == [:connector_unverified, :webhook]
+      assert def.input_sources == [:unverified_input, :webhook]
     end
 
     test "defaults to empty list when not specified" do

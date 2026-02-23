@@ -76,8 +76,8 @@ defmodule TriOnyx.TaintMatrixTest do
       assert :high = TaintMatrix.trigger_taint(:webhook)
     end
 
-    test "connector_unverified is high taint" do
-      assert :high = TaintMatrix.trigger_taint(:connector_unverified)
+    test "unverified_input is high taint" do
+      assert :high = TaintMatrix.trigger_taint(:unverified_input)
     end
 
     test "inter_agent is medium taint" do
@@ -88,7 +88,7 @@ defmodule TriOnyx.TaintMatrixTest do
       assert :low = TaintMatrix.trigger_taint(:cron)
       assert :low = TaintMatrix.trigger_taint(:heartbeat)
       assert :low = TaintMatrix.trigger_taint(:external_message)
-      assert :low = TaintMatrix.trigger_taint(:connector_verified)
+      assert :low = TaintMatrix.trigger_taint(:verified_input)
     end
 
     test "unknown triggers default to low taint" do

@@ -64,9 +64,12 @@ defmodule TriOnyx.RiskScorerTest do
       assert :low = RiskScorer.infer_sensitivity(["Read", "Write", "Bash", "WebFetch"])
     end
 
-    test "email tools elevate to medium" do
+    test "SendEmail elevates to medium" do
       assert :medium = RiskScorer.infer_sensitivity(["SendEmail"])
-      assert :medium = RiskScorer.infer_sensitivity(["Read", "MoveEmail"])
+    end
+
+    test "MoveEmail stays low sensitivity" do
+      assert :low = RiskScorer.infer_sensitivity(["Read", "MoveEmail"])
     end
   end
 
@@ -151,8 +154,8 @@ defmodule TriOnyx.RiskScorerTest do
       assert :high = RiskScorer.infer_capability(["Read", "Bash"], :outbound)
     end
 
-    test "SendEmail without network = medium" do
-      assert :medium = RiskScorer.infer_capability(["Read", "SendEmail"], :none)
+    test "SendEmail without network = high" do
+      assert :high = RiskScorer.infer_capability(["Read", "SendEmail"], :none)
     end
 
     test "WebFetch without Bash = medium" do
