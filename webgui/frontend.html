@@ -20,7 +20,7 @@
 
   /* Sidebar */
   .sidebar {
-    width: 280px; min-width: 280px;
+    width: 320px; min-width: 320px;
     background: var(--surface); border-right: 1px solid var(--border);
     display: flex; flex-direction: column;
   }
@@ -272,7 +272,7 @@ function renderAgentList() {
     return `<div class="agent-card ${active}" onclick="selectAgent('${a.name}')">
       <div class="agent-info">
         <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
-        <div class="agent-meta">${a.model} &middot; ${status} ${badges}</div>
+        <div class="agent-meta">${a.model} &middot; ${status}<br>${badges}</div>
       </div>
       <div class="risk-square ${risk}">
         <span class="risk-icon">${riskIcons[risk] || '●'}</span>
