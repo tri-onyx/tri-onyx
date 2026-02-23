@@ -313,8 +313,15 @@ defmodule TriOnyx.BCP.Channel do
   end
 
   @spec query_to_spec(Query.t()) :: map()
-  defp query_to_spec(%Query{category: 1} = q), do: %{"fields" => q.fields}
-  defp query_to_spec(%Query{category: 2} = q), do: %{"questions" => q.questions}
+  defp query_to_spec(%Query{category: 1} = q) do
+    spec = %{"fields" => q.fields}
+    if q.context, do: Map.put(spec, "context", q.context), else: spec
+  end
+
+  defp query_to_spec(%Query{category: 2} = q) do
+    spec = %{"questions" => q.questions}
+    if q.context, do: Map.put(spec, "context", q.context), else: spec
+  end
 
   defp query_to_spec(%Query{category: 3} = q),
     do: %{"directive" => q.directive, "max_words" => q.max_words}

@@ -956,6 +956,10 @@ def build_bcp_query_tool(bcp_handler: BCPHandler) -> Any:
                     "type": "integer",
                     "description": "BCP category (1-5) determining bandwidth allocation",
                 },
+                "context": {
+                    "type": "string",
+                    "description": "Optional context for the Reader — what content to examine and why these questions are being asked",
+                },
                 "spec": {
                     "type": "object",
                     "description": "Query specification (fields, questions, or directive)",
@@ -997,6 +1001,11 @@ def build_bcp_query_tool(bcp_handler: BCPHandler) -> Any:
                 "content": [{"type": "text", "text": "Error: 'category' must be an integer 1-5."}],
                 "isError": True,
             }
+
+        # Pass context into the spec so the gateway can forward it to the Reader
+        context = args.get("context")
+        if context:
+            spec["context"] = context
 
         result = await bcp_handler.send_query(to=to, category=category, spec=spec)
         is_error = result.startswith("Error:")
@@ -1369,12 +1378,19 @@ def _format_bcp_query_prompt(query: BCPQueryMessage) -> str:
         f"You received a BCP query (id: {query.query_id}) "
         f"from agent '{query.from_agent}' (category {query.category}).",
         "",
+    ]
+
+    if query.context:
+        parts.append(f"**Context:** {query.context}")
+        parts.append("")
+
+    parts.extend([
         "Research the requested information and respond using the "
         "`mcp__interagent__BCPRespond` tool with:",
         f'  - query_id: "{query.query_id}"',
         "  - response: a JSON object with the field names and values described below",
         "",
-    ]
+    ])
 
     if query.category == 1 and query.fields:
         parts.append("**Category 1 — Structured fields (exact values required):**")

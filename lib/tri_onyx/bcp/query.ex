@@ -38,6 +38,7 @@ defmodule TriOnyx.BCP.Query do
           from: String.t(),
           to: String.t(),
           session_id: String.t(),
+          context: String.t() | nil,
           fields: [field()] | nil,
           questions: [question()] | nil,
           directive: String.t() | nil,
@@ -52,6 +53,7 @@ defmodule TriOnyx.BCP.Query do
     :from,
     :to,
     :session_id,
+    :context,
     :fields,
     :questions,
     :directive,
@@ -91,6 +93,7 @@ defmodule TriOnyx.BCP.Query do
               from: from,
               to: to,
               session_id: session_id,
+              context: Map.get(attrs, :context),
               requires_approval: Map.get(attrs, :requires_approval, category == 3)
             },
             category_fields
