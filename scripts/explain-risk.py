@@ -53,17 +53,14 @@ def format_unified_sources(sources: list[dict]) -> str:
     """Format unified source list as 'source(level), ...'."""
     if not sources:
         return "none"
-    return ", ".join(f"{d['source']}({colorize(d['level'])})" for d in sources)
-
-
-def format_sources(sources: list[dict]) -> str:
-    """Format propagation sources as '← agent (edge_type)'."""
-    if not sources:
-        return ""
     parts = []
-    for s in sources:
-        parts.append(f"← {colorize(s['contributed'], s['from'])} ({s['edge_type']})")
-    return "  ".join(parts)
+    for d in sources:
+        label = f"{d['source']}({colorize(d['level'])})"
+        if d.get("edge_type"):
+            label += f" [{d['edge_type']}]"
+        parts.append(label)
+    return ", ".join(parts)
+
 
 
 def explain_agent(name: str, agent: dict, analysis: dict) -> str:
@@ -105,11 +102,12 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
     lines.append(f"  Taint:       {colorize(prop_t):<20s} ({taint_base_note})")
     taint_srcs = aa.get("taint_sources", [])
     if taint_srcs:
-        # Prefer unified sources (list of {source, level}) over legacy format
-        if taint_srcs and "source" in taint_srcs[0]:
-            lines.append(f"    sources:   {format_unified_sources(taint_srcs)}")
-        else:
-            lines.append(f"    inherited: {format_sources(taint_srcs)}")
+        tool_srcs = [s for s in taint_srcs if s.get("kind") == "tool"]
+        input_srcs = [s for s in taint_srcs if s.get("kind") == "input"]
+        if tool_srcs:
+            lines.append(f"    tools:     {format_unified_sources(tool_srcs)}")
+        if input_srcs:
+            lines.append(f"    inputs:    {format_unified_sources(input_srcs)}")
 
     sens_base_note = f"topology: {wc_s}"
     if live_s_elevated:
@@ -118,10 +116,12 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
     lines.append(f"  Sensitivity: {colorize(prop_s):<20s} ({sens_base_note})")
     sens_srcs = aa.get("sensitivity_sources", [])
     if sens_srcs:
-        if sens_srcs and "source" in sens_srcs[0]:
-            lines.append(f"    sources:   {format_unified_sources(sens_srcs)}")
-        else:
-            lines.append(f"    inherited: {format_sources(sens_srcs)}")
+        tool_srcs = [s for s in sens_srcs if s.get("kind") == "tool"]
+        input_srcs = [s for s in sens_srcs if s.get("kind") == "input"]
+        if tool_srcs:
+            lines.append(f"    tools:     {format_unified_sources(tool_srcs)}")
+        if input_srcs:
+            lines.append(f"    inputs:    {format_unified_sources(input_srcs)}")
 
     lines.append(f"  Capability:  {colorize(cap)}")
     cap_drivers = aa.get("capability_drivers", [])
@@ -133,15 +133,6 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
     if network and network != "none":
         net_str = ", ".join(network) if isinstance(network, list) else str(network)
         lines.append(f"  Network:     {net_str}")
-
-    # Incoming edges summary
-    incoming = aa.get("incoming_edges", [])
-    if incoming:
-        edge_strs = []
-        for e in incoming:
-            et = e.get("edge_type", "filesystem")
-            edge_strs.append(f"{e['from']} ({et})")
-        lines.append(f"  Inputs:      {'; '.join(edge_strs)}")
 
     return "\n".join(lines)
 
