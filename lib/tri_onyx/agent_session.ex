@@ -1077,10 +1077,15 @@ defmodule TriOnyx.AgentSession do
   @spec maybe_record_provenance(String.t(), map(), t()) :: :ok
   defp maybe_record_provenance(tool_name, tool_input, state)
        when tool_name in @write_tools do
-    file_path = Map.get(tool_input, "file_path", "")
+    raw_path = Map.get(tool_input, "file_path", "")
 
-    if file_path != "" do
+    if raw_path != "" do
       workspace_path = TriOnyx.Workspace.workspace_dir()
+
+      # The agent container sees files at /workspace/..., but the gateway
+      # workspace is a local directory. Strip the container prefix so git
+      # gets a path relative to the workspace root.
+      file_path = raw_path |> String.replace_leading("/workspace/", "")
       agent_name = state.definition.name
       taint = state.taint_level
       sensitivity = state.sensitivity_level

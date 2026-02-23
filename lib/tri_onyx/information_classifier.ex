@@ -205,7 +205,8 @@ defmodule TriOnyx.InformationClassifier do
 
     if controlled_path?(path) do
       workspace_path = TriOnyx.Workspace.workspace_dir()
-      TriOnyx.GitProvenance.file_sensitivity(workspace_path, path)
+      rel_path = path |> String.replace_leading("/workspace/", "")
+      TriOnyx.GitProvenance.file_sensitivity(workspace_path, rel_path)
     else
       :low
     end
