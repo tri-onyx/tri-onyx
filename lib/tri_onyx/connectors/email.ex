@@ -517,35 +517,48 @@ defmodule TriOnyx.Connectors.Email do
         :ok
 
       {:ok, imap} ->
-        with_imap_connection(imap, fn socket, transport ->
-          # SELECT source folder
-          imap_send(socket, transport, "M001 SELECT #{source_folder}")
-          {:ok, _} = imap_recv_until_tagged(socket, transport, "M001")
+        # Ensure destination folder exists on the IMAP server before moving
+        with :ok <- imap_create_folder(dest_folder) do
+          with_imap_connection(imap, fn socket, transport ->
+            # SELECT source folder (normalize "inbox" to "INBOX" for IMAP)
+            imap_folder = normalize_imap_folder(source_folder)
+            imap_send(socket, transport, "M001 SELECT #{imap_folder}")
+            {:ok, select_resp} = imap_recv_until_tagged(socket, transport, "M001")
 
-          # Try UID MOVE (RFC 6851)
-          imap_send(socket, transport, "M002 UID MOVE #{uid} #{dest_folder}")
-          {:ok, move_resp} = imap_recv_until_tagged(socket, transport, "M002")
-
-          if String.contains?(move_resp, "M002 OK") do
-            :ok
-          else
-            # Fallback: COPY + STORE \Deleted + EXPUNGE for older servers
-            imap_send(socket, transport, "M003 UID COPY #{uid} #{dest_folder}")
-            {:ok, copy_resp} = imap_recv_until_tagged(socket, transport, "M003")
-
-            if String.contains?(copy_resp, "M003 OK") do
-              imap_send(socket, transport, "M004 UID STORE #{uid} +FLAGS (\\Deleted)")
-              {:ok, _} = imap_recv_until_tagged(socket, transport, "M004")
-
-              imap_send(socket, transport, "M005 EXPUNGE")
-              {:ok, _} = imap_recv_until_tagged(socket, transport, "M005")
-              :ok
+            if not String.contains?(select_resp, "M001 OK") do
+              {:error, "IMAP SELECT failed for #{imap_folder}: #{String.trim(select_resp)}"}
             else
-              {:error, "IMAP MOVE/COPY failed: #{String.trim(copy_resp)}"}
+              # Try UID MOVE (RFC 6851)
+              imap_dest = normalize_imap_folder(dest_folder)
+              imap_send(socket, transport, "M002 UID MOVE #{uid} #{imap_dest}")
+              {:ok, move_resp} = imap_recv_until_tagged(socket, transport, "M002")
+
+              if String.contains?(move_resp, "M002 OK") do
+                :ok
+              else
+                # Fallback: COPY + STORE \Deleted + EXPUNGE for older servers
+                imap_send(socket, transport, "M003 UID COPY #{uid} #{imap_dest}")
+                {:ok, copy_resp} = imap_recv_until_tagged(socket, transport, "M003")
+
+                if String.contains?(copy_resp, "M003 OK") do
+                  imap_send(socket, transport, "M004 UID STORE #{uid} +FLAGS (\\Deleted)")
+                  {:ok, _} = imap_recv_until_tagged(socket, transport, "M004")
+
+                  imap_send(socket, transport, "M005 EXPUNGE")
+                  {:ok, _} = imap_recv_until_tagged(socket, transport, "M005")
+                  :ok
+                else
+                  {:error, "IMAP MOVE/COPY failed: #{String.trim(copy_resp)}"}
+                end
+              end
             end
-          end
-        end)
+          end)
+        end
     end
+  end
+
+  defp normalize_imap_folder(folder) do
+    if String.downcase(folder) == "inbox", do: "INBOX", else: folder
   end
 
   @spec imap_create_folder(String.t()) :: :ok | {:error, String.t()}
@@ -556,7 +569,8 @@ defmodule TriOnyx.Connectors.Email do
 
       {:ok, imap} ->
         with_imap_connection(imap, fn socket, transport ->
-          imap_send(socket, transport, "C001 CREATE #{folder_name}")
+          imap_name = normalize_imap_folder(folder_name)
+          imap_send(socket, transport, "C001 CREATE #{imap_name}")
           {:ok, create_resp} = imap_recv_until_tagged(socket, transport, "C001")
 
           if String.contains?(create_resp, "C001 OK") or
