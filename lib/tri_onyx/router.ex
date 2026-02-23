@@ -786,7 +786,6 @@ defmodule TriOnyx.Router do
             "to" => target_name,
             "edge_type" => to_string(edge_type),
             "paths" => edge.paths,
-            "risk_level" => edge.risk_level,
             "biba_violation" => MapSet.member?(biba_set, {edge.from, target_name}),
             "blp_violation" => MapSet.member?(blp_set, {edge.from, target_name}),
             "max_category" => Map.get(edge, :max_category),
@@ -1127,7 +1126,6 @@ defmodule TriOnyx.Router do
              %{
                "from" => edge.from,
                "paths" => edge.paths,
-               "risk_level" => edge.risk_level,
                "edge_type" => to_string(Map.get(edge, :edge_type, :filesystem))
              }
            end),
