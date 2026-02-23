@@ -125,46 +125,46 @@ defmodule TriOnyx.ConnectorHandlerTest do
   end
 
   describe "trust level to trigger type mapping" do
-    test "verified trust level maps to connector_verified trigger" do
+    test "verified trust level maps to verified_input trigger" do
       # Verified connector messages should be low taint
-      assert %{taint: :low, sensitivity: :low} = InformationClassifier.classify_trigger(:connector_verified)
+      assert %{taint: :low, sensitivity: :low} = InformationClassifier.classify_trigger(:verified_input)
     end
 
-    test "unverified trust level maps to connector_unverified trigger" do
+    test "unverified trust level maps to unverified_input trigger" do
       # Unverified connector messages should be high taint
-      assert %{taint: :high} = InformationClassifier.classify_trigger(:connector_unverified)
+      assert %{taint: :high} = InformationClassifier.classify_trigger(:unverified_input)
     end
   end
 
   describe "information classification for connector triggers" do
-    test "connector_verified is low risk" do
-      result = InformationClassifier.classify_trigger(:connector_verified)
+    test "verified_input is low risk" do
+      result = InformationClassifier.classify_trigger(:verified_input)
       assert %{taint: :low, reason: reason} = result
       assert reason =~ "verified connector"
     end
 
-    test "connector_unverified is high risk" do
-      result = InformationClassifier.classify_trigger(:connector_unverified)
+    test "unverified_input is high risk" do
+      result = InformationClassifier.classify_trigger(:unverified_input)
       assert %{taint: :high, reason: reason} = result
       assert reason =~ "unverified connector"
     end
   end
 
   describe "risk scoring for connector triggers" do
-    test "connector_verified trigger with read-only tools = low" do
-      assert :low = RiskScorer.infer_input_risk(:connector_verified, ["Read", "Grep"])
+    test "verified_input trigger with read-only tools = low" do
+      assert :low = RiskScorer.infer_input_risk(:verified_input, ["Read", "Grep"])
     end
 
-    test "connector_unverified trigger = high" do
-      assert :high = RiskScorer.infer_input_risk(:connector_unverified, ["Read"])
+    test "unverified_input trigger = high" do
+      assert :high = RiskScorer.infer_input_risk(:unverified_input, ["Read"])
     end
 
-    test "connector_verified with WebFetch elevates to high" do
-      assert :high = RiskScorer.infer_input_risk(:connector_verified, ["Read", "WebFetch"])
+    test "verified_input with WebFetch elevates to high" do
+      assert :high = RiskScorer.infer_input_risk(:verified_input, ["Read", "WebFetch"])
     end
 
-    test "connector_unverified has high taint" do
-      assert :high = RiskScorer.infer_taint(:connector_unverified, ["Read"])
+    test "unverified_input has high taint" do
+      assert :high = RiskScorer.infer_taint(:unverified_input, ["Read"])
     end
   end
 

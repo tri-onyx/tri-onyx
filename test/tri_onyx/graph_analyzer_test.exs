@@ -918,8 +918,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
   end
 
   describe "worst_case_taint with input_sources" do
-    test "connector_unverified raises taint to high" do
-      agent = make_def(%{name: "cal", tools: ["Read", "CalendarQuery"], input_sources: [:connector_unverified]})
+    test "unverified_input raises taint to high" do
+      agent = make_def(%{name: "cal", tools: ["Read", "CalendarQuery"], input_sources: [:unverified_input]})
       assert :high = GraphAnalyzer.worst_case_taint(agent)
     end
 
@@ -935,8 +935,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
   end
 
   describe "worst_case_sensitivity with input_sources" do
-    test "connector_unverified raises sensitivity to medium" do
-      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:connector_unverified]})
+    test "unverified_input raises sensitivity to medium" do
+      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:unverified_input]})
       assert :medium = GraphAnalyzer.worst_case_sensitivity(agent)
     end
 
@@ -948,17 +948,17 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
   describe "rating_drivers/2" do
     test "includes tool and input source taint with kind field" do
-      agent = make_def(%{name: "cal", tools: ["Read", "WebFetch"], input_sources: [:connector_unverified]})
+      agent = make_def(%{name: "cal", tools: ["Read", "WebFetch"], input_sources: [:unverified_input]})
       result = GraphAnalyzer.rating_drivers(agent)
 
       sources = Enum.map(result.taint_sources, & &1.source)
       assert "WebFetch" in sources
-      assert "connector_unverified" in sources
+      assert "unverified_input" in sources
 
       # Assert kind field
       tool_src = Enum.find(result.taint_sources, & &1.source == "WebFetch")
       assert tool_src.kind == :tool
-      input_src = Enum.find(result.taint_sources, & &1.source == "connector_unverified")
+      input_src = Enum.find(result.taint_sources, & &1.source == "unverified_input")
       assert input_src.kind == :input
     end
 
@@ -1009,10 +1009,10 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
 
     test "includes input source sensitivity with kind :input" do
-      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:connector_unverified]})
+      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:unverified_input]})
       result = GraphAnalyzer.rating_drivers(agent)
 
-      src = Enum.find(result.sensitivity_sources, & &1.source == "connector_unverified")
+      src = Enum.find(result.sensitivity_sources, & &1.source == "unverified_input")
       assert src != nil
       assert src.kind == :input
     end

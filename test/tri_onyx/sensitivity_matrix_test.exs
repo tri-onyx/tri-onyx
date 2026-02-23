@@ -4,10 +4,13 @@ defmodule TriOnyx.SensitivityMatrixTest do
   alias TriOnyx.SensitivityMatrix
 
   describe "tool_sensitivity/1" do
-    test "email tools are medium sensitivity (auth required)" do
+    test "SendEmail is medium sensitivity (auth required)" do
       assert :medium = SensitivityMatrix.tool_sensitivity("SendEmail")
-      assert :medium = SensitivityMatrix.tool_sensitivity("MoveEmail")
-      assert :medium = SensitivityMatrix.tool_sensitivity("CreateFolder")
+    end
+
+    test "MoveEmail and CreateFolder are low sensitivity" do
+      assert :low = SensitivityMatrix.tool_sensitivity("MoveEmail")
+      assert :low = SensitivityMatrix.tool_sensitivity("CreateFolder")
     end
 
     test "filesystem tools are low sensitivity" do
@@ -48,13 +51,13 @@ defmodule TriOnyx.SensitivityMatrixTest do
     test "most triggers are low sensitivity" do
       assert :low = SensitivityMatrix.trigger_sensitivity(:webhook)
       assert :low = SensitivityMatrix.trigger_sensitivity(:external_message)
-      assert :low = SensitivityMatrix.trigger_sensitivity(:connector_verified)
+      assert :low = SensitivityMatrix.trigger_sensitivity(:verified_input)
       assert :low = SensitivityMatrix.trigger_sensitivity(:cron)
       assert :low = SensitivityMatrix.trigger_sensitivity(:heartbeat)
     end
 
-    test "connector_unverified has medium sensitivity" do
-      assert :medium = SensitivityMatrix.trigger_sensitivity(:connector_unverified)
+    test "unverified_input has medium sensitivity" do
+      assert :medium = SensitivityMatrix.trigger_sensitivity(:unverified_input)
     end
 
     test "unknown triggers default to low sensitivity" do

@@ -10,8 +10,8 @@ defmodule TriOnyx.InformationClassifierTest do
       assert reason =~ "webhook"
     end
 
-    test "connector_unverified trigger has high taint, medium sensitivity" do
-      result = InformationClassifier.classify_trigger(:connector_unverified)
+    test "unverified_input trigger has high taint, medium sensitivity" do
+      result = InformationClassifier.classify_trigger(:unverified_input)
       assert %{taint: :high, sensitivity: :medium, reason: reason} = result
       assert reason =~ "unverified"
     end
@@ -28,8 +28,8 @@ defmodule TriOnyx.InformationClassifierTest do
       assert %{taint: :low, sensitivity: :low} = InformationClassifier.classify_trigger(:external_message)
     end
 
-    test "connector_verified trigger has low taint and sensitivity" do
-      assert %{taint: :low, sensitivity: :low} = InformationClassifier.classify_trigger(:connector_verified)
+    test "verified_input trigger has low taint and sensitivity" do
+      assert %{taint: :low, sensitivity: :low} = InformationClassifier.classify_trigger(:verified_input)
     end
 
     test "unknown trigger type has low taint and sensitivity" do

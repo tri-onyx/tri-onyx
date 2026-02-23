@@ -117,10 +117,13 @@ defmodule TriOnyx.Integration.TaintTest do
   end
 
   describe "tool result sensitivity classification" do
-    test "email tools have medium sensitivity (auth required)" do
+    test "SendEmail has medium sensitivity (auth required)" do
       assert :medium = InformationClassifier.classify_tool_result("SendEmail", %{}).sensitivity
-      assert :medium = InformationClassifier.classify_tool_result("MoveEmail", %{}).sensitivity
-      assert :medium = InformationClassifier.classify_tool_result("CreateFolder", %{}).sensitivity
+    end
+
+    test "MoveEmail and CreateFolder have low sensitivity" do
+      assert :low = InformationClassifier.classify_tool_result("MoveEmail", %{}).sensitivity
+      assert :low = InformationClassifier.classify_tool_result("CreateFolder", %{}).sensitivity
     end
 
     test "non-auth tools have low sensitivity" do
