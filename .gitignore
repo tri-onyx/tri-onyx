@@ -38,6 +38,7 @@ logs/
 .transcripts/
 .memories/
 .tmp/
+.claude/settings.local.json
 
 # BetterBeads
 .betterbeads/
