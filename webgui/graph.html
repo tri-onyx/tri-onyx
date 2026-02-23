@@ -406,6 +406,10 @@ function buildGraph() {
       taintSourcesUnified: aa.taint_sources || [],
       sensitivitySourcesUnified: aa.sensitivity_sources || [],
       capabilityDrivers: aa.capability_drivers || [],
+      worstCaseTaint: normalizeLevel(aa.worst_case_taint),
+      worstCaseSensitivity: normalizeLevel(aa.worst_case_sensitivity),
+      propagatedTaint: aa.propagated_taint ? normalizeLevel(aa.propagated_taint) : null,
+      propagatedSensitivity: aa.propagated_sensitivity ? normalizeLevel(aa.propagated_sensitivity) : null,
     };
   });
 
@@ -461,13 +465,20 @@ const RISK_MATRIX_2D = [
 function buildRatingBreakdown(d) {
   const hasNetwork = d.network && d.network !== 'none' && !(Array.isArray(d.network) && d.network.length === 0);
 
-  // Use server-provided unified sources
-  const taintSources = (d.taintSourcesUnified || []).map(x => ({ source: x.source, level: x.level }));
-  const sensitivitySources = (d.sensitivitySourcesUnified || []).map(x => ({ source: x.source, level: x.level }));
+  // Group server-provided sources by kind (tool vs input)
+  const allTaintSources = d.taintSourcesUnified || [];
+  const allSensSources = d.sensitivitySourcesUnified || [];
+  const taintToolSources = allTaintSources.filter(x => x.kind === 'tool');
+  const taintInputSources = allTaintSources.filter(x => x.kind === 'input');
+  const sensToolSources = allSensSources.filter(x => x.kind === 'tool');
+  const sensInputSources = allSensSources.filter(x => x.kind === 'input');
   const capDrivers = (d.capabilityDrivers || []).map(x => ({ tool: x.tool, level: x.level }));
 
-  const tI = LEVEL_RANK[d.taintLevel] || 0;
-  const sI = LEVEL_RANK[d.sensitivityLevel] || 0;
+  // Use effective (propagated) levels for risk derivation
+  const effT = d.effTaintLevel || d.taintLevel;
+  const effS = d.effSensitivityLevel || d.sensitivityLevel;
+  const tI = LEVEL_RANK[effT] || 0;
+  const sI = LEVEL_RANK[effS] || 0;
   const baseline = RISK_MATRIX_2D[tI][sI];
   const baseIdx = RISK_LEVELS.indexOf(baseline);
 
@@ -483,7 +494,15 @@ function buildRatingBreakdown(d) {
     finalRisk = baseline;
   }
 
-  return { taintSources, sensitivitySources, capDrivers, hasNetwork, baseline, capMod, finalRisk };
+  // Detect live session elevation (like explain-risk.py)
+  const liveTaintElevated = LEVEL_RANK[d.taintLevel] > LEVEL_RANK[d.worstCaseTaint || 'low'];
+  const liveSensElevated = LEVEL_RANK[d.sensitivityLevel] > LEVEL_RANK[d.worstCaseSensitivity || 'low'];
+
+  return {
+    taintToolSources, taintInputSources, sensToolSources, sensInputSources,
+    capDrivers, hasNetwork, baseline, capMod, finalRisk,
+    effT, effS, liveTaintElevated, liveSensElevated,
+  };
 }
 
 function renderDriverBadges(drivers) {
@@ -495,9 +514,10 @@ function renderDriverBadges(drivers) {
 
 function renderSourceBadgesUnified(sources) {
   if (!sources.length) return '<span style="color:var(--muted);font-size:10px;">none above low</span>';
-  return sources.map(d =>
-    `<span class="driver-badge ${d.level}">${d.source}</span>`
-  ).join('');
+  return sources.map(d => {
+    const edgeNote = d.edge_type ? ` <span style="color:var(--muted);font-size:8px;">[${d.edge_type}]</span>` : '';
+    return `<span class="driver-badge ${d.level}">${d.source}${edgeNote}</span>`;
+  }).join('');
 }
 
 function renderAllToolsByLevel(capDrivers, tools) {
@@ -508,48 +528,6 @@ function renderAllToolsByLevel(capDrivers, tools) {
   return items.map(d =>
     `<span class="driver-badge ${d.level}">${d.tool}</span>`
   ).join('');
-}
-
-const EDGE_TYPE_LABELS = { write_read: 'filesystem', messaging: 'messaging', bcp: 'BCP' };
-
-function getIncomingConnections(nodeId) {
-  return graphData.links.filter(l => {
-    const tgt = typeof l.target === 'object' ? l.target.id : l.target;
-    return tgt === nodeId;
-  }).map(l => {
-    const src = typeof l.source === 'object' ? l.source.id : l.source;
-    const srcNode = graphData.nodes.find(n => n.id === src);
-    return {
-      from: src,
-      type: EDGE_TYPE_LABELS[l.type] || l.type,
-      taint: srcNode ? srcNode.taintLevel : 'low',
-      sensitivity: srcNode ? srcNode.sensitivityLevel : 'low',
-      capability: srcNode ? srcNode.capabilityLevel : 'low',
-    };
-  });
-}
-
-function renderInherited(connections, axis) {
-  const elevated = connections.filter(c => LEVEL_RANK[c[axis]] > 0);
-  if (!elevated.length) return '';
-  return '<div style="margin-top:3px;">' +
-    elevated.map(c =>
-      `<div style="font-size:10px;color:var(--muted);margin-top:1px;">` +
-      `← <span class="badge ${c[axis]}">${c[axis]}</span> ` +
-      `<span style="color:var(--text)">${c.from}</span> ` +
-      `<span style="font-style:italic">(${c.type})</span></div>`
-    ).join('') + '</div>';
-}
-
-function renderSourceBadges(sources) {
-  if (!sources || !sources.length) return '';
-  return '<div style="margin-top:3px;">' +
-    sources.map(s =>
-      `<div style="font-size:10px;color:var(--muted);margin-top:1px;">` +
-      `← <span class="badge ${s.contributed}">${s.contributed}</span> ` +
-      `<span style="color:var(--text)">${s.from}</span> ` +
-      `<span style="font-style:italic">(${s.edge_type})</span></div>`
-    ).join('') + '</div>';
 }
 
 function riskIcon(level) {
@@ -933,27 +911,23 @@ function renderGraph() {
   node.on('mouseenter', (event, d) => {
     const a = d.agent;
     const b = buildRatingBreakdown(d);
-    const incoming = getIncomingConnections(d.id);
 
-    // Effective levels = max(own, inherited from connections)
-    const maxInTaint = incoming.reduce((acc, c) => LEVEL_RANK[c.taint] > LEVEL_RANK[acc] ? c.taint : acc, 'low');
-    const maxInSens = incoming.reduce((acc, c) => LEVEL_RANK[c.sensitivity] > LEVEL_RANK[acc] ? c.sensitivity : acc, 'low');
-    const effTaint = LEVEL_RANK[maxInTaint] > LEVEL_RANK[d.taintLevel] ? maxInTaint : d.taintLevel;
-    const effSens = LEVEL_RANK[maxInSens] > LEVEL_RANK[d.sensitivityLevel] ? maxInSens : d.sensitivityLevel;
-
-    const sources = (a.information_sources && a.information_sources.length) ? a.information_sources : [];
-    const sourcesRow = sources.length
-      ? `<div class="axis-row"><span class="axis-label">Sources</span><span class="paths">${sources.join(', ')}</span></div>`
-      : '';
+    // Worst-case vs live session notes (matches explain-risk.py logic)
+    const wcT = d.worstCaseTaint || 'low';
+    const wcS = d.worstCaseSensitivity || 'low';
+    let taintNote = `topology: ${wcT}`;
+    if (b.liveTaintElevated) {
+      const infoSources = a.information_sources || [];
+      taintNote += `; live: ${d.taintLevel}` + (infoSources.length ? ` via ${infoSources[0]}` : '');
+    }
+    let sensNote = `topology: ${wcS}`;
+    if (b.liveSensElevated) {
+      sensNote += `; live: ${d.sensitivityLevel}`;
+    }
 
     const bashNetNote = (b.hasNetwork && d.tools.includes('Bash'))
-      ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network → high taint &amp; capability</div>'
+      ? '<div style="color:var(--orange);font-size:10px;margin-top:2px;">Bash + network access → high taint &amp; capability</div>'
       : '';
-
-    const inheritedTaint = d.taintSources && d.taintSources.length
-      ? renderSourceBadges(d.taintSources) : renderInherited(incoming, 'taint');
-    const inheritedSens = d.sensitivitySources && d.sensitivitySources.length
-      ? renderSourceBadges(d.sensitivitySources) : renderInherited(incoming, 'sensitivity');
 
     const chainHtml = (d.riskChain && d.riskChain.length)
       ? `<div class="axis-row"><span class="axis-label">Risk chain</span><span class="risk-chain" style="margin:0">${d.riskChain.join(' → ')}</span></div>`
@@ -979,28 +953,32 @@ function renderGraph() {
       </div>
 
       <div class="section">
-        <div class="section-header"><div class="section-title">☣️ Taint (integrity)</div><span class="badge ${effTaint}">${effTaint}</span></div>
-        <div class="axis-row"><span class="axis-label">Sources</span><div class="driver-list">${renderSourceBadgesUnified(b.taintSources)}</div></div>
+        <div class="section-header"><div class="section-title">\u2623\uFE0F Taint (integrity)</div><span class="badge ${b.effT}">${b.effT}</span></div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">${taintNote}</div>
+        ${b.taintToolSources.length ? `<div class="axis-row"><span class="axis-label">Tools</span><div class="driver-list">${renderSourceBadgesUnified(b.taintToolSources)}</div></div>` : ''}
+        ${b.taintInputSources.length ? `<div class="axis-row"><span class="axis-label">Inputs</span><div class="driver-list">${renderSourceBadgesUnified(b.taintInputSources)}</div></div>` : ''}
+        ${!b.taintToolSources.length && !b.taintInputSources.length ? '<div class="axis-row"><span class="axis-label">Sources</span><span style="color:var(--muted);font-size:10px;">none above low</span></div>' : ''}
         ${bashNetNote}
-        ${inheritedTaint}
       </div>
 
       <div class="section">
-        <div class="section-header"><div class="section-title">🔒 Sensitivity (confidentiality)</div><span class="badge ${effSens}">${effSens}</span></div>
-        <div class="axis-row"><span class="axis-label">Sources</span><div class="driver-list">${renderSourceBadgesUnified(b.sensitivitySources)}</div></div>
-        ${inheritedSens}
+        <div class="section-header"><div class="section-title">\uD83D\uDD12 Sensitivity (confidentiality)</div><span class="badge ${b.effS}">${b.effS}</span></div>
+        <div style="font-size:10px;color:var(--muted);margin-bottom:3px;">${sensNote}</div>
+        ${b.sensToolSources.length ? `<div class="axis-row"><span class="axis-label">Tools</span><div class="driver-list">${renderSourceBadgesUnified(b.sensToolSources)}</div></div>` : ''}
+        ${b.sensInputSources.length ? `<div class="axis-row"><span class="axis-label">Inputs</span><div class="driver-list">${renderSourceBadgesUnified(b.sensInputSources)}</div></div>` : ''}
+        ${!b.sensToolSources.length && !b.sensInputSources.length ? '<div class="axis-row"><span class="axis-label">Sources</span><span style="color:var(--muted);font-size:10px;">none above low</span></div>' : ''}
       </div>
 
       <div class="section">
-        <div class="section-header"><div class="section-title">🦾 Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
+        <div class="section-header"><div class="section-title">\uD83E\uDDBE Capability (blast radius)</div><span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span></div>
         <div style="margin-top:2px;font-size:11px;"><span class="axis-label">Tools</span></div>
         <div class="driver-list">${renderAllToolsByLevel(b.capDrivers, d.tools)}</div>
       </div>
 
       <div class="section">
         <div class="section-header"><div class="section-title">Effective Risk</div><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
-        <div class="derivation">T:${effTaint} × S:${effSens} → ${RISK_MATRIX_2D[LEVEL_RANK[effTaint]][LEVEL_RANK[effSens]]}</div>
-        <div class="derivation">cap:${d.capabilityLevel} → ${b.capMod}</div>
+        <div class="derivation">T:${b.effT} \u00D7 S:${b.effS} \u2192 ${RISK_MATRIX_2D[LEVEL_RANK[b.effT]][LEVEL_RANK[b.effS]]}</div>
+        <div class="derivation">cap:${d.capabilityLevel} \u2192 ${b.capMod}</div>
         ${maxInputNote}
         ${chainHtml}
       </div>
