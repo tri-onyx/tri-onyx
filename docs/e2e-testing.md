@@ -39,7 +39,7 @@ uv run scripts/test-agent.py <agent-name> --turns '[
 # Auto-approve all BCP Cat-3 requests
 uv run scripts/test-agent.py <agent-name> "<prompt>" --auto-approve
 
-# Lower-trust trigger (maps to :connector_unverified in the gateway)
+# Lower-trust trigger (maps to :unverified_input in the gateway)
 uv run scripts/test-agent.py <agent-name> "<prompt>" --trust unverified
 
 # Extend timeout for slow agents (seconds)

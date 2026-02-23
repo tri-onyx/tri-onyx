@@ -264,11 +264,11 @@ defmodule TriOnyx.InformationClassifier do
 
   @spec trigger_reason(atom()) :: String.t()
   defp trigger_reason(:webhook), do: "webhook trigger (untrusted payload)"
-  defp trigger_reason(:connector_unverified), do: "unverified connector message"
+  defp trigger_reason(:unverified_input), do: "unverified connector message"
   defp trigger_reason(:cron), do: "cron trigger"
   defp trigger_reason(:heartbeat), do: "heartbeat trigger"
   defp trigger_reason(:external_message), do: "verified external message"
-  defp trigger_reason(:connector_verified), do: "verified connector message"
+  defp trigger_reason(:verified_input), do: "verified connector message"
   defp trigger_reason(other), do: "trigger: #{other}"
 
   @spec controlled_path?(String.t()) :: boolean()

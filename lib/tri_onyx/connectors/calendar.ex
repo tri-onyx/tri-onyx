@@ -687,7 +687,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
   For each new or changed event:
   1. Fetches via CalDAV REPORT
   2. Writes event JSON to workspace
-  3. Dispatches a `:connector_unverified` trigger
+  3. Dispatches a `:unverified_input` trigger
   """
 
   use GenServer
@@ -798,7 +798,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
                     "Path: /workspace/agents/#{state.agent_name}/events/#{calendar}/#{sanitize_uid(uid)}.json"
 
                 TriggerRouter.dispatch(%{
-                  type: :connector_unverified,
+                  type: :unverified_input,
                   agent_name: state.agent_name,
                   payload: trigger_payload
                 })

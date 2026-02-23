@@ -493,7 +493,7 @@ defmodule TriOnyx.AgentDefinition do
     end
   end
 
-  @valid_input_sources ~w(connector_unverified connector_verified webhook external_message cron heartbeat)
+  @valid_input_sources ~w(unverified_input verified_input webhook external_message cron heartbeat)
 
   @spec parse_input_sources(map()) :: {:ok, [atom()]} | {:error, term()}
   defp parse_input_sources(yaml) do

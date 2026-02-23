@@ -107,7 +107,7 @@ defmodule TriOnyx.SystemCommand do
 
             case AgentSupervisor.start_session(supervisor,
                    definition: definition,
-                   trigger_type: :connector_verified
+                   trigger_type: :verified_input
                  ) do
               {:ok, _pid} ->
                 {:ok, "Force-restarting agent '#{agent_name}'"}
@@ -132,7 +132,7 @@ defmodule TriOnyx.SystemCommand do
 
               case AgentSupervisor.start_session(supervisor,
                      definition: definition,
-                     trigger_type: :connector_verified
+                     trigger_type: :verified_input
                    ) do
                 {:ok, _pid} ->
                   Logger.info("SystemCommand: restarted agent '#{agent_name}'")
@@ -150,7 +150,7 @@ defmodule TriOnyx.SystemCommand do
             # Not running — start it directly
             case AgentSupervisor.start_session(supervisor,
                    definition: definition,
-                   trigger_type: :connector_verified
+                   trigger_type: :verified_input
                  ) do
               {:ok, _pid} ->
                 {:ok, "Started agent '#{agent_name}' (was not running)"}

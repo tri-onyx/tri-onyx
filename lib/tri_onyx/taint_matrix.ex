@@ -37,10 +37,10 @@ defmodule TriOnyx.TaintMatrix do
   | Source                | Taint  | Reason                                       |
   |-----------------------|--------|----------------------------------------------|
   | :webhook              | high   | Untrusted external HTTP payload              |
-  | :connector_unverified | high   | Unverified email or chat message             |
+  | :unverified_input | high   | Unverified email or chat message             |
   | :inter_agent          | medium | Sender taint unknown at static analysis time |
   | :external_message     | low    | API-key authenticated programmatic message   |
-  | :connector_verified   | low    | Chat platform message with verified sender identity |
+  | :verified_input   | low    | Chat platform message with verified sender identity |
   | :cron                 | low    | Internal schedule (no external input)        |
   | :heartbeat            | low    | Internal timer (no external input)           |
   | unknown               | low    | Default for unregistered trigger types       |
@@ -94,10 +94,10 @@ defmodule TriOnyx.TaintMatrix do
   # Taint levels for trigger / input sources.
   @trigger_taint %{
     webhook: :high,
-    connector_unverified: :high,
+    unverified_input: :high,
     inter_agent: :medium,
     external_message: :low,
-    connector_verified: :low,
+    verified_input: :low,
     cron: :low,
     heartbeat: :low
   }

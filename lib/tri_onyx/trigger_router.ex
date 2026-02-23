@@ -32,8 +32,8 @@ defmodule TriOnyx.TriggerRouter do
           | :webhook
           | :external_message
           | :inter_agent
-          | :connector_verified
-          | :connector_unverified
+          | :verified_input
+          | :unverified_input
 
   @type trigger_event :: %{
           type: trigger_type(),

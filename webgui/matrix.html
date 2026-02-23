@@ -338,7 +338,7 @@ const PRESETS = [
   { label: "Read-only",       trigger: "cron",                 tools: ["Read/controlled", "Grep", "Glob"] },
   { label: "Web research",    trigger: "cron",                 tools: ["WebFetch", "WebSearch", "Read/controlled", "Write"] },
   { label: "Code exec",       trigger: "cron",                 tools: ["Bash/isolated", "Read/controlled", "Write", "Edit"] },
-  { label: "Email agent",     trigger: "connector_unverified", tools: ["SendEmail", "MoveEmail", "CreateFolder", "Read/controlled", "Write"] },
+  { label: "Email agent",     trigger: "unverified_input", tools: ["SendEmail", "MoveEmail", "CreateFolder", "Read/controlled", "Write"] },
   { label: "Webhook handler", trigger: "webhook",              tools: ["WebFetch", "Bash/network", "Read/external", "Write"] },
   { label: "Full agent",      trigger: "webhook",              tools: null },
 ];
