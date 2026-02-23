@@ -969,8 +969,9 @@ function renderGraph() {
 
       <div class="section">
         <div class="section-header"><div class="section-title">Effective Risk</div><span class="badge ${d.effectiveRisk}">${d.effectiveRisk}</span></div>
-        <div class="derivation">T:${b.effT} \u00D7 S:${b.effS} \u2192 ${RISK_MATRIX_2D[LEVEL_RANK[b.effT]][LEVEL_RANK[b.effS]]}</div>
-        <div class="derivation">cap:${d.capabilityLevel} \u2192 ${b.capMod}</div>
+        <div class="derivation">Baseline: \u2623\uFE0F <span class="badge ${b.effT}">${b.effT}</span> \u00D7 \uD83D\uDD12 <span class="badge ${b.effS}">${b.effS}</span> = <span class="badge ${b.baseline}">${b.baseline}</span></div>
+        <div class="derivation">Adjusted: \uD83E\uDDBE <span class="badge ${d.capabilityLevel}">${d.capabilityLevel}</span> capability \u2192 ${b.capMod}</div>
+        <div class="derivation">Final: <span class="badge ${d.effectiveRisk}" style="font-size:11px;">${d.effectiveRisk}</span></div>
         ${maxInputNote}
         ${chainHtml}
       </div>
