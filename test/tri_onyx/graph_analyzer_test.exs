@@ -18,7 +18,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
       system_prompt: "test prompt",
       heartbeat_every: nil,
       idle_timeout: nil,
-      bcp_channels: []
+      bcp_channels: [],
+      input_sources: [],
+      base_taint: :low
     }
 
     merged = Map.merge(defaults, attrs)
@@ -36,7 +38,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
       system_prompt: merged.system_prompt,
       heartbeat_every: merged[:heartbeat_every],
       idle_timeout: merged[:idle_timeout],
-      bcp_channels: merged.bcp_channels
+      bcp_channels: merged.bcp_channels,
+      input_sources: merged.input_sources,
+      base_taint: merged.base_taint
     }
   end
 
@@ -915,6 +919,94 @@ defmodule TriOnyx.GraphAnalyzerTest do
       edge = hd(result["ctrl"].incoming_edges)
       assert edge.max_category == 2
       assert edge.budget_bits == 500
+    end
+  end
+
+  describe "worst_case_taint with input_sources" do
+    test "connector_unverified raises taint to high" do
+      agent = make_def(%{name: "cal", tools: ["Read", "CalendarQuery"], input_sources: [:connector_unverified]})
+      assert :high = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "webhook raises taint to high" do
+      agent = make_def(%{name: "wh", tools: ["Read"], input_sources: [:webhook]})
+      assert :high = GraphAnalyzer.worst_case_taint(agent)
+    end
+
+    test "cron does not raise taint" do
+      agent = make_def(%{name: "cron", tools: ["Read"], input_sources: [:cron]})
+      assert :low = GraphAnalyzer.worst_case_taint(agent)
+    end
+  end
+
+  describe "worst_case_sensitivity with input_sources" do
+    test "connector_unverified raises sensitivity to medium" do
+      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:connector_unverified]})
+      assert :medium = GraphAnalyzer.worst_case_sensitivity(agent)
+    end
+
+    test "webhook does not raise sensitivity" do
+      agent = make_def(%{name: "wh", tools: ["Read"], input_sources: [:webhook]})
+      assert :low = GraphAnalyzer.worst_case_sensitivity(agent)
+    end
+  end
+
+  describe "rating_drivers/2" do
+    test "includes tool and input source taint" do
+      agent = make_def(%{name: "cal", tools: ["Read", "WebFetch"], input_sources: [:connector_unverified]})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.taint_sources, & &1.source)
+      assert "WebFetch" in sources
+      assert "connector_unverified" in sources
+    end
+
+    test "includes receive_from peers as taint sources" do
+      agent = make_def(%{name: "a", tools: ["Read"], receive_from: ["main"]})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.taint_sources, & &1.source)
+      assert "receive_from:main" in sources
+    end
+
+    test "includes network as taint source" do
+      agent = make_def(%{name: "a", tools: ["Read"], network: :outbound})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.taint_sources, & &1.source)
+      assert "network:outbound" in sources
+    end
+
+    test "includes base_taint when above low" do
+      agent = make_def(%{name: "a", tools: ["Read"], base_taint: :medium})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.taint_sources, & &1.source)
+      assert "base_taint" in sources
+    end
+
+    test "excludes base_taint when low" do
+      agent = make_def(%{name: "a", tools: ["Read"], base_taint: :low})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.taint_sources, & &1.source)
+      refute "base_taint" in sources
+    end
+
+    test "includes input source sensitivity" do
+      agent = make_def(%{name: "cal", tools: ["Read"], input_sources: [:connector_unverified]})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      sources = Enum.map(result.sensitivity_sources, & &1.source)
+      assert "connector_unverified" in sources
+    end
+
+    test "capability_drivers only include tools" do
+      agent = make_def(%{name: "a", tools: ["Read", "Bash"], input_sources: [:webhook]})
+      result = GraphAnalyzer.rating_drivers(agent)
+
+      # capability_drivers should only have tools, not input sources
+      assert Enum.all?(result.capability_drivers, fn d -> Map.has_key?(d, :tool) end)
     end
   end
 

@@ -49,6 +49,13 @@ def format_drivers(drivers: list[dict]) -> str:
     return ", ".join(f"{d['tool']}({colorize(d['level'])})" for d in drivers)
 
 
+def format_unified_sources(sources: list[dict]) -> str:
+    """Format unified source list as 'source(level), ...'."""
+    if not sources:
+        return "none"
+    return ", ".join(f"{d['source']}({colorize(d['level'])})" for d in sources)
+
+
 def format_sources(sources: list[dict]) -> str:
     """Format propagation sources as '← agent (edge_type)'."""
     if not sources:
@@ -80,27 +87,44 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
     if desc:
         lines.append(f"  {desc}")
 
-    # Three axes
-    td = aa.get("tool_drivers", {})
+    # Three axes — unified sources
 
-    lines.append(f"  Taint:       {colorize(prop_t):<20s} (base: {wc_t})")
-    taint_drivers = td.get("taint_drivers", [])
-    if taint_drivers:
-        lines.append(f"    drivers:   {format_drivers(taint_drivers)}")
-    taint_sources = aa.get("taint_sources", [])
-    if taint_sources:
-        lines.append(f"    inherited: {format_sources(taint_sources)}")
+    # Detect live session override: when the agent's live taint exceeds worst-case,
+    # it was escalated by the trigger type at runtime.
+    live_t = agent.get("taint_level", wc_t)
+    live_s = agent.get("sensitivity_level", wc_s)
+    live_t_elevated = LEVEL_RANK.get(live_t, 0) > LEVEL_RANK.get(wc_t, 0)
+    live_s_elevated = LEVEL_RANK.get(live_s, 0) > LEVEL_RANK.get(wc_s, 0)
 
-    lines.append(f"  Sensitivity: {colorize(prop_s):<20s} (base: {wc_s})")
-    sens_drivers = td.get("sensitivity_drivers", [])
-    if sens_drivers:
-        lines.append(f"    drivers:   {format_drivers(sens_drivers)}")
-    sens_sources = aa.get("sensitivity_sources", [])
-    if sens_sources:
-        lines.append(f"    inherited: {format_sources(sens_sources)}")
+    taint_base_note = f"topology: {wc_t}"
+    if live_t_elevated:
+        sources = agent.get("information_sources", [])
+        trigger_reason = f"; live session: {live_t} via {sources[0]}" if sources else f"; live session: {live_t}"
+        taint_base_note += trigger_reason
+
+    lines.append(f"  Taint:       {colorize(prop_t):<20s} ({taint_base_note})")
+    taint_srcs = aa.get("taint_sources", [])
+    if taint_srcs:
+        # Prefer unified sources (list of {source, level}) over legacy format
+        if taint_srcs and "source" in taint_srcs[0]:
+            lines.append(f"    sources:   {format_unified_sources(taint_srcs)}")
+        else:
+            lines.append(f"    inherited: {format_sources(taint_srcs)}")
+
+    sens_base_note = f"topology: {wc_s}"
+    if live_s_elevated:
+        sens_base_note += f"; live session: {live_s}"
+
+    lines.append(f"  Sensitivity: {colorize(prop_s):<20s} ({sens_base_note})")
+    sens_srcs = aa.get("sensitivity_sources", [])
+    if sens_srcs:
+        if sens_srcs and "source" in sens_srcs[0]:
+            lines.append(f"    sources:   {format_unified_sources(sens_srcs)}")
+        else:
+            lines.append(f"    inherited: {format_sources(sens_srcs)}")
 
     lines.append(f"  Capability:  {colorize(cap)}")
-    cap_drivers = td.get("capability_drivers", [])
+    cap_drivers = aa.get("capability_drivers", [])
     if cap_drivers:
         lines.append(f"    drivers:   {format_drivers(cap_drivers)}")
 

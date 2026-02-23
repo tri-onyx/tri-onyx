@@ -679,8 +679,8 @@ defmodule TriOnyx.Router do
       "webhook"              => "untrusted external HTTP payload",
       "connector_unverified" => "unverified email or chat message",
       "inter_agent"          => "sender taint propagated at runtime",
-      "external_message"     => "verified external message (sender checked)",
-      "connector_verified"   => "verified connector message",
+      "external_message"     => "API-key authenticated programmatic message",
+      "connector_verified"   => "chat platform message with verified sender identity",
       "cron"                 => "internal schedule (no external input)",
       "heartbeat"            => "internal timer (no external input)"
     }
@@ -802,25 +802,25 @@ defmodule TriOnyx.Router do
         definition = all_defs[name]
         prop_t = data["propagated_taint"]
         prop_s = data["propagated_sensitivity"]
-        wc_t = Map.get(taint_levels, name, :low)
-        wc_s = Map.get(sensitivity_levels, name, :low)
+        wc_t = Map.get(worst_case_taints, name, :low)
+        wc_s = Map.get(worst_case_sensitivities, name, :low)
 
-        eff_t = if prop_t, do: String.to_existing_atom(prop_t), else: wc_t
-        eff_s = if prop_s, do: String.to_existing_atom(prop_s), else: wc_s
+        merged_t = Map.get(taint_levels, name, :low)
+        merged_s = Map.get(sensitivity_levels, name, :low)
+        eff_t = if prop_t, do: String.to_existing_atom(prop_t), else: merged_t
+        eff_s = if prop_s, do: String.to_existing_atom(prop_s), else: merged_s
         cap = RiskScorer.infer_capability(definition.tools, definition.network)
         eff_risk = RiskScorer.effective_risk(eff_t, eff_s, cap)
 
-        drivers = GraphAnalyzer.tool_drivers(definition)
+        drivers = GraphAnalyzer.rating_drivers(definition, all_defs)
 
         {name, Map.merge(data, %{
           "effective_risk" => RiskScorer.format_risk(eff_risk),
           "worst_case_taint" => to_string(wc_t),
           "worst_case_sensitivity" => to_string(wc_s),
-          "tool_drivers" => %{
-            "taint_drivers" => Enum.map(drivers.taint_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end),
-            "sensitivity_drivers" => Enum.map(drivers.sensitivity_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end),
-            "capability_drivers" => Enum.map(drivers.capability_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end)
-          }
+          "taint_sources" => Enum.map(drivers.taint_sources, fn d -> %{"source" => d.source, "level" => to_string(d.level)} end),
+          "sensitivity_sources" => Enum.map(drivers.sensitivity_sources, fn d -> %{"source" => d.source, "level" => to_string(d.level)} end),
+          "capability_drivers" => Enum.map(drivers.capability_drivers, fn d -> %{"tool" => d.tool, "level" => to_string(d.level)} end)
         })}
       end)
 
