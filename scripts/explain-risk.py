@@ -93,7 +93,7 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
     live_t_elevated = LEVEL_RANK.get(live_t, 0) > LEVEL_RANK.get(wc_t, 0)
     live_s_elevated = LEVEL_RANK.get(live_s, 0) > LEVEL_RANK.get(wc_s, 0)
 
-    taint_base_note = f"topology: {wc_t}"
+    taint_base_note = f"static: {wc_t}"
     if live_t_elevated:
         sources = agent.get("information_sources", [])
         trigger_reason = f"; live session: {live_t} via {sources[0]}" if sources else f"; live session: {live_t}"
@@ -109,7 +109,7 @@ def explain_agent(name: str, agent: dict, analysis: dict) -> str:
         if input_srcs:
             lines.append(f"    inputs:    {format_unified_sources(input_srcs)}")
 
-    sens_base_note = f"topology: {wc_s}"
+    sens_base_note = f"static: {wc_s}"
     if live_s_elevated:
         sens_base_note += f"; live session: {live_s}"
 
