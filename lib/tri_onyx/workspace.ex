@@ -446,6 +446,11 @@ defmodule TriOnyx.Workspace do
          :ok <- File.mkdir_p(Path.join(dir, "agents")),
          :ok <- write_template_files(dir),
          {_, 0} <- System.cmd("git", ["init"], cd: dir, stderr_to_stdout: true),
+         {_, 0} <-
+           System.cmd("git", ["config", "core.fileMode", "false"],
+             cd: dir,
+             stderr_to_stdout: true
+           ),
          :ok <- ensure_safe_directory(dir),
          {_, 0} <- System.cmd("git", ["add", "-A"], cd: dir, stderr_to_stdout: true),
          {_, 0} <-
