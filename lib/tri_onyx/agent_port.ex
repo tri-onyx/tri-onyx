@@ -494,6 +494,7 @@ defmodule TriOnyx.AgentPort do
         :binary,
         :exit_status,
         :use_stdio,
+        :stderr_to_stdout,
         args: docker_args
       ])
 
