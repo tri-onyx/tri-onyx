@@ -1,0 +1,17 @@
+site_name: TriOnyx
+theme:
+  name: material
+nav:
+  - Home: index.md
+  - Architecture:
+      - Agent Runtime: agent-runtime.md
+      - Protocol: protocol.md
+      - FUSE Driver: fuse-driver-spec.md
+      - BCP: bcp.md
+  - Guides:
+      - Matrix Setup: matrix-guide.md
+      - Email Setup: email-setup.md
+      - Email OAuth2: email-outlook-oauth2.md
+      - Webhook Receiver: webhook-receiver-design.md
+  - Development:
+      - E2E Testing: e2e-testing.md
