@@ -40,6 +40,7 @@ defmodule TriOnyx.ConnectorHandler do
 
   require Logger
 
+  alias TriOnyx.ActionApprovalQueue
   alias TriOnyx.AgentSupervisor
   alias TriOnyx.BCP.ApprovalQueue
   alias TriOnyx.EventBus
@@ -279,6 +280,7 @@ defmodule TriOnyx.ConnectorHandler do
 
   defp handle_frame(%{"type" => "reaction"} = frame, state) do
     approval_id = Map.get(frame, "approval_id")
+    action_approval_id = Map.get(frame, "action_approval_id")
     # Strip Unicode variation selectors (U+FE0E, U+FE0F) so 👍️ matches 👍
     emoji = Map.get(frame, "emoji", "") |> String.replace(~r/[\x{FE0E}\x{FE0F}]/u, "")
     sender = Map.get(frame, "sender", "")
@@ -287,6 +289,28 @@ defmodule TriOnyx.ConnectorHandler do
     trust = Map.get(frame, "trust", %{})
 
     cond do
+      # Action approval reaction — action_approval_id is present
+      is_binary(action_approval_id) and action_approval_id != "" ->
+        Logger.info(
+          "ConnectorHandler: action approval reaction from #{sender} " <>
+            "(approval=#{action_approval_id}, emoji=#{emoji})"
+        )
+
+        case emoji do
+          "👍" ->
+            ActionApprovalQueue.approve(action_approval_id)
+
+          "👎" ->
+            ActionApprovalQueue.reject(action_approval_id, "rejected via reaction by #{sender}")
+
+          _ ->
+            Logger.warning(
+              "ConnectorHandler: unrecognized action approval emoji #{emoji} for #{action_approval_id}"
+            )
+        end
+
+        {:ok, state}
+
       # BCP approval reaction — approval_id is present
       is_binary(approval_id) and approval_id != "" ->
         Logger.info(
@@ -545,6 +569,20 @@ defmodule TriOnyx.ConnectorHandler do
               "taint_level" => Map.get(event, "taint_level", ""),
               "sensitivity_level" => Map.get(event, "sensitivity_level", ""),
               "source" => Map.get(event, "source", "")
+            })
+
+          {:push, [{:text, frame}], state}
+
+        "action_approval_request" ->
+          frame =
+            Jason.encode!(%{
+              "type" => "action_approval_request",
+              "approval_id" => Map.get(event, "approval_id", ""),
+              "agent_name" => Map.get(event, "agent_name", ""),
+              "session_id" => session_id,
+              "tool_name" => Map.get(event, "tool_name", ""),
+              "tool_input" => Map.get(event, "tool_input", %{}),
+              "channel" => channel
             })
 
           {:push, [{:text, frame}], state}

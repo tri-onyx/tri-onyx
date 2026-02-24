@@ -606,6 +606,87 @@ defmodule TriOnyx.Router do
     end
   end
 
+  # --- Action Approval Queue ---
+
+  get "/actions/approvals" do
+    alias TriOnyx.ActionApprovalQueue
+
+    items = ActionApprovalQueue.list_pending()
+
+    serialized =
+      Enum.map(items, fn item ->
+        %{
+          "id" => item.id,
+          "agent_name" => item.agent_name,
+          "session_id" => item.session_id,
+          "tool_name" => item.tool_name,
+          "tool_input" => item.tool_input,
+          "submitted_at" => DateTime.to_iso8601(item.submitted_at)
+        }
+      end)
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{"approvals" => serialized}))
+  end
+
+  post "/actions/approvals/:id/approve" do
+    alias TriOnyx.ActionApprovalQueue
+
+    case ActionApprovalQueue.approve(id) do
+      {:ok, item} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(
+          200,
+          Jason.encode!(%{
+            "status" => "approved",
+            "id" => item.id,
+            "agent_name" => item.agent_name,
+            "tool_name" => item.tool_name
+          })
+        )
+
+      {:error, :not_found} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+    end
+  end
+
+  post "/actions/approvals/:id/reject" do
+    alias TriOnyx.ActionApprovalQueue
+
+    body = conn.assigns[:raw_body] || ""
+
+    reason =
+      case Jason.decode(body) do
+        {:ok, %{"reason" => r}} when is_binary(r) -> r
+        _ -> "no reason provided"
+      end
+
+    case ActionApprovalQueue.reject(id, reason) do
+      {:ok, item} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(
+          200,
+          Jason.encode!(%{
+            "status" => "rejected",
+            "id" => item.id,
+            "reason" => reason,
+            "agent_name" => item.agent_name,
+            "tool_name" => item.tool_name
+          })
+        )
+
+      {:error, :not_found} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+    end
+  end
+
   # --- Connector WebSocket ---
 
   get "/connectors/ws" do
