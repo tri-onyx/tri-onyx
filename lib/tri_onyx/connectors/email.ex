@@ -657,28 +657,68 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
   # --- Private ---
 
-  # Scans the agent's inbox directory and returns the highest UID found,
-  # so the poller only fetches emails newer than what's already on disk.
+  # Reads the persisted last-seen UID from the agent's state directory.
+  # Falls back to scanning the inbox directory for backwards compatibility,
+  # and "0" if neither source has data.
   @spec last_uid_from_disk(String.t()) :: String.t()
   defp last_uid_from_disk(agent_name) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
-    inbox_dir = Path.join([workspace_dir, "agents", agent_name, "inbox"])
+    case read_last_uid_file(agent_name) do
+      {:ok, uid} ->
+        uid
 
-    case File.ls(inbox_dir) do
-      {:ok, entries} ->
-        entries
-        |> Enum.map(fn entry -> Integer.parse(entry) end)
-        |> Enum.filter(fn
-          {_n, ""} -> true
-          _ -> false
-        end)
-        |> Enum.map(fn {n, ""} -> n end)
-        |> Enum.max(fn -> 0 end)
-        |> Integer.to_string()
+      :error ->
+        # Backwards compat: derive from inbox contents if no state file yet
+        workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+        inbox_dir = Path.join([workspace_dir, "agents", agent_name, "inbox"])
+
+        case File.ls(inbox_dir) do
+          {:ok, entries} ->
+            entries
+            |> Enum.map(fn entry -> Integer.parse(entry) end)
+            |> Enum.filter(fn
+              {_n, ""} -> true
+              _ -> false
+            end)
+            |> Enum.map(fn {n, ""} -> n end)
+            |> Enum.max(fn -> 0 end)
+            |> Integer.to_string()
+
+          {:error, _} ->
+            "0"
+        end
+    end
+  end
+
+  @spec last_uid_state_path(String.t()) :: String.t()
+  defp last_uid_state_path(agent_name) do
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    Path.join([workspace_dir, "agents", agent_name, "state", "last_uid"])
+  end
+
+  @spec read_last_uid_file(String.t()) :: {:ok, String.t()} | :error
+  defp read_last_uid_file(agent_name) do
+    path = last_uid_state_path(agent_name)
+
+    case File.read(path) do
+      {:ok, contents} ->
+        uid = String.trim(contents)
+
+        case Integer.parse(uid) do
+          {_n, ""} -> {:ok, uid}
+          _ -> :error
+        end
 
       {:error, _} ->
-        "0"
+        :error
     end
+  end
+
+  @spec persist_last_uid(String.t(), String.t()) :: :ok
+  defp persist_last_uid(agent_name, uid) do
+    path = last_uid_state_path(agent_name)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, uid)
+    :ok
   end
 
   @spec schedule_poll(%__MODULE__{}) :: %__MODULE__{}
@@ -697,6 +737,11 @@ defmodule TriOnyx.Connectors.Email.Poller do
         inbox_dir = Path.join([workspace_dir, "agents", state.agent_name, "inbox"])
 
         Enum.each(emails, fn {uid, raw_email} ->
+          email_dir = Path.join(inbox_dir, uid)
+
+          if File.dir?(email_dir) do
+            Logger.debug("Email #{uid} already in inbox, skipping")
+          else
           case Email.parse_mime(raw_email) do
             {:ok, message} ->
               attachment_data = extract_raw_attachments(raw_email)
@@ -737,8 +782,10 @@ defmodule TriOnyx.Connectors.Email.Poller do
             {:error, reason} ->
               Logger.error("Failed to parse email #{uid}: #{reason}")
           end
+          end
         end)
 
+        persist_last_uid(state.agent_name, new_last_uid)
         %{state | last_uid: new_last_uid}
 
       {:error, reason} ->
