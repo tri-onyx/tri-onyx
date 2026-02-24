@@ -115,13 +115,9 @@ When agents send messages to each other, the message carries the sender's taint 
 
 ### Sanitization
 
-**Sanitization** is the only way to reduce taint in transit. When a message passes through sanitization, its taint steps down one level:
+**Sanitization** is a structural defense that validates message format and rejects malformed payloads. It does **not** reduce taint. Whether a message is sanitized or raw, the receiver inherits the sender's full taint level. The bandwidth constraint (1024-byte strings provide sufficient channel for prompt injection) means structural validation alone cannot step down taint.
 
-- High → Medium
-- Medium → Low
-- Low → Low
-
-Sanitization does **not** reduce sensitivity. Rephrasing a database record doesn't make it less sensitive — the information content is preserved even if the exact wording changes. Sensitivity can only be reduced by **redaction** (removing specific sensitive fields) or **aggregation** (replacing individual records with statistical summaries).
+Sanitization does **not** reduce sensitivity either. Sensitivity can only be reduced by **redaction** (removing specific sensitive fields) or **aggregation** (replacing individual records with statistical summaries).
 
 ### Human review
 
