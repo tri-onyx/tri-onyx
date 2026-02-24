@@ -1,22 +1,20 @@
-# TriOnyx
+# TriOnyx — What OpenClaw would be if security came first
 
-An autonomous agent gateway that secures multi-agent LLM systems by tracking what agents have *seen*, not just what they can *do*.
+A complete agent runtime that tracks what agents have *seen*, not just what they can *do*.
 
-Built on Elixir/OTP. Runs Claude-powered agents in isolated Docker containers with FUSE filesystem policies, network sandboxing, and two-axis risk scoring derived from the Biba and Bell-LaPadula information security models.
+## The core problem
 
-## The Problem with Agent Security Today
+OpenClaw sandboxes **capability** — restrict filesystem access, disable shell, limit network. This misses the point. An LLM that has ingested a prompt injection is dangerous regardless of what tools it has. The real threat is **information**: what enters an agent's context, and where it flows next.
 
-Every agent framework gets security wrong in the same way: they sandbox **capability**. Restrict filesystem access. Disable shell execution. Limit network calls. The assumption is that a capable agent is a dangerous agent, so reduce capability to reduce risk.
+## What TriOnyx does
 
-This is backwards.
+- **Isolated agent containers** — each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state
+- **Taint and sensitivity tracking** — two independent axes (Biba integrity, Bell-LaPadula confidentiality) that measure what each agent has been exposed to
+- **Information flow enforcement** — the gateway intercepts all inter-agent communication and blocks flows that would violate integrity or confidentiality constraints
+- **Auditable everything** — structured logs for file access, tool calls, message routing, and policy violations
+- **Risk reduction, not elimination** — the security model makes attacks harder and detectable, not theoretically impossible
 
-The real threat to LLM agents is **information**, not capability:
-
-- **Prompt injection** is an information attack — adversarial instructions embedded in data propagate through attention mechanisms and influence every subsequent output.
-- **Data exfiltration** is an information problem — an agent doesn't need file-write access to leak data, it needs to have *seen* the data and to have *any* output channel.
-- **Multi-agent propagation** is an information flow problem — attacks traverse capability boundaries through data, not through tools.
-
-TriOnyx tracks **information exposure** — what each agent has seen and where that information flows — and uses it as the primary dimension of security enforcement.
+Built on Elixir/OTP. Designed for a single operator running their own agents.
 
 ## Architecture
 

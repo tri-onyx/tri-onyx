@@ -2,6 +2,12 @@
 
 > **Note:** `CLAUDE.md` is a symlink to this file (`AGENTS.md`). Edit `AGENTS.md` directly.
 
+## Destructive Actions
+
+- **NEVER delete `.git` directories** — especially inside submodules or nested repos. Losing `.git` means losing all commit history, and if there is no upstream remote, that history is **unrecoverable**.
+- **NEVER run `rm -rf` on directories you don't fully understand** — always ask the user before deleting anything that could contain irreplaceable data.
+- When converting a submodule to regular files, only remove the index entry (`git rm --cached`) and stage the contents. Do not touch the `.git` directory inside it.
+
 ## Development Workflow
 
 When building new features, follow these steps in order:

@@ -86,6 +86,7 @@ Configures the agent.  Must be the first message sent after spawning.
 | `agent.system_prompt` | string    | no       | `""`                         | System prompt (appended to `claude_code` preset) |
 | `agent.max_turns`    | integer    | no       | `10`                         | Maximum SDK turns per session                 |
 | `agent.cwd`          | string     | no       | `"/workspace"`               | Working directory for the agent               |
+| `agent.skills`       | string[]   | no       | `[]`                         | List of skill names to load into the agent's context |
 
 ### `prompt`
 

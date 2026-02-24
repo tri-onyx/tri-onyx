@@ -155,7 +155,7 @@ defmodule TriOnyx.InformationClassifier do
   Steps an information level down by one notch.
 
   `:high` → `:medium`, `:medium` → `:low`, `:low` → `:low`.
-  Used only for taint (sanitization reduces taint, not sensitivity).
+  Used for BCP taint classification — gateway validation reduces but does not eliminate taint.
   """
   @spec step_down(information_level()) :: information_level()
   def step_down(:high), do: :medium
