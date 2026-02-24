@@ -16,6 +16,7 @@ defmodule TriOnyx.ToolRegistry do
     BCPQuery BCPRespond RestartAgent Bash WebFetch WebSearch
     SendEmail MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
+    SocialPost SocialReply SocialReadFeed SocialReadNotifications SocialReadDMs SocialSchedulePost
   )
 
   # Auth and capability metadata for built-in tools.
@@ -47,7 +48,13 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarQuery" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarCreate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
-    "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false}
+    "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "SocialPost" => %{requires_auth: true, capability_level: :high, requires_approval: true},
+    "SocialReply" => %{requires_auth: true, capability_level: :high, requires_approval: true},
+    "SocialReadFeed" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "SocialReadNotifications" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "SocialReadDMs" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "SocialSchedulePost" => %{requires_auth: true, capability_level: :high, requires_approval: true}
   }
 
   # Display metadata for the classification matrix UI.
@@ -74,7 +81,13 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "CalendarQuery",  display: "CalendarQuery",  variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarCreate", display: "CalendarCreate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarUpdate", display: "CalendarUpdate", variant: nil, group: "Calendar (CalDAV)", note: nil},
-    %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil}
+    %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil},
+    %{key: "SocialPost",              display: "SocialPost",              variant: nil, group: "Social Media", note: nil},
+    %{key: "SocialReply",             display: "SocialReply",             variant: nil, group: "Social Media", note: nil},
+    %{key: "SocialReadFeed",          display: "SocialReadFeed",          variant: nil, group: "Social Media", note: "returns arbitrary external content"},
+    %{key: "SocialReadNotifications", display: "SocialReadNotifications", variant: nil, group: "Social Media", note: "returns arbitrary external content"},
+    %{key: "SocialReadDMs",           display: "SocialReadDMs",           variant: nil, group: "Social Media", note: "returns DMs — high sensitivity"},
+    %{key: "SocialSchedulePost",      display: "SocialSchedulePost",      variant: nil, group: "Social Media", note: nil}
   ]
 
   @doc """
