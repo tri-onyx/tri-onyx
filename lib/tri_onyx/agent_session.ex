@@ -852,6 +852,347 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  # --- Social Media tool handlers ---
+
+  defp handle_agent_event({:social_post_request, req_id, draft_path}, state) do
+    Logger.info("AgentSession #{state.id}: social_post_request draft=#{draft_path}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+      session_id = state.id
+      agent_name = state.definition.name
+
+      Task.start(fn ->
+        proceed =
+          if ToolRegistry.requires_approval?("SocialPost") do
+            {:ok, approval_id} =
+              ActionApprovalQueue.submit(%{
+                agent_name: agent_name,
+                session_id: session_id,
+                tool_name: "SocialPost",
+                tool_input: %{"draft_path" => draft_path}
+              })
+
+            EventBus.broadcast(session_id, %{
+              "type" => "action_approval_request",
+              "approval_id" => approval_id,
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "tool_name" => "SocialPost",
+              "tool_input" => %{"draft_path" => draft_path}
+            })
+
+            case ActionApprovalQueue.await_decision(approval_id) do
+              {:approved, _item} -> :proceed
+              {:rejected, reason} -> {:rejected, reason}
+              {:error, :timeout} -> {:rejected, "approval timed out"}
+            end
+          else
+            :proceed
+          end
+
+        case proceed do
+          :proceed ->
+            case TriOnyx.Connectors.Social.post(host_path) do
+              {:ok, post_id} ->
+                AgentPort.send_social_post_response(port, req_id, true, "posted", post_id)
+
+              {:error, reason} ->
+                AgentPort.send_social_post_response(port, req_id, false, reason)
+            end
+
+          {:rejected, reason} ->
+            AgentPort.send_social_post_response(port, req_id, false, "approval rejected: #{reason}")
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "social_post",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "pending_approval"
+      })
+    else
+      AgentPort.send_social_post_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:social_reply_request, req_id, draft_path}, state) do
+    Logger.info("AgentSession #{state.id}: social_reply_request draft=#{draft_path}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+      session_id = state.id
+      agent_name = state.definition.name
+
+      Task.start(fn ->
+        proceed =
+          if ToolRegistry.requires_approval?("SocialReply") do
+            {:ok, approval_id} =
+              ActionApprovalQueue.submit(%{
+                agent_name: agent_name,
+                session_id: session_id,
+                tool_name: "SocialReply",
+                tool_input: %{"draft_path" => draft_path}
+              })
+
+            EventBus.broadcast(session_id, %{
+              "type" => "action_approval_request",
+              "approval_id" => approval_id,
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "tool_name" => "SocialReply",
+              "tool_input" => %{"draft_path" => draft_path}
+            })
+
+            case ActionApprovalQueue.await_decision(approval_id) do
+              {:approved, _item} -> :proceed
+              {:rejected, reason} -> {:rejected, reason}
+              {:error, :timeout} -> {:rejected, "approval timed out"}
+            end
+          else
+            :proceed
+          end
+
+        case proceed do
+          :proceed ->
+            case TriOnyx.Connectors.Social.reply(host_path) do
+              {:ok, reply_id} ->
+                AgentPort.send_social_reply_response(port, req_id, true, "replied", reply_id)
+
+              {:error, reason} ->
+                AgentPort.send_social_reply_response(port, req_id, false, reason)
+            end
+
+          {:rejected, reason} ->
+            AgentPort.send_social_reply_response(port, req_id, false, "approval rejected: #{reason}")
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "social_reply",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "pending_approval"
+      })
+    else
+      AgentPort.send_social_reply_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:social_read_feed_request, req_id, params}, state) do
+    Logger.info("AgentSession #{state.id}: social_read_feed_request params=#{inspect(params)}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Social.read_feed(params, agent_dir) do
+        {:ok, posts} ->
+          AgentPort.send_social_read_feed_response(port, req_id, true, "#{length(posts)} posts", posts)
+
+        {:error, reason} ->
+          AgentPort.send_social_read_feed_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "social_read_feed",
+      "agent_name" => state.definition.name,
+      "params" => params,
+      "status" => "fetching"
+    })
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:social_read_notifications_request, req_id, params}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: social_read_notifications_request params=#{inspect(params)}"
+    )
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Social.read_notifications(params, agent_dir) do
+        {:ok, notifications} ->
+          AgentPort.send_social_read_notifications_response(
+            port,
+            req_id,
+            true,
+            "#{length(notifications)} notifications",
+            notifications
+          )
+
+        {:error, reason} ->
+          AgentPort.send_social_read_notifications_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "social_read_notifications",
+      "agent_name" => state.definition.name,
+      "params" => params,
+      "status" => "fetching"
+    })
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:social_read_dms_request, req_id, params}, state) do
+    Logger.info("AgentSession #{state.id}: social_read_dms_request params=#{inspect(params)}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Social.read_dms(params, agent_dir) do
+        {:ok, messages} ->
+          AgentPort.send_social_read_dms_response(
+            port,
+            req_id,
+            true,
+            "#{length(messages)} messages",
+            messages
+          )
+
+        {:error, reason} ->
+          AgentPort.send_social_read_dms_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "social_read_dms",
+      "agent_name" => state.definition.name,
+      "params" => params,
+      "status" => "fetching"
+    })
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:social_schedule_post_request, req_id, draft_path}, state) do
+    Logger.info("AgentSession #{state.id}: social_schedule_post_request draft=#{draft_path}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+      session_id = state.id
+      agent_name = state.definition.name
+
+      Task.start(fn ->
+        proceed =
+          if ToolRegistry.requires_approval?("SocialSchedulePost") do
+            {:ok, approval_id} =
+              ActionApprovalQueue.submit(%{
+                agent_name: agent_name,
+                session_id: session_id,
+                tool_name: "SocialSchedulePost",
+                tool_input: %{"draft_path" => draft_path}
+              })
+
+            EventBus.broadcast(session_id, %{
+              "type" => "action_approval_request",
+              "approval_id" => approval_id,
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "tool_name" => "SocialSchedulePost",
+              "tool_input" => %{"draft_path" => draft_path}
+            })
+
+            case ActionApprovalQueue.await_decision(approval_id) do
+              {:approved, _item} -> :proceed
+              {:rejected, reason} -> {:rejected, reason}
+              {:error, :timeout} -> {:rejected, "approval timed out"}
+            end
+          else
+            :proceed
+          end
+
+        case proceed do
+          :proceed ->
+            case TriOnyx.Connectors.Social.schedule_post(host_path) do
+              {:ok, scheduled_id} ->
+                AgentPort.send_social_schedule_post_response(
+                  port,
+                  req_id,
+                  true,
+                  "scheduled",
+                  scheduled_id
+                )
+
+              {:error, reason} ->
+                AgentPort.send_social_schedule_post_response(port, req_id, false, reason)
+            end
+
+          {:rejected, reason} ->
+            AgentPort.send_social_schedule_post_response(
+              port,
+              req_id,
+              false,
+              "approval rejected: #{reason}"
+            )
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "social_schedule_post",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "pending_approval"
+      })
+    else
+      AgentPort.send_social_schedule_post_response(
+        state.port,
+        req_id,
+        false,
+        "path traversal rejected"
+      )
+    end
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:restart_agent_request, req_id, agent_name, force}, state) do
     Logger.info(
       "AgentSession #{state.id}: restart_agent_request agent=#{agent_name} force=#{force}"

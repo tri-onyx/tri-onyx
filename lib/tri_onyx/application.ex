@@ -94,6 +94,14 @@ defmodule TriOnyx.Application do
         children
       end
 
+    # Conditionally add social media poller if Twitter/social configuration is present
+    children =
+      if Application.get_env(:tri_onyx, :social) do
+        children ++ [{TriOnyx.Connectors.Social.Poller, []}]
+      else
+        children
+      end
+
     opts = [strategy: :one_for_one, name: TriOnyx.Supervisor]
 
     Logger.info("TriOnyx gateway starting")
