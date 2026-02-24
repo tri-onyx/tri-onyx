@@ -86,7 +86,8 @@ Implement a passthrough FUSE filesystem that intercepts and checks **every** ope
 - `Rename` — move/rename (check both source and destination)
 - `Unlink` — delete a file
 - `Rmdir` — delete a directory
-- `Symlink` / `Link` — create links (check the target path)
+- `Symlink` — unconditionally denied with EPERM (symlinks bypass path-based access control)
+- `Link` — create hard links (check the target path)
 
 ### Access check logic:
 
