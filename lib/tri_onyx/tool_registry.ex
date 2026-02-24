@@ -28,26 +28,26 @@ defmodule TriOnyx.ToolRegistry do
   # Taint and sensitivity classification is owned by TaintMatrix and
   # SensitivityMatrix respectively.
   @tool_meta %{
-    "Read" => %{requires_auth: false, capability_level: :low},
-    "Grep" => %{requires_auth: false, capability_level: :low},
-    "Glob" => %{requires_auth: false, capability_level: :low},
-    "Write" => %{requires_auth: false, capability_level: :low},
-    "Edit" => %{requires_auth: false, capability_level: :low},
-    "NotebookEdit" => %{requires_auth: false, capability_level: :low},
-    "SendMessage" => %{requires_auth: false, capability_level: :low},
-    "BCPQuery" => %{requires_auth: false, capability_level: :low},
-    "BCPRespond" => %{requires_auth: false, capability_level: :low},
-    "RestartAgent" => %{requires_auth: false, capability_level: :low},
-    "Bash" => %{requires_auth: false, capability_level: :medium},
-    "WebFetch" => %{requires_auth: false, capability_level: :medium},
-    "WebSearch" => %{requires_auth: false, capability_level: :medium},
-    "SendEmail" => %{requires_auth: true, capability_level: :high},
-    "MoveEmail" => %{requires_auth: true, capability_level: :low},
-    "CreateFolder" => %{requires_auth: true, capability_level: :low},
-    "CalendarQuery" => %{requires_auth: true, capability_level: :medium},
-    "CalendarCreate" => %{requires_auth: true, capability_level: :medium},
-    "CalendarUpdate" => %{requires_auth: true, capability_level: :medium},
-    "CalendarDelete" => %{requires_auth: true, capability_level: :medium}
+    "Read" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Grep" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Glob" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Write" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Edit" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "NotebookEdit" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "SendMessage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "BCPQuery" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "BCPRespond" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "RestartAgent" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Bash" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
+    "WebFetch" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
+    "WebSearch" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
+    "SendEmail" => %{requires_auth: true, capability_level: :high, requires_approval: true},
+    "MoveEmail" => %{requires_auth: true, capability_level: :low, requires_approval: false},
+    "CreateFolder" => %{requires_auth: true, capability_level: :low, requires_approval: false},
+    "CalendarQuery" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "CalendarCreate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false}
   }
 
   # Display metadata for the classification matrix UI.
@@ -136,6 +136,15 @@ defmodule TriOnyx.ToolRegistry do
   def requires_auth?(tool_name) when is_binary(tool_name) do
     meta = tool_meta(tool_name)
     meta.requires_auth
+  end
+
+  @doc """
+  Returns whether a tool requires human approval before execution.
+  """
+  @spec requires_approval?(String.t()) :: boolean()
+  def requires_approval?(tool_name) when is_binary(tool_name) do
+    meta = tool_meta(tool_name)
+    Map.get(meta, :requires_approval, false)
   end
 
   @doc """

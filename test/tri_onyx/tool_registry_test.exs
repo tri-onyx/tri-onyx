@@ -47,6 +47,23 @@ defmodule TriOnyx.ToolRegistryTest do
     end
   end
 
+  describe "requires_approval?/1" do
+    test "SendEmail requires approval" do
+      assert ToolRegistry.requires_approval?("SendEmail")
+    end
+
+    test "other tools do not require approval" do
+      refute ToolRegistry.requires_approval?("Read")
+      refute ToolRegistry.requires_approval?("Bash")
+      refute ToolRegistry.requires_approval?("MoveEmail")
+      refute ToolRegistry.requires_approval?("CalendarCreate")
+    end
+
+    test "unknown tools default to false" do
+      refute ToolRegistry.requires_approval?("UnknownTool")
+    end
+  end
+
   describe "tool_meta/1" do
     test "returns auth metadata for known tools" do
       meta = ToolRegistry.tool_meta("SendEmail")

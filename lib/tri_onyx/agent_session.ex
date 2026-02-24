@@ -25,6 +25,7 @@ defmodule TriOnyx.AgentSession do
   alias TriOnyx.RiskScorer
   alias TriOnyx.SessionLogger
   alias TriOnyx.ToolRegistry
+  alias TriOnyx.ActionApprovalQueue
   alias TriOnyx.BCP
   alias TriOnyx.SystemCommand
   alias TriOnyx.Triggers.InterAgent
@@ -577,14 +578,50 @@ defmodule TriOnyx.AgentSession do
 
     if String.starts_with?(host_path, expanded_agent_dir) do
       port = state.port
+      session_id = state.id
+      agent_name = state.definition.name
 
       Task.start(fn ->
-        case TriOnyx.Connectors.Email.send_email(host_path) do
-          {:ok, message_id} ->
-            AgentPort.send_send_email_response(port, req_id, true, "sent", message_id)
+        proceed =
+          if ToolRegistry.requires_approval?("SendEmail") do
+            {:ok, approval_id} =
+              ActionApprovalQueue.submit(%{
+                agent_name: agent_name,
+                session_id: session_id,
+                tool_name: "SendEmail",
+                tool_input: %{"draft_path" => draft_path}
+              })
 
-          {:error, reason} ->
-            AgentPort.send_send_email_response(port, req_id, false, reason)
+            EventBus.broadcast(session_id, %{
+              "type" => "action_approval_request",
+              "approval_id" => approval_id,
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "tool_name" => "SendEmail",
+              "tool_input" => %{"draft_path" => draft_path}
+            })
+
+            case ActionApprovalQueue.await_decision(approval_id) do
+              {:approved, _item} -> :proceed
+              {:rejected, reason} -> {:rejected, reason}
+              {:error, :timeout} -> {:rejected, "approval timed out"}
+            end
+          else
+            :proceed
+          end
+
+        case proceed do
+          :proceed ->
+            case TriOnyx.Connectors.Email.send_email(host_path) do
+              {:ok, message_id} ->
+                AgentPort.send_send_email_response(port, req_id, true, "sent", message_id)
+
+              {:error, reason} ->
+                AgentPort.send_send_email_response(port, req_id, false, reason)
+            end
+
+          {:rejected, reason} ->
+            AgentPort.send_send_email_response(port, req_id, false, "approval rejected: #{reason}")
         end
       end)
 
@@ -592,7 +629,7 @@ defmodule TriOnyx.AgentSession do
         "type" => "send_email",
         "agent_name" => state.definition.name,
         "draft_path" => draft_path,
-        "status" => "sending"
+        "status" => "pending_approval"
       })
     else
       AgentPort.send_send_email_response(state.port, req_id, false, "path traversal rejected")

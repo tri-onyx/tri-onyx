@@ -70,6 +70,9 @@ defmodule TriOnyx.Application do
       # 9. BCP approval queue — human approval for Cat-3 queries/escalations
       TriOnyx.BCP.ApprovalQueue,
 
+      # 10. Action approval queue — human approval for sensitive tool actions
+      TriOnyx.ActionApprovalQueue,
+
       # 10. HTTP server
       {Bandit, plug: TriOnyx.Router, port: port}
     ]
