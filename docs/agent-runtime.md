@@ -61,14 +61,20 @@ Key constraints enforced at this stage:
 
 ### 2. Invocation
 
-The gateway sends the trigger payload (user message, cron context, webhook
-data, inter-agent message) as the prompt and streams the response:
+The gateway creates a persistent client that maintains conversation context
+across the entire session, then sends prompts and streams the responses:
 
 ```python
-from claude_agent_sdk import query, AssistantMessage, ResultMessage
-from claude_agent_sdk import TextBlock, ToolUseBlock
+from claude_agent_sdk import ClaudeSDKClient, AssistantMessage, ResultMessage
+from claude_agent_sdk import TextBlock, ToolUseBlock, UserMessage, ToolResultBlock
 
-async for message in query(prompt=prompt, options=options):
+# Create a persistent client that maintains conversation context
+client = ClaudeSDKClient(options=options)
+await client.connect()
+
+# Send a prompt and stream the response
+await client.query(prompt=prompt)
+async for message in client.receive_response():
     if isinstance(message, AssistantMessage):
         for block in message.content:
             if isinstance(block, TextBlock):
@@ -78,26 +84,34 @@ async for message in query(prompt=prompt, options=options):
                 # Agent requested a tool — the SDK executes it
                 # (only if in allowed_tools)
                 gateway.log_tool_use(agent_id, block)
+    elif isinstance(message, UserMessage):
+        # Tool results come back in UserMessage
+        for block in message.content:
+            if isinstance(block, ToolResultBlock):
+                # Gateway tracks taint based on tool results
+                gateway.log_tool_result(agent_id, block)
     elif isinstance(message, ResultMessage):
-        # Agent loop complete
+        # Single turn complete; client remains connected for next prompt
         gateway.log_result(agent_id, message)
         break
 ```
 
 ### 3. Tool Execution
 
-During the agent loop, the LLM may request tool calls (Read, Write, Bash,
+During each agent turn, the LLM may request tool calls (Read, Write, Bash,
 etc.). The flow is:
 
 1. LLM emits a `ToolUseBlock` requesting a specific tool with parameters
 2. The SDK checks the tool against `allowed_tools` — rejects if not listed
 3. If allowed, the SDK executes the tool and captures the result
-4. The result is fed back into the LLM context as a tool response
-5. The LLM continues reasoning with the new information
+4. The result is fed back into the LLM context as a `UserMessage` with
+   `ToolResultBlock` — the persistent client handles this automatically
+5. The LLM continues reasoning with the new information within the same turn
 
-The gateway wraps this loop to add its own enforcement layer: taint tracking
-(marking the session as tainted if a tool returns untrusted external data)
-and logging (recording every tool call and result for auditability).
+The gateway observes this loop (via streamed events) to add its own enforcement
+layer: taint tracking (marking the session as tainted if a tool returns
+untrusted external data) and logging (recording every tool call and result
+for auditability).
 
 ### 4. Completion
 
