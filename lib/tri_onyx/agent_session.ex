@@ -47,7 +47,8 @@ defmodule TriOnyx.AgentSession do
           trigger_type: atom(),
           last_text: String.t() | nil,
           shutdown_reason: String.t() | nil,
-          memory_save_timer: reference() | nil
+          memory_save_timer: reference() | nil,
+          interrupt_prompt: {String.t(), map()} | nil
         }
 
   @type start_opt ::
@@ -180,7 +181,8 @@ defmodule TriOnyx.AgentSession do
       pending_tools: %{},
       idle_timer: nil,
       shutdown_reason: nil,
-      memory_save_timer: nil
+      memory_save_timer: nil,
+      interrupt_prompt: nil
     }
 
     # Log session start
@@ -239,6 +241,14 @@ defmodule TriOnyx.AgentSession do
     Logger.info("AgentSession #{state.id}: queuing prompt (status=#{status}, #{byte_size(content)} bytes)")
     state = maybe_elevate_from_metadata(state, metadata)
     {:reply, :ok, %{state | pending_prompt: {content, metadata}}}
+  end
+
+  def handle_call({:prompt, content, metadata}, _from, %{status: :running, port: port} = state)
+      when port != nil do
+    Logger.info("AgentSession #{state.id}: interrupting running prompt for new user message")
+    AgentPort.send_interrupt(port, "user_message")
+    state = maybe_elevate_from_metadata(state, metadata)
+    {:reply, :ok, %{state | interrupt_prompt: {content, metadata}}}
   end
 
   def handle_call({:prompt, _content, _metadata}, _from, state) do
@@ -389,6 +399,25 @@ defmodule TriOnyx.AgentSession do
       {_content, _metadata} ->
         Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP queries already flushed)")
         {:noreply, %{state | status: :running, pending_prompt: nil}}
+
+      nil ->
+        {:noreply, schedule_idle_timeout(state)}
+    end
+  end
+
+  defp handle_agent_event({:interrupted, reason}, state) do
+    Logger.info("AgentSession #{state.id}: runtime interrupted (reason=#{reason})")
+    broadcast_event(state, %{"type" => "interrupted", "reason" => reason})
+
+    state = %{state | status: :ready}
+
+    case state.interrupt_prompt do
+      {content, metadata} ->
+        prefixed = "[Previous task was interrupted by user]\n\n" <> content
+        Logger.info("AgentSession #{state.id}: sending queued interrupt prompt (#{byte_size(prefixed)} bytes)")
+        broadcast_event(state, %{"type" => "user_prompt", "content" => prefixed})
+        AgentPort.send_prompt(state.port, prefixed, metadata)
+        {:noreply, %{state | status: :running, interrupt_prompt: nil}}
 
       nil ->
         {:noreply, schedule_idle_timeout(state)}
@@ -1318,14 +1347,27 @@ defmodule TriOnyx.AgentSession do
 
     # If we're in :saving_memory, this result is from the memory save prompt.
     # Commit and stop.
-    if state.status == :saving_memory do
-      cancel_timer(state.memory_save_timer)
-      Logger.info("AgentSession #{state.id}: memory save complete, shutting down")
-      AgentPort.send_shutdown(state.port, state.shutdown_reason)
-      {:stop, {:shutdown, state.shutdown_reason}, state}
-    else
-      state = %{state | status: :ready}
-      {:noreply, schedule_idle_timeout(state)}
+    cond do
+      state.status == :saving_memory ->
+        cancel_timer(state.memory_save_timer)
+        Logger.info("AgentSession #{state.id}: memory save complete, shutting down")
+        AgentPort.send_shutdown(state.port, state.shutdown_reason)
+        {:stop, {:shutdown, state.shutdown_reason}, state}
+
+      state.interrupt_prompt != nil ->
+        # Race condition: result arrived before runtime saw the interrupt.
+        # The prompt completed normally, so send the queued prompt without
+        # the [interrupted] prefix since nothing was actually cut short.
+        {content, metadata} = state.interrupt_prompt
+        state = %{state | status: :ready, interrupt_prompt: nil}
+        Logger.info("AgentSession #{state.id}: result arrived with queued interrupt prompt, sending directly")
+        broadcast_event(state, %{"type" => "user_prompt", "content" => content})
+        AgentPort.send_prompt(state.port, content, metadata)
+        {:noreply, %{state | status: :running}}
+
+      true ->
+        state = %{state | status: :ready}
+        {:noreply, schedule_idle_timeout(state)}
     end
   end
 

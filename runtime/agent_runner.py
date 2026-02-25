@@ -46,6 +46,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from protocol import (
     StartMessage,
     PromptMessage,
+    InterruptMessage,
     ShutdownMessage,
     MemorySaveMessage,
     SendMessageResponse,
@@ -68,6 +69,7 @@ from protocol import (
     emit_tool_result,
     emit_result,
     emit_error,
+    emit_interrupted,
     emit_send_message_request,
     emit_restart_agent_request,
     emit_bcp_query_request,
@@ -172,6 +174,7 @@ class InboundDispatcher:
 
     def __init__(self) -> None:
         self.control_queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+        self.interrupt_event: asyncio.Event = asyncio.Event()
         self.send_message_responses: asyncio.Queue[SendMessageResponse] = asyncio.Queue()
         self.bcp_query_queue: asyncio.Queue[BCPQueryMessage] = asyncio.Queue()
         self.bcp_response_delivery_queue: asyncio.Queue[BCPResponseDeliveryMessage] = asyncio.Queue()
@@ -204,6 +207,34 @@ class InboundDispatcher:
                 await self._task
             except asyncio.CancelledError:
                 pass
+
+    def drain_stale_responses(self) -> None:
+        """Empty all response queues after an interrupt to avoid stale tool responses."""
+        queues = [
+            self.send_message_responses,
+            self.bcp_response_delivery_queue,
+            self.bcp_validation_results,
+            self.send_email_responses,
+            self.move_email_responses,
+            self.create_folder_responses,
+            self.restart_agent_responses,
+            self.calendar_query_responses,
+            self.calendar_create_responses,
+            self.calendar_update_responses,
+            self.calendar_delete_responses,
+            self.social_post_responses,
+            self.social_reply_responses,
+            self.social_read_feed_responses,
+            self.social_read_notifications_responses,
+            self.social_read_dms_responses,
+            self.social_schedule_post_responses,
+        ]
+        for q in queues:
+            while not q.empty():
+                try:
+                    q.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
 
     async def _read_line(self) -> str | None:
         """Read one line from stdin without blocking the event loop."""
@@ -327,6 +358,11 @@ class InboundDispatcher:
                     await self.social_schedule_post_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse social_schedule_post_response: %s", exc)
+            elif msg_type == "interrupt":
+                # Route directly to interrupt_event (not control_queue) because
+                # the main loop is blocked awaiting run_prompt, not reading control.
+                log.info("Interrupt received, setting interrupt event")
+                self.interrupt_event.set()
             elif msg_type == "bcp_query":
                 # Route to control queue so the main loop can present
                 # the query to the LLM as a prompt
@@ -2011,6 +2047,50 @@ async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Interruptible prompt wrapper
+# ---------------------------------------------------------------------------
+
+
+async def run_prompt_interruptible(
+    client: ClaudeSDKClient, prompt: str, dispatcher: InboundDispatcher
+) -> bool:
+    """Run a prompt, racing it against the interrupt event.
+
+    Returns True if the prompt completed normally, False if it was interrupted.
+    On interrupt: cancels the prompt task, drains stale responses, and emits
+    an ``interrupted`` message to the gateway.
+    """
+    dispatcher.interrupt_event.clear()
+
+    prompt_task = asyncio.create_task(run_prompt(client, prompt))
+    interrupt_task = asyncio.create_task(dispatcher.interrupt_event.wait())
+
+    done, pending = await asyncio.wait(
+        {prompt_task, interrupt_task}, return_when=asyncio.FIRST_COMPLETED
+    )
+
+    if prompt_task in done:
+        # Prompt finished before interrupt — clean up the interrupt waiter.
+        interrupt_task.cancel()
+        try:
+            await interrupt_task
+        except asyncio.CancelledError:
+            pass
+        return True
+    else:
+        # Interrupt arrived before prompt finished — cancel the SDK call.
+        log.info("Interrupting active prompt")
+        prompt_task.cancel()
+        try:
+            await prompt_task
+        except asyncio.CancelledError:
+            pass
+        dispatcher.drain_stale_responses()
+        emit_interrupted("user_message")
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Main event loop
 # ---------------------------------------------------------------------------
 
@@ -2243,7 +2323,7 @@ async def main() -> None:
                     emit_error("Empty prompt content")
                     continue
                 log.info("Received prompt (%d chars), dispatching to SDK", len(msg.content))
-                await run_prompt(client, msg.content)
+                await run_prompt_interruptible(client, msg.content, dispatcher)
 
             elif isinstance(msg, BCPQueryMessage):
                 if client is None or config is None:
@@ -2251,7 +2331,7 @@ async def main() -> None:
                     continue
                 prompt = _format_bcp_query_prompt(msg)
                 log.info("BCP query %s -> prompt (%d chars)", msg.query_id, len(prompt))
-                await run_prompt(client, prompt)
+                await run_prompt_interruptible(client, prompt, dispatcher)
 
             elif isinstance(msg, MemorySaveMessage):
                 log.info("Memory save requested: %s", msg.reason or "no reason given")
