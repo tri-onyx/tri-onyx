@@ -804,7 +804,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
       # Search for new messages (IMAP UIDs start at 1, never 0)
       search_from = if last_uid == "0", do: "1", else: last_uid
-      Email.imap_send(socket, transport, "A003 SEARCH UID #{search_from}:*")
+      Email.imap_send(socket, transport, "A003 UID SEARCH UID #{search_from}:*")
       {:ok, search_resp} = Email.imap_recv_until_tagged(socket, transport, "A003")
 
       uids = parse_search_response(search_resp, last_uid)
@@ -813,7 +813,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
       emails =
         uids
         |> Enum.map(fn uid ->
-          Email.imap_send(socket, transport, "F#{uid} FETCH #{uid} (BODY[])")
+          Email.imap_send(socket, transport, "F#{uid} UID FETCH #{uid} (BODY[])")
           {:ok, fetch_resp} = Email.imap_recv_until_tagged(socket, transport, "F#{uid}")
           {uid, extract_body_from_fetch(fetch_resp)}
         end)
