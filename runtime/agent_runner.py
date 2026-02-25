@@ -1935,7 +1935,11 @@ def _truncate(text: str, max_len: int = _MAX_TOOL_RESULT_LEN) -> str:
     return text[: max_len - 20] + "... [truncated]"
 
 
-async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
+async def run_prompt(
+    client: ClaudeSDKClient,
+    prompt: str,
+    interrupt_event: asyncio.Event | None = None,
+) -> bool:
     """Send a prompt and stream the response through the protocol.
 
     Uses the persistent ClaudeSDKClient which maintains conversation context
@@ -1947,6 +1951,12 @@ async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
       - tool_use events -- tool invocations (audit logging)
       - tool_result     -- tool returns (taint tracking)
       - result          -- session metadata on completion
+
+    If *interrupt_event* is provided, the loop checks it between SDK messages
+    and bails out immediately when set (no result emitted — the caller handles
+    signalling the gateway).
+
+    Returns True if the prompt completed normally, False if interrupted.
     """
     start_time = time.monotonic()
     num_turns = 0
@@ -1960,6 +1970,11 @@ async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
         response_iter = client.receive_response().__aiter__()
         msg_count = 0
         while True:
+            # Check for interrupt before awaiting the next SDK message.
+            if interrupt_event is not None and interrupt_event.is_set():
+                log.info("Interrupt detected between SDK messages, aborting prompt")
+                return False
+
             try:
                 log.debug("Awaiting next SDK message (received %d so far)...", msg_count)
                 message = await response_iter.__anext__()
@@ -2045,6 +2060,8 @@ async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
             is_error=True,
         )
 
+    return True
+
 
 # ---------------------------------------------------------------------------
 # Interruptible prompt wrapper
@@ -2054,37 +2071,20 @@ async def run_prompt(client: ClaudeSDKClient, prompt: str) -> None:
 async def run_prompt_interruptible(
     client: ClaudeSDKClient, prompt: str, dispatcher: InboundDispatcher
 ) -> bool:
-    """Run a prompt, racing it against the interrupt event.
+    """Run a prompt with cooperative interrupt support.
 
     Returns True if the prompt completed normally, False if it was interrupted.
-    On interrupt: cancels the prompt task, drains stale responses, and emits
-    an ``interrupted`` message to the gateway.
+    On interrupt: ``run_prompt`` checks the event between SDK messages and
+    returns early. We then drain stale responses and emit ``interrupted``.
     """
     dispatcher.interrupt_event.clear()
 
-    prompt_task = asyncio.create_task(run_prompt(client, prompt))
-    interrupt_task = asyncio.create_task(dispatcher.interrupt_event.wait())
+    completed = await run_prompt(client, prompt, interrupt_event=dispatcher.interrupt_event)
 
-    done, pending = await asyncio.wait(
-        {prompt_task, interrupt_task}, return_when=asyncio.FIRST_COMPLETED
-    )
-
-    if prompt_task in done:
-        # Prompt finished before interrupt — clean up the interrupt waiter.
-        interrupt_task.cancel()
-        try:
-            await interrupt_task
-        except asyncio.CancelledError:
-            pass
+    if completed:
         return True
     else:
-        # Interrupt arrived before prompt finished — cancel the SDK call.
-        log.info("Interrupting active prompt")
-        prompt_task.cancel()
-        try:
-            await prompt_task
-        except asyncio.CancelledError:
-            pass
+        log.info("Prompt was interrupted, draining stale responses")
         dispatcher.drain_stale_responses()
         emit_interrupted("user_message")
         return False
