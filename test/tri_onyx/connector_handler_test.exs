@@ -226,13 +226,18 @@ defmodule TriOnyx.ConnectorHandlerTest do
       {:ok, state: authed_state, channel: channel}
     end
 
-    test "text event is wrapped as agent_text with channel", %{state: state, channel: channel} do
+    test "text event is wrapped as agent_text with channel and clears typing", %{state: state, channel: channel} do
       event = %{"type" => "text", "content" => "Hello world", "session_id" => "session-abc"}
 
-      assert {:push, [{:text, reply}], _state} =
+      assert {:push, [{:text, typing_reply}, {:text, text_reply}], _state} =
                ConnectorHandler.handle_info({:event_bus, "session-abc", event}, state)
 
-      decoded = Jason.decode!(reply)
+      typing_decoded = Jason.decode!(typing_reply)
+      assert typing_decoded["type"] == "agent_typing"
+      assert typing_decoded["is_typing"] == false
+      assert typing_decoded["channel"] == channel
+
+      decoded = Jason.decode!(text_reply)
       assert decoded["type"] == "agent_text"
       assert decoded["session_id"] == "session-abc"
       assert decoded["content"] == "Hello world"
@@ -260,13 +265,18 @@ defmodule TriOnyx.ConnectorHandlerTest do
       assert step_decoded["duration_ms"] == 1500
     end
 
-    test "error event is wrapped as agent_error with channel", %{state: state, channel: channel} do
+    test "error event is wrapped as agent_error with channel and clears typing", %{state: state, channel: channel} do
       event = %{"type" => "error", "message" => "something broke", "session_id" => "session-abc"}
 
-      assert {:push, [{:text, reply}], _state} =
+      assert {:push, [{:text, typing_reply}, {:text, error_reply}], _state} =
                ConnectorHandler.handle_info({:event_bus, "session-abc", event}, state)
 
-      decoded = Jason.decode!(reply)
+      typing_decoded = Jason.decode!(typing_reply)
+      assert typing_decoded["type"] == "agent_typing"
+      assert typing_decoded["is_typing"] == false
+      assert typing_decoded["channel"] == channel
+
+      decoded = Jason.decode!(error_reply)
       assert decoded["type"] == "agent_error"
       assert decoded["channel"] == channel
       assert decoded["message"] == "something broke"

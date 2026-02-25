@@ -231,7 +231,18 @@ defmodule TriOnyx.ConnectorHandler do
             end
 
             new_channels = Map.put(state.session_channels, session_id, {channel, agent_name})
-            {:ok, %{state | session_channels: new_channels}}
+
+            # Send typing=true immediately so the user sees the bot is working
+            typing_frame =
+              Jason.encode!(%{
+                "type" => "agent_typing",
+                "agent_name" => agent_name,
+                "session_id" => session_id,
+                "channel" => channel,
+                "is_typing" => true
+              })
+
+            {:push, [{:text, typing_frame}], %{state | session_channels: new_channels}}
 
           {:error, reason} ->
             Logger.warning(
@@ -425,7 +436,18 @@ defmodule TriOnyx.ConnectorHandler do
           if String.contains?(content, "HEARTBEAT_OK") do
             {:ok, state}
           else
-            frame =
+            # Clear typing indicator when text is delivered so the user
+            # doesn't see "writing…" alongside the actual response.
+            typing_frame =
+              Jason.encode!(%{
+                "type" => "agent_typing",
+                "agent_name" => agent_name,
+                "session_id" => session_id,
+                "channel" => channel,
+                "is_typing" => false
+              })
+
+            text_frame =
               Jason.encode!(%{
                 "type" => "agent_text",
                 "agent_name" => agent_name,
@@ -434,7 +456,7 @@ defmodule TriOnyx.ConnectorHandler do
                 "channel" => channel
               })
 
-            {:push, [{:text, frame}], state}
+            {:push, [{:text, typing_frame}, {:text, text_frame}], state}
           end
 
         "ready" ->
@@ -529,9 +551,16 @@ defmodule TriOnyx.ConnectorHandler do
           {:push, [{:text, typing_frame}, {:text, result_frame}, {:text, step_frame}], state}
 
         "error" ->
+          typing_frame =
+            Jason.encode!(%{
+              "type" => "agent_typing",
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "channel" => channel,
+              "is_typing" => false
+            })
 
-
-          frame =
+          error_frame =
             Jason.encode!(%{
               "type" => "agent_error",
               "agent_name" => agent_name,
@@ -540,7 +569,7 @@ defmodule TriOnyx.ConnectorHandler do
               "message" => Map.get(event, "message", "unknown error")
             })
 
-          {:push, [{:text, frame}], state}
+          {:push, [{:text, typing_frame}, {:text, error_frame}], state}
 
         "agent_log" ->
           frame =
@@ -586,6 +615,19 @@ defmodule TriOnyx.ConnectorHandler do
             })
 
           {:push, [{:text, frame}], state}
+
+        "port_down" ->
+          # Agent process crashed — clear the typing indicator
+          typing_frame =
+            Jason.encode!(%{
+              "type" => "agent_typing",
+              "agent_name" => agent_name,
+              "session_id" => session_id,
+              "channel" => channel,
+              "is_typing" => false
+            })
+
+          {:push, [{:text, typing_frame}], state}
 
         _other ->
           # Ignore events we don't map to connector frames
