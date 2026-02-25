@@ -8,6 +8,7 @@ on its own line (JSON Lines format).
 Gateway -> Runtime (stdin):
   start                  -- agent configuration (name, tools, model, system_prompt, ...)
   prompt                 -- trigger payload to drive an agent session
+  interrupt              -- cancel the active prompt (user interrupt)
   shutdown               -- graceful shutdown request
   send_message_response  -- gateway response after routing an inter-agent message
   restart_agent_response -- gateway response after a restart_agent_request
@@ -16,6 +17,7 @@ Gateway -> Runtime (stdin):
 
 Runtime -> Gateway (stdout):
   ready                -- runtime initialized, awaiting configuration
+  interrupted          -- active prompt was cancelled (user interrupt)
   text                 -- LLM text output (for audit logging)
   tool_use             -- tool invocation (observational, for audit logging)
   tool_result          -- tool result (observational, for taint tracking)
@@ -86,6 +88,17 @@ class PromptMessage:
             content=data.get("content", ""),
             metadata=data.get("metadata", {}),
         )
+
+
+@dataclass
+class InterruptMessage:
+    """Interrupt request from the gateway to cancel the active prompt."""
+
+    reason: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> InterruptMessage:
+        return cls(reason=data.get("reason", ""))
 
 
 @dataclass
@@ -453,6 +466,7 @@ class SocialSchedulePostResponse:
 InboundMessage = (
     StartMessage
     | PromptMessage
+    | InterruptMessage
     | ShutdownMessage
     | MemorySaveMessage
     | SendMessageResponse
@@ -477,6 +491,7 @@ InboundMessage = (
 _INBOUND_PARSERS: dict[str, type] = {
     "start": StartMessage,
     "prompt": PromptMessage,
+    "interrupt": InterruptMessage,
     "shutdown": ShutdownMessage,
     "memory_save": MemorySaveMessage,
     "send_message_response": SendMessageResponse,
@@ -569,6 +584,11 @@ def emit_result(
         "cost_usd": cost_usd,
         "is_error": is_error,
     })
+
+
+def emit_interrupted(reason: str = "") -> None:
+    """Signal that the runtime was interrupted and is ready for the next prompt."""
+    _emit({"type": "interrupted", "reason": reason})
 
 
 def emit_error(message: str) -> None:

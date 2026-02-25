@@ -38,6 +38,7 @@ defmodule TriOnyx.AgentPort do
 
   @type event ::
           {:ready}
+          | {:interrupted, String.t()}
           | {:text, String.t()}
           | {:tool_use, String.t(), String.t(), map()}
           | {:tool_result, String.t(), String.t(), boolean()}
@@ -134,6 +135,14 @@ defmodule TriOnyx.AgentPort do
   @spec send_shutdown(GenServer.server(), String.t()) :: :ok
   def send_shutdown(server, reason \\ "") do
     GenServer.cast(server, {:send, %{"type" => "shutdown", "reason" => reason}})
+  end
+
+  @doc """
+  Sends an `interrupt` message to cancel the active prompt.
+  """
+  @spec send_interrupt(GenServer.server(), String.t()) :: :ok
+  def send_interrupt(server, reason \\ "") do
+    GenServer.cast(server, {:send, %{"type" => "interrupt", "reason" => reason}})
   end
 
   @doc """
@@ -686,6 +695,9 @@ defmodule TriOnyx.AgentPort do
     case Jason.decode(json_line) do
       {:ok, %{"type" => "ready"}} ->
         {:ok, {:ready}}
+
+      {:ok, %{"type" => "interrupted", "reason" => reason}} ->
+        {:ok, {:interrupted, reason}}
 
       {:ok, %{"type" => "text", "content" => content}} ->
         {:ok, {:text, content}}

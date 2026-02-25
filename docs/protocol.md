@@ -11,7 +11,7 @@ and communicates using three channels:
 
 | Channel | Direction          | Purpose                                        |
 |---------|--------------------|------------------------------------------------|
-| stdin   | Gateway -> Runtime | Configuration, prompts, shutdown               |
+| stdin   | Gateway -> Runtime | Configuration, prompts, interrupts, shutdown   |
 | stdout  | Runtime -> Gateway | Events, results, errors (structured protocol)  |
 | stderr  | Runtime -> (logs)  | Diagnostic logging (not part of protocol)      |
 
@@ -108,6 +108,23 @@ Delivers a trigger payload to drive an agent session.
 | `content`  | string | yes      | The prompt text to send to the LLM             |
 | `metadata` | object | no       | Opaque metadata from the gateway (not sent to LLM) |
 
+### `interrupt`
+
+Requests cancellation of the active prompt.  The runtime should cancel the
+in-flight SDK call, drain any stale response queues, and emit an `interrupted`
+message once ready for the next prompt.
+
+```json
+{
+  "type": "interrupt",
+  "reason": "user_message"
+}
+```
+
+| Field    | Type   | Required | Description                          |
+|----------|--------|----------|--------------------------------------|
+| `reason` | string | no       | Why the interrupt was requested      |
+
 ### `shutdown`
 
 Requests a graceful shutdown.  The runtime should finish any active session
@@ -138,6 +155,22 @@ receive prompts.
   "type": "ready"
 }
 ```
+
+### `interrupted`
+
+Signals that the runtime has cancelled the active prompt in response to an
+`interrupt` message and is ready for the next prompt.
+
+```json
+{
+  "type": "interrupted",
+  "reason": "user_message"
+}
+```
+
+| Field    | Type   | Description                            |
+|----------|--------|----------------------------------------|
+| `reason` | string | Echo of the interrupt reason           |
 
 ### `text`
 
