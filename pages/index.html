@@ -1,0 +1,996 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TriOnyx — Secure Agent Runtime</title>
+  <meta name="description" content="A complete agent runtime that tracks what agents have seen, not just what they can do. What OpenClaw would be if security came first.">
+  <meta property="og:title" content="TriOnyx — Secure Agent Runtime">
+  <meta property="og:description" content="A complete agent runtime that tracks what agents have seen, not just what they can do.">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔱</text></svg>">
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; font-size: 16px; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      background: #0b0b0f;
+      color: #c8c8d0;
+      line-height: 1.7;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ── Typography ── */
+    h1, h2, h3, h4 { color: #f0f0f5; font-weight: 700; line-height: 1.2; }
+    h1 { font-size: clamp(2.2rem, 5vw, 3.5rem); }
+    h2 { font-size: clamp(1.6rem, 3vw, 2.2rem); margin-bottom: 1rem; }
+    h3 { font-size: 1.15rem; }
+    a { color: #22d3a7; text-decoration: none; transition: color 0.2s; }
+    a:hover { color: #5eead4; }
+
+    /* ── Layout ── */
+    .container {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+    }
+
+    section {
+      padding: 5rem 0;
+    }
+
+    section + section {
+      border-top: 1px solid #1a1a24;
+    }
+
+    /* ── Navigation ── */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      background: rgba(11, 11, 15, 0.85);
+      border-bottom: 1px solid #1a1a24;
+    }
+
+    nav .container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+
+    .nav-logo {
+      font-size: 1.25rem;
+      font-weight: 800;
+      color: #f0f0f5;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-logo span { color: #22d3a7; }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: #888;
+      font-size: 0.875rem;
+      font-weight: 500;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover { color: #f0f0f5; }
+
+    .nav-links .gh-link {
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+
+    .nav-links .gh-link svg { width: 20px; height: 20px; fill: #888; transition: fill 0.2s; }
+    .nav-links .gh-link:hover svg { fill: #f0f0f5; }
+
+    /* Mobile nav toggle */
+    .nav-toggle { display: none; background: none; border: none; cursor: pointer; padding: 0.5rem; }
+    .nav-toggle span { display: block; width: 24px; height: 2px; background: #888; margin: 5px 0; transition: all 0.3s; }
+
+    /* ── Hero ── */
+    .hero {
+      padding: 10rem 0 6rem;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 800px;
+      height: 600px;
+      background: radial-gradient(ellipse, rgba(34, 211, 167, 0.06) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 0.35rem 1rem;
+      border: 1px solid #22d3a733;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      color: #22d3a7;
+      margin-bottom: 1.5rem;
+      background: rgba(34, 211, 167, 0.05);
+    }
+
+    .hero h1 { margin-bottom: 1.25rem; }
+    .hero h1 em { font-style: normal; color: #22d3a7; }
+
+    .hero-sub {
+      font-size: clamp(1.05rem, 2vw, 1.25rem);
+      color: #888;
+      max-width: 640px;
+      margin: 0 auto 2.5rem;
+    }
+
+    .hero-buttons {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem 1.75rem;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+    }
+
+    .btn-primary {
+      background: #22d3a7;
+      color: #0b0b0f;
+    }
+
+    .btn-primary:hover {
+      background: #5eead4;
+      color: #0b0b0f;
+      transform: translateY(-1px);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: #c8c8d0;
+      border: 1px solid #333;
+    }
+
+    .btn-secondary:hover {
+      border-color: #555;
+      color: #f0f0f5;
+      transform: translateY(-1px);
+    }
+
+    /* ── Comparison Table ── */
+    .comparison-section { background: #0e0e14; }
+
+    .comparison-section h2 { text-align: center; margin-bottom: 0.5rem; }
+    .comparison-section .section-sub {
+      text-align: center;
+      color: #888;
+      margin-bottom: 3rem;
+      font-size: 1rem;
+    }
+
+    .comparison-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.925rem;
+    }
+
+    .comparison-table th,
+    .comparison-table td {
+      padding: 1rem 1.25rem;
+      text-align: left;
+      border-bottom: 1px solid #1a1a24;
+    }
+
+    .comparison-table thead th {
+      color: #f0f0f5;
+      font-weight: 700;
+      font-size: 0.95rem;
+      border-bottom: 2px solid #22d3a744;
+    }
+
+    .comparison-table thead th:first-child { color: #888; }
+    .comparison-table thead th:nth-child(2) { color: #555; }
+    .comparison-table thead th:nth-child(3) { color: #22d3a7; }
+
+    .comparison-table tbody td:first-child {
+      color: #aaa;
+      font-weight: 500;
+    }
+
+    .comparison-table tbody td:nth-child(2) { color: #666; }
+
+    .comparison-table tbody td:nth-child(3) { color: #c8c8d0; }
+
+    .check { color: #22d3a7; font-weight: 700; }
+    .cross { color: #555; }
+
+    /* ── Feature Grid ── */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .feature-card {
+      background: #12121a;
+      border: 1px solid #1a1a24;
+      border-radius: 12px;
+      padding: 2rem;
+      transition: border-color 0.3s, transform 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: #22d3a733;
+      transform: translateY(-2px);
+    }
+
+    .feature-icon {
+      font-size: 1.75rem;
+      margin-bottom: 1rem;
+      display: block;
+    }
+
+    .feature-card h3 { margin-bottom: 0.5rem; }
+    .feature-card p { color: #888; font-size: 0.9rem; }
+
+    /* ── Architecture ── */
+    .arch-section { background: #0e0e14; }
+
+    .arch-section h2 { text-align: center; margin-bottom: 0.5rem; }
+    .arch-section .section-sub {
+      text-align: center;
+      color: #888;
+      margin-bottom: 3rem;
+    }
+
+    .arch-diagram {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.5rem;
+    }
+
+    .arch-layer {
+      background: #12121a;
+      border: 1px solid #1a1a24;
+      border-radius: 12px;
+      padding: 2rem;
+      width: 100%;
+      max-width: 720px;
+      position: relative;
+    }
+
+    .arch-layer.gateway {
+      border-color: #22d3a744;
+      background: linear-gradient(135deg, #12121a 0%, #0f1a17 100%);
+    }
+
+    .arch-layer h3 {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .arch-layer h3 .tag {
+      font-size: 0.7rem;
+      padding: 0.15rem 0.5rem;
+      border-radius: 100px;
+      font-weight: 600;
+      background: #22d3a720;
+      color: #22d3a7;
+    }
+
+    .arch-layer ul {
+      list-style: none;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.4rem;
+    }
+
+    .arch-layer ul li {
+      font-size: 0.85rem;
+      color: #888;
+      padding-left: 1.2rem;
+      position: relative;
+    }
+
+    .arch-layer ul li::before {
+      content: '›';
+      position: absolute;
+      left: 0;
+      color: #22d3a7;
+      font-weight: 700;
+    }
+
+    .arch-arrow {
+      color: #333;
+      font-size: 1.5rem;
+      text-align: center;
+    }
+
+    .arch-agents {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.5rem;
+      width: 100%;
+      max-width: 720px;
+    }
+
+    .arch-agents .arch-layer {
+      max-width: none;
+    }
+
+    .arch-agents .arch-layer ul {
+      grid-template-columns: 1fr;
+    }
+
+    /* ── Philosophy ── */
+    .philosophy-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 1.5rem;
+    }
+
+    .philosophy-card {
+      background: #12121a;
+      border: 1px solid #1a1a24;
+      border-radius: 12px;
+      padding: 1.75rem;
+    }
+
+    .philosophy-card .icon {
+      font-size: 1.5rem;
+      margin-bottom: 0.75rem;
+      display: block;
+    }
+
+    .philosophy-card h3 { margin-bottom: 0.5rem; font-size: 1.05rem; }
+    .philosophy-card p { color: #888; font-size: 0.875rem; }
+
+    /* ── Quick Start ── */
+    .quickstart-section { background: #0e0e14; }
+
+    .quickstart-section h2 { text-align: center; margin-bottom: 0.5rem; }
+    .quickstart-section .section-sub {
+      text-align: center;
+      color: #888;
+      margin-bottom: 3rem;
+    }
+
+    .terminal {
+      background: #0b0b0f;
+      border: 1px solid #1a1a24;
+      border-radius: 12px;
+      overflow: hidden;
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .terminal-header {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.9rem 1.25rem;
+      background: #12121a;
+      border-bottom: 1px solid #1a1a24;
+    }
+
+    .terminal-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .terminal-dot.red { background: #ff5f57; }
+    .terminal-dot.yellow { background: #febc2e; }
+    .terminal-dot.green { background: #28c840; }
+
+    .terminal-title {
+      flex: 1;
+      text-align: center;
+      color: #555;
+      font-size: 0.8rem;
+      font-weight: 500;
+    }
+
+    .terminal-body {
+      padding: 1.5rem;
+      overflow-x: auto;
+    }
+
+    .terminal-body pre {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', 'Menlo', monospace;
+      font-size: 0.85rem;
+      line-height: 1.8;
+      color: #c8c8d0;
+    }
+
+    .terminal-body .comment { color: #555; }
+    .terminal-body .prompt { color: #22d3a7; }
+    .terminal-body .flag { color: #c084fc; }
+    .terminal-body .string { color: #fbbf24; }
+
+    /* ── FAQ ── */
+    .faq-list {
+      max-width: 760px;
+      margin: 0 auto;
+    }
+
+    .faq-list h2 {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .faq-item {
+      border-bottom: 1px solid #1a1a24;
+    }
+
+    .faq-question {
+      width: 100%;
+      background: none;
+      border: none;
+      color: #f0f0f5;
+      font-size: 1rem;
+      font-weight: 600;
+      text-align: left;
+      padding: 1.25rem 0;
+      cursor: pointer;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: inherit;
+    }
+
+    .faq-question:hover { color: #22d3a7; }
+
+    .faq-question .arrow {
+      transition: transform 0.3s;
+      color: #555;
+      font-size: 1.25rem;
+      flex-shrink: 0;
+      margin-left: 1rem;
+    }
+
+    .faq-item.open .faq-question .arrow { transform: rotate(180deg); }
+
+    .faq-answer {
+      max-height: 0;
+      overflow: hidden;
+      transition: max-height 0.3s ease;
+    }
+
+    .faq-answer-inner {
+      padding-bottom: 1.25rem;
+      color: #888;
+      font-size: 0.925rem;
+      line-height: 1.7;
+    }
+
+    .faq-answer-inner code {
+      background: #1a1a24;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.85em;
+      color: #c084fc;
+    }
+
+    /* ── Tech Stack Pills ── */
+    .tech-stack {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.75rem;
+      justify-content: center;
+      margin-top: 2rem;
+    }
+
+    .tech-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+      padding: 0.4rem 1rem;
+      background: #12121a;
+      border: 1px solid #1a1a24;
+      border-radius: 100px;
+      font-size: 0.8rem;
+      color: #888;
+      font-weight: 500;
+    }
+
+    .tech-pill .dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+    }
+
+    .dot-elixir { background: #6b4fbb; }
+    .dot-python { background: #3776ab; }
+    .dot-go { background: #00add8; }
+    .dot-docker { background: #2496ed; }
+    .dot-fuse { background: #f97316; }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid #1a1a24;
+      padding: 3rem 0;
+    }
+
+    .footer-inner {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 1rem;
+    }
+
+    .footer-brand { color: #555; font-size: 0.875rem; }
+    .footer-brand strong { color: #888; }
+
+    .footer-links {
+      display: flex;
+      gap: 1.5rem;
+      list-style: none;
+    }
+
+    .footer-links a {
+      color: #555;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover { color: #22d3a7; }
+
+    /* ── Responsive ── */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .nav-toggle { display: block; }
+
+      nav.open .nav-links {
+        display: flex;
+        flex-direction: column;
+        position: absolute;
+        top: 64px;
+        left: 0;
+        right: 0;
+        background: rgba(11, 11, 15, 0.98);
+        padding: 1.5rem;
+        gap: 1rem;
+        border-bottom: 1px solid #1a1a24;
+      }
+
+      .hero { padding: 8rem 0 4rem; }
+
+      .arch-layer ul { grid-template-columns: 1fr; }
+      .arch-agents { grid-template-columns: 1fr; }
+
+      .comparison-table { font-size: 0.8rem; }
+      .comparison-table th,
+      .comparison-table td { padding: 0.75rem 0.75rem; }
+
+      .footer-inner { flex-direction: column; text-align: center; }
+    }
+  </style>
+</head>
+<body>
+  <!-- ── Navigation ── -->
+  <nav id="navbar">
+    <div class="container">
+      <a href="#" class="nav-logo"><span>Tri</span>Onyx</a>
+      <button class="nav-toggle" onclick="this.parentElement.parentElement.classList.toggle('open')" aria-label="Menu">
+        <span></span><span></span><span></span>
+      </button>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#architecture">Architecture</a></li>
+        <li><a href="#philosophy">Philosophy</a></li>
+        <li><a href="#quickstart">Quick Start</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li>
+          <a href="https://github.com/tri-onyx/tri-onyx" class="gh-link" target="_blank" rel="noopener">
+            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+            GitHub
+          </a>
+        </li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ── Hero ── -->
+  <section class="hero">
+    <div class="container">
+      <div class="hero-badge">What OpenClaw would be if security came first</div>
+      <h1>Track what agents have <em>seen</em>,<br>not just what they can do</h1>
+      <p class="hero-sub">A complete agent runtime with per-agent isolation, information flow tracking, and cryptographic audit trails. Built on Elixir/OTP.</p>
+      <div class="hero-buttons">
+        <a href="#quickstart" class="btn btn-primary">Get Started</a>
+        <a href="https://github.com/tri-onyx/tri-onyx" class="btn btn-secondary" target="_blank" rel="noopener">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="flex-shrink:0"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg>
+          View on GitHub
+        </a>
+      </div>
+      <div class="tech-stack">
+        <span class="tech-pill"><span class="dot dot-elixir"></span>Elixir/OTP</span>
+        <span class="tech-pill"><span class="dot dot-python"></span>Python</span>
+        <span class="tech-pill"><span class="dot dot-go"></span>Go</span>
+        <span class="tech-pill"><span class="dot dot-docker"></span>Docker</span>
+        <span class="tech-pill"><span class="dot dot-fuse"></span>FUSE</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Comparison Table ── -->
+  <section class="comparison-section" id="comparison">
+    <div class="container">
+      <h2>Why TriOnyx?</h2>
+      <p class="section-sub">Traditional sandboxes restrict capability. TriOnyx tracks information.</p>
+      <table class="comparison-table">
+        <thead>
+          <tr>
+            <th>Capability</th>
+            <th>Traditional Sandbox</th>
+            <th>TriOnyx</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Per-agent container isolation</td>
+            <td class="cross">&#10005; Shared process</td>
+            <td class="check">&#10003; Full Docker isolation</td>
+          </tr>
+          <tr>
+            <td>Information flow tracking</td>
+            <td class="cross">&#10005; Not tracked</td>
+            <td class="check">&#10003; Biba + Bell-LaPadula</td>
+          </tr>
+          <tr>
+            <td>Taint propagation detection</td>
+            <td class="cross">&#10005; No model</td>
+            <td class="check">&#10003; Monotonic per-session</td>
+          </tr>
+          <tr>
+            <td>Per-file filesystem policy</td>
+            <td class="cross">&#10005; Coarse-grained</td>
+            <td class="check">&#10003; FUSE + path trie</td>
+          </tr>
+          <tr>
+            <td>Credential isolation</td>
+            <td class="cross">&#10005; Agent holds keys</td>
+            <td class="check">&#10003; Gateway-only</td>
+          </tr>
+          <tr>
+            <td>Transitive risk analysis</td>
+            <td class="cross">&#10005; None</td>
+            <td class="check">&#10003; Full graph analysis</td>
+          </tr>
+          <tr>
+            <td>Structured audit trail</td>
+            <td class="cross">&#10005; Basic logs</td>
+            <td class="check">&#10003; Every access logged</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Features ── -->
+  <section id="features">
+    <div class="container">
+      <h2 style="text-align:center; margin-bottom:0.5rem">Core Features</h2>
+      <p class="section-sub" style="text-align:center; color:#888; margin-bottom:3rem">Every layer designed to limit what a compromised agent can do with what it knows.</p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F512;</span>
+          <h3>Isolated Agent Containers</h3>
+          <p>Each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state. Compromise one agent, the rest don't know.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F9EC;</span>
+          <h3>Taint & Sensitivity Tracking</h3>
+          <p>Two independent axes &mdash; Biba integrity for trustworthiness, Bell-LaPadula confidentiality for sensitivity &mdash; track what each agent has been exposed to.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F6E1;&#xFE0F;</span>
+          <h3>Information Flow Enforcement</h3>
+          <p>The gateway intercepts all inter-agent communication and blocks flows that would violate integrity or confidentiality constraints. No bypass possible.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F4C2;</span>
+          <h3>FUSE Filesystem Driver</h3>
+          <p>A Go passthrough filesystem enforcing per-file read/write policies. Pre-computed path trie for O(1) access decisions. Symlinks unconditionally denied.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F50D;</span>
+          <h3>Auditable Everything</h3>
+          <p>Structured logs for every file access, tool call, message route, and policy violation. Complete provenance tracking with risk manifests.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon">&#x1F310;</span>
+          <h3>Graph Analysis</h3>
+          <p>Transitive risk propagation across the agent topology. Detects multi-hop policy violations that pairwise checks would miss.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Architecture ── -->
+  <section class="arch-section" id="architecture">
+    <div class="container">
+      <h2>Architecture</h2>
+      <p class="section-sub">Three components. Clean separation. No LLM in the security boundary.</p>
+      <div class="arch-diagram">
+        <div class="arch-layer" style="max-width:720px; text-align:center; padding:1.25rem;">
+          <span style="color:#888; font-size:0.85rem;">External Triggers &mdash; webhooks, chat, cron, email</span>
+        </div>
+        <div class="arch-arrow">&#x25BC;</div>
+        <div class="arch-layer gateway">
+          <h3>
+            Elixir/OTP Gateway
+            <span class="tag">Non-agentic</span>
+          </h3>
+          <ul>
+            <li>Agent lifecycle (supervision trees)</li>
+            <li>Taint &amp; sensitivity tracking</li>
+            <li>Message interception &amp; validation</li>
+            <li>Risk scoring &amp; violation detection</li>
+            <li>Credential management (sole holder)</li>
+            <li>Graph analysis (transitive risk)</li>
+          </ul>
+        </div>
+        <div class="arch-arrow">&#x25BC;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&#x25BC;</div>
+        <div class="arch-agents">
+          <div class="arch-layer">
+            <h3>Agent Container</h3>
+            <ul>
+              <li>Python + Claude SDK</li>
+              <li>FUSE Driver (Go)</li>
+              <li>iptables network policy</li>
+              <li>JSON Lines protocol</li>
+            </ul>
+          </div>
+          <div class="arch-layer">
+            <h3>Agent Container</h3>
+            <ul>
+              <li>Python + Claude SDK</li>
+              <li>FUSE Driver (Go)</li>
+              <li>iptables network policy</li>
+              <li>JSON Lines protocol</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Philosophy ── -->
+  <section id="philosophy">
+    <div class="container">
+      <h2 style="text-align:center; margin-bottom:0.5rem">Design Philosophy</h2>
+      <p class="section-sub" style="text-align:center; color:#888; margin-bottom:3rem">Principles that guided every architectural decision.</p>
+      <div class="philosophy-grid">
+        <div class="philosophy-card">
+          <span class="icon">&#x26A0;&#xFE0F;</span>
+          <h3>Information is the threat</h3>
+          <p>An LLM that has ingested a prompt injection is dangerous regardless of what tools it has. Track what enters context, and where it flows next.</p>
+        </div>
+        <div class="philosophy-card">
+          <span class="icon">&#x1F6AB;</span>
+          <h3>No LLM in the security boundary</h3>
+          <p>The gateway is entirely deterministic &mdash; no AI, no autonomy, no judgment calls. Security decisions are made by code, not models.</p>
+        </div>
+        <div class="philosophy-card">
+          <span class="icon">&#x1F4C9;</span>
+          <h3>Risk reduction, not elimination</h3>
+          <p>The security model makes attacks harder and detectable, not theoretically impossible. Honest about what's achievable.</p>
+        </div>
+        <div class="philosophy-card">
+          <span class="icon">&#x1F50F;</span>
+          <h3>Gateway holds all credentials</h3>
+          <p>Agents never touch API keys or secrets directly. The gateway injects credentials at call time, preventing exfiltration.</p>
+        </div>
+        <div class="philosophy-card">
+          <span class="icon">&#x2B06;&#xFE0F;</span>
+          <h3>Monotonic exposure</h3>
+          <p>Taint and sensitivity only increase during a session. Once an agent has seen something, it can't un-see it. Simple, predictable, auditable.</p>
+        </div>
+        <div class="philosophy-card">
+          <span class="icon">&#x1F464;</span>
+          <h3>Single operator</h3>
+          <p>Built for one person running their own agents. No multi-tenancy complexity. Aligns trust model with reality.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Quick Start ── -->
+  <section class="quickstart-section" id="quickstart">
+    <div class="container">
+      <h2>Quick Start</h2>
+      <p class="section-sub">Up and running in minutes. Just Docker.</p>
+      <div class="terminal">
+        <div class="terminal-header">
+          <span class="terminal-dot red"></span>
+          <span class="terminal-dot yellow"></span>
+          <span class="terminal-dot green"></span>
+          <span class="terminal-title">terminal</span>
+        </div>
+        <div class="terminal-body">
+<pre><span class="comment"># Clone the repository</span>
+<span class="prompt">$</span> git clone https://github.com/tri-onyx/tri-onyx.git
+<span class="prompt">$</span> cd tri-onyx
+
+<span class="comment"># Build the gateway image</span>
+<span class="prompt">$</span> docker build <span class="flag">-f</span> gateway.Dockerfile <span class="flag">-t</span> tri-onyx-gateway:latest .
+
+<span class="comment"># Build the agent runtime image</span>
+<span class="prompt">$</span> docker build <span class="flag">-f</span> agent.Dockerfile <span class="flag">-t</span> tri-onyx-agent:latest .
+
+<span class="comment"># Start the gateway</span>
+<span class="prompt">$</span> docker run <span class="flag">--rm -p</span> 4000:4000 \
+    <span class="flag">-v</span> $(pwd):/app <span class="flag">-w</span> /app \
+    <span class="flag">-v</span> /var/run/docker.sock:/var/run/docker.sock \
+    <span class="flag">-e</span> TRI_ONYX_HOST_ROOT=$(pwd) \
+    <span class="flag">--env-file</span> .env \
+    tri-onyx-gateway:latest mix run <span class="flag">--no-halt</span></pre>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── FAQ ── -->
+  <section id="faq">
+    <div class="container">
+      <div class="faq-list">
+        <h2>Frequently Asked Questions</h2>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            How does TriOnyx differ from just using Docker?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Docker provides process isolation, but it doesn't track what information flows between containers. TriOnyx adds a security layer on top of Docker: per-file FUSE policies, information flow tracking across agents, taint propagation detection, and a gateway that intercepts all inter-agent communication to enforce integrity and confidentiality constraints.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            What LLM providers are supported?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              TriOnyx uses the Claude Agent SDK for the agent runtime. Agents are driven by Claude models (Sonnet, Opus, Haiku). The gateway itself is non-agentic &mdash; no LLM is used in the security boundary.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            Can agents communicate with each other?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Yes, but only through the gateway. All inter-agent messages are intercepted, validated, and logged. The gateway checks taint and sensitivity levels before allowing a message through. If a high-taint agent tries to send data to a clean agent, the Bandwidth-Constrained Trust Protocol kicks in, limiting what can pass.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            What's the performance overhead of the FUSE driver?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              The FUSE driver uses a pre-computed path trie for O(1) access decisions, so the per-call overhead is minimal. Policy expansion happens once at mount time. For typical agent workloads (reading source files, writing results), the overhead is negligible compared to LLM API latency.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            Is this production-ready?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              TriOnyx is designed for single-operator use &mdash; one person running their own agents. It's built on Elixir/OTP (known for reliability) and the security model is well-documented with formal Architecture Decision Records. It's actively developed and used by its creators. Evaluate it against your own requirements.
+            </div>
+          </div>
+        </div>
+
+        <div class="faq-item">
+          <button class="faq-question" onclick="toggleFaq(this)">
+            How are agents defined?
+            <span class="arrow">&#x25BC;</span>
+          </button>
+          <div class="faq-answer">
+            <div class="faq-answer-inner">
+              Agents are markdown files with YAML frontmatter in <code>workspace/agent-definitions/</code>. The frontmatter declares permissions (tools, filesystem access, network policy) and the body is the system prompt. The gateway translates these into Docker container configuration, FUSE policy, and iptables rules.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Footer ── -->
+  <footer>
+    <div class="container">
+      <div class="footer-inner">
+        <div class="footer-brand">
+          <strong>TriOnyx</strong> &mdash; Secure agent runtime
+        </div>
+        <ul class="footer-links">
+          <li><a href="https://github.com/tri-onyx/tri-onyx" target="_blank" rel="noopener">GitHub</a></li>
+          <li><a href="https://github.com/tri-onyx/tri-onyx/tree/main/docs" target="_blank" rel="noopener">Docs</a></li>
+          <li><a href="https://github.com/tri-onyx/tri-onyx/tree/main/adr" target="_blank" rel="noopener">ADRs</a></li>
+        </ul>
+      </div>
+    </div>
+  </footer>
+
+  <script>
+    function toggleFaq(btn) {
+      const item = btn.parentElement;
+      const answer = item.querySelector('.faq-answer');
+      const isOpen = item.classList.contains('open');
+
+      // Close all
+      document.querySelectorAll('.faq-item.open').forEach(function(el) {
+        el.classList.remove('open');
+        el.querySelector('.faq-answer').style.maxHeight = null;
+      });
+
+      // Open clicked (if it wasn't already open)
+      if (!isOpen) {
+        item.classList.add('open');
+        answer.style.maxHeight = answer.scrollHeight + 'px';
+      }
+    }
+
+    // Navbar shadow on scroll
+    window.addEventListener('scroll', function() {
+      var nav = document.getElementById('navbar');
+      if (window.scrollY > 20) {
+        nav.style.boxShadow = '0 1px 12px rgba(0,0,0,0.3)';
+      } else {
+        nav.style.boxShadow = 'none';
+      }
+    });
+  </script>
+</body>
+</html>
