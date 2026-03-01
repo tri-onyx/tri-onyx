@@ -125,6 +125,58 @@
     return originalQuery(parameters);
   };
 
+  // ---- User Agent ---------------------------------------------------------
+  // Headless Chromium includes "HeadlessChrome" in the UA string.  Replace
+  // it with "Chrome" so the version number stays in sync automatically.
+
+  const cleanUA = navigator.userAgent.replace(/HeadlessChrome/g, "Chrome");
+  Object.defineProperty(navigator, "userAgent", { get: () => cleanUA });
+  Object.defineProperty(navigator, "appVersion", {
+    get: () => cleanUA.replace(/^Mozilla\//, ""),
+  });
+
+  // ---- WebGL Renderer -----------------------------------------------------
+  // SwiftShader (the headless software renderer) is a well-known bot signal.
+  // Override the debug renderer info with a common integrated GPU string.
+
+  const UNMASKED_VENDOR_WEBGL = 0x9245;
+  const UNMASKED_RENDERER_WEBGL = 0x9246;
+  const webglOverrides = {
+    [UNMASKED_VENDOR_WEBGL]: "Google Inc. (Intel)",
+    [UNMASKED_RENDERER_WEBGL]:
+      "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL ES 3.2)",
+  };
+
+  const patchGetParameter = (proto) => {
+    const original = proto.getParameter;
+    proto.getParameter = function (param) {
+      if (webglOverrides[param] !== undefined) return webglOverrides[param];
+      return original.call(this, param);
+    };
+  };
+  if (typeof WebGLRenderingContext !== "undefined") {
+    patchGetParameter(WebGLRenderingContext.prototype);
+  }
+  if (typeof WebGL2RenderingContext !== "undefined") {
+    patchGetParameter(WebGL2RenderingContext.prototype);
+  }
+
+  // ---- Broken image dimensions --------------------------------------------
+  // Headless Chrome renders broken images as 16x16 placeholder icons.  Real
+  // browsers report 0x0 for images that failed to load.
+
+  ["height", "width"].forEach((prop) => {
+    const desc = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, prop);
+    if (!desc || !desc.get) return;
+    const originalGet = desc.get;
+    Object.defineProperty(HTMLImageElement.prototype, prop, {
+      get() {
+        if (this.complete && this.naturalHeight === 0) return 0;
+        return originalGet.call(this);
+      },
+    });
+  });
+
   // ---- Hardware fingerprint ---------------------------------------------
   // Headless defaults to 0 or 1 for these; real browsers report actual hw.
 
@@ -140,6 +192,12 @@
     navigator.permissions.query,
     ...(window.chrome.loadTimes ? [window.chrome.loadTimes] : []),
     ...(window.chrome.csi ? [window.chrome.csi] : []),
+    ...(typeof WebGLRenderingContext !== "undefined"
+      ? [WebGLRenderingContext.prototype.getParameter]
+      : []),
+    ...(typeof WebGL2RenderingContext !== "undefined"
+      ? [WebGL2RenderingContext.prototype.getParameter]
+      : []),
   ]);
 
   const originalToString = Function.prototype.toString;

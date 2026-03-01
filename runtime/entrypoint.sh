@@ -205,7 +205,7 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
     "browserName": "chromium",
     "isolated": false,
     "userDataDir": "/home/tri_onyx/.browser-sessions",
-    "initScript": "/home/tri_onyx/.browser-stealth.js",
+    "initScript": ["/home/tri_onyx/.browser-stealth.js"],
     "launchOptions": {
       "channel": "chromium",
       "args": [
