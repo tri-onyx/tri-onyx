@@ -66,6 +66,12 @@ cmd_unlock() {
 
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
 
+    # Fix ownership if needed so we can actually remove the lock files.
+    if [ "$(stat -c %u "$profile_dir")" != "$(id -u)" ]; then
+        echo "fixing profile ownership..."
+        sudo chown -R "$(id -u):$(id -g)" "$profile_dir"
+    fi
+
     local removed=0
     for lf in "${LOCK_FILES[@]}"; do
         local path="$profile_dir/$lf"
@@ -93,6 +99,24 @@ cmd_open() {
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
     [ -f "$PLAYWRIGHT_CLI" ] || die "playwright-cli not found: $PLAYWRIGHT_CLI"
 
+    # Save original ownership so we can restore it after the browser exits.
+    local orig_uid_gid
+    orig_uid_gid="$(stat -c %u:%g "$profile_dir")"
+
+    # Fix ownership — the container runs as a different UID so profile
+    # dirs end up with 700 permissions owned by that UID.
+    if [ "$(stat -c %u "$profile_dir")" != "$(id -u)" ]; then
+        echo "fixing profile ownership..."
+        sudo chown -R "$(id -u):$(id -g)" "$profile_dir"
+    fi
+
+    # Restore original ownership on exit (normal, error, or signal).
+    restore_ownership() {
+        echo "restoring profile ownership to $orig_uid_gid..."
+        sudo chown -R "$orig_uid_gid" "$profile_dir"
+    }
+    trap restore_ownership EXIT
+
     # Clear stale locks so the browser can start cleanly.
     for lf in "${LOCK_FILES[@]}"; do
         local path="$profile_dir/$lf"
@@ -106,7 +130,7 @@ cmd_open() {
     [ -n "$url" ] && args+=("$url")
 
     echo "opening $profile..."
-    exec node "$PLAYWRIGHT_CLI" "${args[@]}"
+    node "$PLAYWRIGHT_CLI" "${args[@]}"
 }
 
 # ---------------------------------------------------------------------------
