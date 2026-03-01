@@ -7,6 +7,20 @@
 #   docker run --device /dev/fuse --cap-drop ALL --cap-add SYS_ADMIN ...
 #   (add --cap-add NET_ADMIN for network policy enforcement)
 
+# --- Build stages ---
+
+# Node.js runtime for playwright-cli
+FROM node:22-slim AS node-base
+
+# Install playwright-cli npm dependencies in an isolated stage so npm
+# is not present in the final image.
+FROM node-base AS playwright-cli-deps
+COPY playwright-cli/package.json playwright-cli/package-lock.json /opt/playwright-cli/
+WORKDIR /opt/playwright-cli
+RUN npm ci --production
+
+# --- Final image ---
+
 FROM python:3.12-slim
 
 # Install FUSE3 for the tri-onyx-fs driver, iptables for optional
@@ -43,8 +57,8 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
 COPY fuse/tri-onyx-fs /usr/local/bin/tri-onyx-fs
 RUN chmod +x /usr/local/bin/tri-onyx-fs
 
-# Copy the Python agent runtime.
-COPY runtime/agent_runner.py runtime/protocol.py /opt/tri_onyx/
+# Copy the Python agent runtime and browser stealth script.
+COPY runtime/agent_runner.py runtime/protocol.py runtime/browser-stealth.js /opt/tri_onyx/
 
 # Pre-install the inline script dependencies into UV's cache so that
 # `uv run --script` at runtime is a cache hit with no network required.
@@ -54,12 +68,25 @@ COPY runtime/agent_runner.py runtime/protocol.py /opt/tri_onyx/
 ENV UV_CACHE_DIR=/opt/uv-cache
 RUN uv run --script /opt/tri_onyx/agent_runner.py < /dev/null 2>&1 || true
 
-# Pre-install Playwright and its Chromium browser so agents with outbound
-# network can use the newsagg fetcher without downloading at runtime.
-# Uses uvx to run the playwright CLI in an ephemeral venv.
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright-browsers
-RUN uv tool run playwright install chromium \
+
+# Install Node.js (runtime only, no npm) and playwright-cli.
+# The CLI delegates to Playwright's built-in client; node_modules were
+# pre-installed in the playwright-cli-deps build stage.
+COPY --from=node-base /usr/local/bin/node /usr/local/bin/node
+COPY playwright-cli/playwright-cli.js /opt/playwright-cli/playwright-cli.js
+COPY --from=playwright-cli-deps /opt/playwright-cli/node_modules /opt/playwright-cli/node_modules
+RUN chmod +x /opt/playwright-cli/playwright-cli.js \
+    && ln -s /opt/playwright-cli/playwright-cli.js /usr/local/bin/playwright-cli
+
+# Install Chromium using the Node.js playwright package so the browser
+# revision matches what playwright-cli expects at runtime.
+RUN node /opt/playwright-cli/node_modules/playwright/cli.js install chromium \
     && chown -R tri_onyx:tri_onyx /opt/playwright-browsers
+
+# Create the browser sessions directory for pre-authenticated profiles.
+RUN mkdir -p /home/tri_onyx/.browser-sessions \
+    && chown tri_onyx:tri_onyx /home/tri_onyx/.browser-sessions
 
 RUN chown -R tri_onyx:tri_onyx /opt/uv-cache
 
