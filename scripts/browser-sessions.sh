@@ -17,14 +17,23 @@ LOCK_FILES=(SingletonLock SingletonCookie SingletonSocket)
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# Open up permissions so the host user can read/write the profile without
-# changing ownership.  The container entrypoint also runs chmod a+rX on
-# startup, so Chromium (running as tri_onyx) retains full access either way.
-fix_permissions() {
+# Claim ownership of a profile dir so the host user can read/write it.
+# Records the original UID:GID so callers can restore later.
+claim_profile() {
     local dir="$1"
+    ORIG_UID_GID="$(stat -c %u:%g "$dir")"
     if [ "$(stat -c %u "$dir")" != "$(id -u)" ]; then
-        echo "fixing profile permissions..."
-        chmod -R a+rwX "$dir"
+        echo "claiming profile ownership (sudo)..."
+        sudo chown -R "$(id -u):$(id -g)" "$dir"
+    fi
+}
+
+# Restore a profile dir to its original container ownership.
+restore_profile() {
+    local dir="$1"
+    if [ -n "${ORIG_UID_GID:-}" ] && [ "$(stat -c %u:%g "$dir")" != "$ORIG_UID_GID" ]; then
+        echo "restoring profile ownership to $ORIG_UID_GID..."
+        sudo chown -R "$ORIG_UID_GID" "$dir"
     fi
 }
 
@@ -77,8 +86,7 @@ cmd_unlock() {
 
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
 
-    # Make writable if owned by the container UID.
-    fix_permissions "$profile_dir"
+    claim_profile "$profile_dir"
 
     local removed=0
     for lf in "${LOCK_FILES[@]}"; do
@@ -93,6 +101,8 @@ cmd_unlock() {
     if [ "$removed" -eq 0 ]; then
         echo "no lock files found in $profile"
     fi
+
+    restore_profile "$profile_dir"
 }
 
 # ---------------------------------------------------------------------------
@@ -107,8 +117,8 @@ cmd_open() {
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
     [ -f "$PLAYWRIGHT_CLI" ] || die "playwright-cli not found: $PLAYWRIGHT_CLI"
 
-    # Make writable if owned by the container UID.
-    fix_permissions "$profile_dir"
+    claim_profile "$profile_dir"
+    trap 'restore_profile "'"$profile_dir"'"' EXIT
 
     # Clear stale locks so the browser can start cleanly.
     for lf in "${LOCK_FILES[@]}"; do
@@ -123,7 +133,7 @@ cmd_open() {
     [ -n "$url" ] && args+=("$url")
 
     echo "opening $profile..."
-    exec node "$PLAYWRIGHT_CLI" "${args[@]}"
+    node "$PLAYWRIGHT_CLI" "${args[@]}"
 }
 
 # ---------------------------------------------------------------------------

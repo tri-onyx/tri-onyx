@@ -182,9 +182,6 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
     # Recursive chown while still running as root fixes this.
     mkdir -p /home/tri_onyx/.browser-sessions
     chown -R tri_onyx:tri_onyx /home/tri_onyx/.browser-sessions 2>/dev/null || true
-    # Make profile readable by the host user so the session management
-    # script can open a headed browser without sudo chown gymnastics.
-    chmod -R a+rX /home/tri_onyx/.browser-sessions 2>/dev/null || true
 
     # Create snapshot output directory inside the FUSE-mounted workspace.
     # This path is covered by the default write policy /agents/<name>/**
