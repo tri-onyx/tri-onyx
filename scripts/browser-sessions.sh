@@ -90,8 +90,12 @@ cmd_open() {
     local url="${1:-}"
     local profile_dir="$SESSIONS_DIR/$profile"
 
-    [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
     [ -f "$PLAYWRIGHT_CLI" ] || die "playwright-cli not found: $PLAYWRIGHT_CLI"
+
+    if [ ! -d "$profile_dir" ]; then
+        echo "creating new profile: $profile"
+        mkdir -p "$profile_dir"
+    fi
 
     # Clear stale locks so the browser can start cleanly.
     for lf in "${LOCK_FILES[@]}"; do
