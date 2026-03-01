@@ -17,6 +17,17 @@ LOCK_FILES=(SingletonLock SingletonCookie SingletonSocket)
 
 die() { echo "error: $*" >&2; exit 1; }
 
+# Open up permissions so the host user can read/write the profile without
+# changing ownership.  The container entrypoint also runs chmod a+rX on
+# startup, so Chromium (running as tri_onyx) retains full access either way.
+fix_permissions() {
+    local dir="$1"
+    if [ "$(stat -c %u "$dir")" != "$(id -u)" ]; then
+        echo "fixing profile permissions..."
+        chmod -R a+rwX "$dir"
+    fi
+}
+
 # ---------------------------------------------------------------------------
 # list — show profiles and their lock state
 # ---------------------------------------------------------------------------
@@ -66,11 +77,8 @@ cmd_unlock() {
 
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
 
-    # Fix ownership if needed so we can actually remove the lock files.
-    if [ "$(stat -c %u "$profile_dir")" != "$(id -u)" ]; then
-        echo "fixing profile ownership..."
-        sudo chown -R "$(id -u):$(id -g)" "$profile_dir"
-    fi
+    # Make writable if owned by the container UID.
+    fix_permissions "$profile_dir"
 
     local removed=0
     for lf in "${LOCK_FILES[@]}"; do
@@ -99,23 +107,8 @@ cmd_open() {
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
     [ -f "$PLAYWRIGHT_CLI" ] || die "playwright-cli not found: $PLAYWRIGHT_CLI"
 
-    # Save original ownership so we can restore it after the browser exits.
-    local orig_uid_gid
-    orig_uid_gid="$(stat -c %u:%g "$profile_dir")"
-
-    # Fix ownership — the container runs as a different UID so profile
-    # dirs end up with 700 permissions owned by that UID.
-    if [ "$(stat -c %u "$profile_dir")" != "$(id -u)" ]; then
-        echo "fixing profile ownership..."
-        sudo chown -R "$(id -u):$(id -g)" "$profile_dir"
-    fi
-
-    # Restore original ownership on exit (normal, error, or signal).
-    restore_ownership() {
-        echo "restoring profile ownership to $orig_uid_gid..."
-        sudo chown -R "$orig_uid_gid" "$profile_dir"
-    }
-    trap restore_ownership EXIT
+    # Make writable if owned by the container UID.
+    fix_permissions "$profile_dir"
 
     # Clear stale locks so the browser can start cleanly.
     for lf in "${LOCK_FILES[@]}"; do
@@ -130,7 +123,7 @@ cmd_open() {
     [ -n "$url" ] && args+=("$url")
 
     echo "opening $profile..."
-    node "$PLAYWRIGHT_CLI" "${args[@]}"
+    exec node "$PLAYWRIGHT_CLI" "${args[@]}"
 }
 
 # ---------------------------------------------------------------------------
