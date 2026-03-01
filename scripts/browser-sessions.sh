@@ -17,26 +17,6 @@ LOCK_FILES=(SingletonLock SingletonCookie SingletonSocket)
 
 die() { echo "error: $*" >&2; exit 1; }
 
-# Claim ownership of a profile dir so the host user can read/write it.
-# Records the original UID:GID so callers can restore later.
-claim_profile() {
-    local dir="$1"
-    ORIG_UID_GID="$(stat -c %u:%g "$dir")"
-    if [ "$(stat -c %u "$dir")" != "$(id -u)" ]; then
-        echo "claiming profile ownership (sudo)..."
-        sudo chown -R "$(id -u):$(id -g)" "$dir"
-    fi
-}
-
-# Restore a profile dir to its original container ownership.
-restore_profile() {
-    local dir="$1"
-    if [ -n "${ORIG_UID_GID:-}" ] && [ "$(stat -c %u:%g "$dir")" != "$ORIG_UID_GID" ]; then
-        echo "restoring profile ownership to $ORIG_UID_GID..."
-        sudo chown -R "$ORIG_UID_GID" "$dir"
-    fi
-}
-
 # ---------------------------------------------------------------------------
 # list — show profiles and their lock state
 # ---------------------------------------------------------------------------
@@ -86,8 +66,6 @@ cmd_unlock() {
 
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
 
-    claim_profile "$profile_dir"
-
     local removed=0
     for lf in "${LOCK_FILES[@]}"; do
         local path="$profile_dir/$lf"
@@ -101,8 +79,6 @@ cmd_unlock() {
     if [ "$removed" -eq 0 ]; then
         echo "no lock files found in $profile"
     fi
-
-    restore_profile "$profile_dir"
 }
 
 # ---------------------------------------------------------------------------
@@ -116,9 +92,6 @@ cmd_open() {
 
     [ -d "$profile_dir" ] || die "profile not found: $profile_dir"
     [ -f "$PLAYWRIGHT_CLI" ] || die "playwright-cli not found: $PLAYWRIGHT_CLI"
-
-    claim_profile "$profile_dir"
-    trap 'restore_profile "'"$profile_dir"'"' EXIT
 
     # Clear stale locks so the browser can start cleanly.
     for lf in "${LOCK_FILES[@]}"; do
