@@ -2,6 +2,10 @@
 
 > **Note:** `CLAUDE.md` is a symlink to this file (`AGENTS.md`). Edit `AGENTS.md` directly.
 
+## Workspace Directory
+
+The `workspace/` directory is tracked by a separate git repository outside the scope of this project. Do not commit or push changes to files under `workspace/` in this repo.
+
 ## Destructive Actions
 
 - **NEVER delete `.git` directories** — especially inside submodules or nested repos. Losing `.git` means losing all commit history, and if there is no upstream remote, that history is **unrecoverable**.
@@ -43,7 +47,7 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 - **The Dockerfile copies a pre-built binary** — `agent.Dockerfile` does `COPY fuse/tri-onyx-fs` (line 37). It does NOT compile from source. After changing Go code, you must recompile the binary before rebuilding the image:
   ```
   docker run --rm -v $(pwd)/fuse:/src -w /src golang:1.22 go build -o tri-onyx-fs ./cmd/tri-onyx-fs
-  docker build --no-cache -t tri-onyx-agent:latest -f agent.Dockerfile .
+  docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .
   ```
 - **The path trie is static, write globs are dynamic** — `policy.Expand()` walks the host directory at mount time and builds a trie of existing files. New files (that don't exist yet) are authorized by `checkWriteDynamic()` which matches against raw write glob patterns. Both `Opendir` and `Readdir` must fall back to `checkWriteDynamic` for directories that are writable but empty at mount time.
 - **Every agent gets `/agents/{name}/**` as a default write path** — injected by `Sandbox.build_fuse_policy/1` in Elixir. This is how agents write to their memory files without needing explicit `fs_write` entries.
@@ -53,7 +57,7 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 
 - **Always rebuild containers after making changes** that affect baked-in artifacts
 - The agent image (`tri-onyx-agent`) bakes in the FUSE binary **and the entire `runtime/` directory** (including `agent_runner.py` and `protocol.py`). Changes to any Python file under `runtime/` require rebuilding the agent image with `--no-cache`. **Remember to recompile the FUSE binary first if Go code changed** (see FUSE Driver section above):
-  `docker build --no-cache -t tri-onyx-agent:latest -f agent.Dockerfile .`
+  `docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .`
 - The gateway image (`tri-onyx-gateway`) mounts Elixir source at runtime, so it only needs rebuilding if `gateway.Dockerfile` itself changes:
   `docker build -t tri-onyx-gateway:latest -f gateway.Dockerfile .`
 - After rebuilding, restart any running containers to pick up the new image

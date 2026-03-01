@@ -47,7 +47,13 @@ RUN echo "user_allow_other" >> /etc/fuse.conf
 # Create a dedicated non-root user for running the agent process.
 # The entrypoint drops privileges to this user after FUSE mount and
 # iptables setup (which require root).
-RUN groupadd -r tri_onyx && useradd -r -g tri_onyx -d /home/tri_onyx -s /bin/bash tri_onyx \
+# Default UID/GID 1000 matches the typical host user so bind-mounted
+# directories (e.g. browser session profiles) are accessible without
+# sudo chown.
+ARG HOST_UID=1000
+ARG HOST_GID=1000
+RUN groupadd -g $HOST_GID tri_onyx \
+    && useradd -u $HOST_UID -g tri_onyx -d /home/tri_onyx -s /bin/bash tri_onyx \
     && mkdir -p /home/tri_onyx && chown tri_onyx:tri_onyx /home/tri_onyx
 
 # Install UV for running the agent script with inline dependencies.
