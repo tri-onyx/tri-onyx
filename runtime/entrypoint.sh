@@ -167,6 +167,86 @@ else
 fi
 
 # -----------------------------------------------------------------------
+# 3.5. Browser capability (playwright-cli)
+# -----------------------------------------------------------------------
+
+if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
+    AGENT_NAME="${TRI_ONYX_AGENT_NAME:?TRI_ONYX_AGENT_NAME is required for browser capability}"
+
+    # Ensure browser sessions directory exists and is fully owned by
+    # tri_onyx. The directory is bind-mounted from the host where files
+    # are typically owned by UID 1000. Chromium profile directories
+    # (e.g. Default/) are created with drwx------ permissions, so a UID
+    # mismatch locks tri_onyx out entirely — causing the browser to fall
+    # back to an in-memory profile and losing the authenticated session.
+    # Recursive chown while still running as root fixes this.
+    mkdir -p /home/tri_onyx/.browser-sessions
+    chown -R tri_onyx:tri_onyx /home/tri_onyx/.browser-sessions 2>/dev/null || true
+
+    # Create snapshot output directory inside the FUSE-mounted workspace.
+    # This path is covered by the default write policy /agents/<name>/**
+    # so the agent can read snapshots via the Read tool.
+    BROWSER_OUTPUT_DIR="/workspace/agents/${AGENT_NAME}/.playwright-cli"
+    mkdir -p "$BROWSER_OUTPUT_DIR"
+    chown tri_onyx:tri_onyx "$BROWSER_OUTPUT_DIR" 2>/dev/null || true
+
+    # Copy the browser stealth init script to a path the tri_onyx user can
+    # read.  This JS is injected before any page script executes to hide
+    # common headless/automation fingerprint signals.
+    cp /opt/tri_onyx/browser-stealth.js /home/tri_onyx/.browser-stealth.js
+    chown tri_onyx:tri_onyx /home/tri_onyx/.browser-stealth.js
+
+    # Generate playwright-cli config outside the FUSE mount so it does not
+    # require a FUSE policy entry. The wrapper script passes --config.
+    CONFIG_PATH="/home/tri_onyx/.playwright-cli.config.json"
+    cat > "$CONFIG_PATH" <<PCEOF
+{
+  "browser": {
+    "browserName": "chromium",
+    "isolated": false,
+    "userDataDir": "/home/tri_onyx/.browser-sessions",
+    "initScript": "/home/tri_onyx/.browser-stealth.js",
+    "launchOptions": {
+      "channel": "chromium",
+      "args": [
+        "--no-sandbox",
+        "--disable-setuid-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-blink-features=AutomationControlled",
+        "--window-size=1920,1080",
+        "--disable-background-networking",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-sync",
+        "--disable-default-apps",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--no-default-browser-check",
+        "--mute-audio"
+      ]
+    },
+    "contextOptions": {
+      "viewport": {"width": 1920, "height": 1080},
+      "locale": "en-US"
+    }
+  },
+  "outputDir": "${BROWSER_OUTPUT_DIR}"
+}
+PCEOF
+    chown tri_onyx:tri_onyx "$CONFIG_PATH" 2>/dev/null || true
+
+    # Create a convenience wrapper so agents call `browser <cmd>` instead
+    # of `playwright-cli --config=... <cmd>`.
+    cat > /usr/local/bin/browser <<'BEOF'
+#!/bin/sh
+exec playwright-cli --config=/home/tri_onyx/.playwright-cli.config.json "$@"
+BEOF
+    chmod +x /usr/local/bin/browser
+
+    log "Browser capability configured (output=$BROWSER_OUTPUT_DIR)"
+fi
+
+# -----------------------------------------------------------------------
 # 4. Hide /mnt/host and drop privileges
 # -----------------------------------------------------------------------
 
