@@ -75,19 +75,3 @@ if caldav_url = System.get_env("TRI_ONYX_CALDAV_URL") do
       agent_name: System.get_env("TRI_ONYX_CALENDAR_AGENT", "calendar")
     }
 end
-
-# Social media connector — Twitter/X + LinkedIn
-# Only enabled when TRI_ONYX_TWITTER_API_KEY is set
-if twitter_api_key = System.get_env("TRI_ONYX_TWITTER_API_KEY") do
-  config :tri_onyx, :social,
-    twitter: %{
-      api_key: twitter_api_key,
-      api_secret: System.get_env("TRI_ONYX_TWITTER_API_SECRET", ""),
-      access_token: System.get_env("TRI_ONYX_TWITTER_ACCESS_TOKEN", ""),
-      access_token_secret: System.get_env("TRI_ONYX_TWITTER_ACCESS_TOKEN_SECRET", ""),
-      bearer_token: System.get_env("TRI_ONYX_TWITTER_BEARER_TOKEN", ""),
-      poll_interval_ms:
-        String.to_integer(System.get_env("TRI_ONYX_SOCIAL_POLL_INTERVAL", "300000")),
-      agent_name: System.get_env("TRI_ONYX_SOCIAL_AGENT", "social")
-    }
-end

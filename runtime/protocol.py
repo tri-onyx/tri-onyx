@@ -28,12 +28,6 @@ Runtime -> Gateway (stdout):
   restart_agent_request  -- request gateway to restart another agent
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query
-  social_post_request          -- request gateway to publish a social media post
-  social_reply_request         -- request gateway to reply to a social media post
-  social_read_feed_request     -- request gateway to read a social media feed
-  social_read_notifications_request -- request gateway to read social notifications
-  social_read_dms_request      -- request gateway to read social direct messages
-  social_schedule_post_request -- request gateway to schedule a social media post
 """
 
 from __future__ import annotations
@@ -349,120 +343,6 @@ class CalendarDeleteResponse:
         )
 
 
-@dataclass
-class SocialPostResponse:
-    """Response from the gateway after a social media post request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    post_id: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialPostResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            post_id=data.get("post_id", ""),
-        )
-
-
-@dataclass
-class SocialReplyResponse:
-    """Response from the gateway after a social media reply request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    reply_id: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialReplyResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            reply_id=data.get("reply_id", ""),
-        )
-
-
-@dataclass
-class SocialReadFeedResponse:
-    """Response from the gateway after a social media read feed request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    posts: list[dict[str, Any]] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialReadFeedResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            posts=data.get("posts", []),
-        )
-
-
-@dataclass
-class SocialReadNotificationsResponse:
-    """Response from the gateway after a social media read notifications request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    notifications: list[dict[str, Any]] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialReadNotificationsResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            notifications=data.get("notifications", []),
-        )
-
-
-@dataclass
-class SocialReadDMsResponse:
-    """Response from the gateway after a social media read DMs request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    messages: list[dict[str, Any]] = field(default_factory=list)
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialReadDMsResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            messages=data.get("messages", []),
-        )
-
-
-@dataclass
-class SocialSchedulePostResponse:
-    """Response from the gateway after a social media schedule post request."""
-
-    request_id: str
-    success: bool
-    detail: str = ""
-    scheduled_id: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SocialSchedulePostResponse:
-        return cls(
-            request_id=data.get("request_id", ""),
-            success=data.get("success", False),
-            detail=data.get("detail", ""),
-            scheduled_id=data.get("scheduled_id", ""),
-        )
-
-
 InboundMessage = (
     StartMessage
     | PromptMessage
@@ -480,12 +360,6 @@ InboundMessage = (
     | CalendarCreateResponse
     | CalendarUpdateResponse
     | CalendarDeleteResponse
-    | SocialPostResponse
-    | SocialReplyResponse
-    | SocialReadFeedResponse
-    | SocialReadNotificationsResponse
-    | SocialReadDMsResponse
-    | SocialSchedulePostResponse
 )
 
 _INBOUND_PARSERS: dict[str, type] = {
@@ -505,12 +379,6 @@ _INBOUND_PARSERS: dict[str, type] = {
     "calendar_create_response": CalendarCreateResponse,
     "calendar_update_response": CalendarUpdateResponse,
     "calendar_delete_response": CalendarDeleteResponse,
-    "social_post_response": SocialPostResponse,
-    "social_reply_response": SocialReplyResponse,
-    "social_read_feed_response": SocialReadFeedResponse,
-    "social_read_notifications_response": SocialReadNotificationsResponse,
-    "social_read_dms_response": SocialReadDMsResponse,
-    "social_schedule_post_response": SocialSchedulePostResponse,
 }
 
 
@@ -729,78 +597,6 @@ def emit_calendar_delete_request(
         "request_id": request_id,
         "uid": uid,
         "calendar": calendar,
-    })
-
-
-def emit_social_post_request(
-    request_id: str,
-    draft_path: str,
-) -> None:
-    """Request the gateway to publish a social media post from a draft."""
-    _emit({
-        "type": "social_post_request",
-        "request_id": request_id,
-        "draft_path": draft_path,
-    })
-
-
-def emit_social_reply_request(
-    request_id: str,
-    draft_path: str,
-) -> None:
-    """Request the gateway to reply to a social media post from a draft."""
-    _emit({
-        "type": "social_reply_request",
-        "request_id": request_id,
-        "draft_path": draft_path,
-    })
-
-
-def emit_social_read_feed_request(
-    request_id: str,
-    params: dict[str, Any],
-) -> None:
-    """Request the gateway to read a social media feed."""
-    _emit({
-        "type": "social_read_feed_request",
-        "request_id": request_id,
-        "params": params,
-    })
-
-
-def emit_social_read_notifications_request(
-    request_id: str,
-    params: dict[str, Any],
-) -> None:
-    """Request the gateway to read social media notifications."""
-    _emit({
-        "type": "social_read_notifications_request",
-        "request_id": request_id,
-        "params": params,
-    })
-
-
-def emit_social_read_dms_request(
-    request_id: str,
-    params: dict[str, Any],
-) -> None:
-    """Request the gateway to read social media direct messages."""
-    _emit({
-        "type": "social_read_dms_request",
-        "request_id": request_id,
-        "params": params,
-    })
-
-
-def emit_social_schedule_post_request(
-    request_id: str,
-    draft_path: str,
-) -> None:
-    """Request the gateway to schedule a social media post from a draft."""
-    _emit({
-        "type": "social_schedule_post_request",
-        "request_id": request_id,
-        "draft_path": draft_path,
     })
 
 

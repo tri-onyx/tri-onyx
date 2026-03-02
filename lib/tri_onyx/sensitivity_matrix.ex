@@ -27,12 +27,6 @@ defmodule TriOnyx.SensitivityMatrix do
   | CalendarCreate| medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarUpdate| medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarDelete| medium      | Uses gateway-injected CalDAV credentials        |
-  | SocialPost    | medium      | Uses gateway-injected OAuth credentials         |
-  | SocialReply   | medium      | Uses gateway-injected OAuth credentials         |
-  | SocialReadFeed| low         | Public feed data, not session-tied              |
-  | SocialReadNotifications | low | Public notifications, not session-tied         |
-  | SocialReadDMs | high        | Private DMs contain sensitive content           |
-  | SocialSchedulePost | medium | Uses gateway-injected OAuth credentials         |
   | Read          | provenance  | Dynamic: derived from git commit metadata       |
   | All others    | low         | No auth required; results are not session-tied  |
 
@@ -75,13 +69,7 @@ defmodule TriOnyx.SensitivityMatrix do
     "CalendarQuery" => :medium,
     "CalendarCreate" => :medium,
     "CalendarUpdate" => :medium,
-    "CalendarDelete" => :medium,
-    "SocialPost" => :medium,
-    "SocialReply" => :medium,
-    "SocialReadFeed" => :low,
-    "SocialReadNotifications" => :low,
-    "SocialReadDMs" => :high,
-    "SocialSchedulePost" => :medium
+    "CalendarDelete" => :medium
   }
 
   @trigger_sensitivity %{

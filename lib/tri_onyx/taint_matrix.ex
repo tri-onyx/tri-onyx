@@ -30,12 +30,6 @@ defmodule TriOnyx.TaintMatrix do
   | CalendarCreate         | low    | Gateway-mediated, returns structured JSON     |
   | CalendarUpdate         | low    | Gateway-mediated, returns structured JSON     |
   | CalendarDelete         | low    | Gateway-mediated, returns structured JSON     |
-  | SocialPost             | low    | Gateway-mediated, returns structured JSON     |
-  | SocialReply            | low    | Gateway-mediated, returns structured JSON     |
-  | SocialReadFeed         | high   | Returns arbitrary external social media content|
-  | SocialReadNotifications| high   | Returns arbitrary external social media content|
-  | SocialReadDMs          | high   | Returns arbitrary external DM content         |
-  | SocialSchedulePost     | low    | Gateway-mediated, returns structured JSON     |
   | All others            | low    | Operate entirely on controlled workspace data|
 
   ## Input Source Taint
@@ -79,13 +73,7 @@ defmodule TriOnyx.TaintMatrix do
     "CalendarQuery" => :low,
     "CalendarCreate" => :low,
     "CalendarUpdate" => :low,
-    "CalendarDelete" => :low,
-    "SocialPost" => :low,
-    "SocialReply" => :low,
-    "SocialReadFeed" => :high,
-    "SocialReadNotifications" => :high,
-    "SocialReadDMs" => :high,
-    "SocialSchedulePost" => :low
+    "CalendarDelete" => :low
   }
 
   # Taint levels for the two Read path contexts.
