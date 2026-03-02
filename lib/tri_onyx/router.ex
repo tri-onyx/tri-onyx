@@ -262,7 +262,7 @@ defmodule TriOnyx.Router do
     case AgentSupervisor.find_session(name) do
       {:ok, pid} ->
         reason = get_stop_reason(conn)
-        AgentSupervisor.stop_session(pid, reason)
+        AgentSupervisor.stop_session(AgentSupervisor, pid, reason)
 
         conn
         |> put_resp_content_type("application/json")

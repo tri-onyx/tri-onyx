@@ -1,0 +1,6 @@
+# Claude Setup Tool - Ignored Files
+# Files listed here will be skipped during setup
+# Edit this file to change ignored files
+
+AGENTS.md
+.gitignore
