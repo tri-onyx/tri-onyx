@@ -12,6 +12,8 @@ from typing import Any
 from nio import (
     AsyncClient,
     AsyncClientConfig,
+    DeleteDevicesAuthResponse,
+    DeleteDevicesError,
     DownloadResponse,
     InviteMemberEvent,
     JoinError,
@@ -133,6 +135,10 @@ class MatrixAdapter(BaseAdapter):
                 logger.info("Device keys uploaded: %s", type(resp).__name__)
             except Exception:
                 logger.info("Device keys already uploaded (restored from store)")
+
+            # Remove stale device sessions so other clients see only our
+            # active device and are willing to share Megolm keys with us.
+            await self._delete_stale_devices()
 
         # Register event callbacks
         self._client.add_event_callback(self._on_room_message, RoomMessageText)
@@ -513,7 +519,22 @@ class MatrixAdapter(BaseAdapter):
                 )
                 return
 
-            resp = await self._client.accept_key_verification(event.transaction_id)
+            # Refresh device keys so nio knows about the requesting device
+            # (otherwise it rejects the verification as "unknown device").
+            try:
+                self._client.users_for_key_query = {event.sender}
+                await self._client.keys_query()
+            except Exception:
+                pass  # best-effort; proceed with accept attempt anyway
+
+            try:
+                resp = await self._client.accept_key_verification(event.transaction_id)
+            except Exception as exc:
+                logger.error(
+                    "Verification %s: failed to accept (%s), device may be unknown",
+                    event.transaction_id, exc,
+                )
+                return
             if hasattr(resp, "status_code") and resp.status_code != 200:
                 logger.error("Failed to accept verification %s: %s", event.transaction_id, resp)
                 return
@@ -1252,8 +1273,49 @@ class MatrixAdapter(BaseAdapter):
         }
 
     # ------------------------------------------------------------------
-    # E2E device trust
+    # E2E device management
     # ------------------------------------------------------------------
+
+    async def _delete_stale_devices(self) -> None:
+        """Delete any device sessions that aren't our active device.
+
+        Stale sessions (e.g. from logging into the bot account via Element)
+        prevent other clients from sharing Megolm keys with us, because
+        they see unverified sessions on the bot user.
+        """
+        assert self._client is not None
+        resp = await self._client.devices()
+        if hasattr(resp, "devices"):
+            stale = [
+                d.id for d in resp.devices
+                if d.id != self._config.device_id
+            ]
+            if not stale:
+                logger.debug("No stale device sessions found")
+                return
+            logger.info(
+                "Deleting %d stale device session(s): %s",
+                len(stale), ", ".join(stale),
+            )
+            del_resp = await self._client.delete_devices(stale)
+            if isinstance(del_resp, DeleteDevicesAuthResponse):
+                # Server requires UIA — retry with empty password auth
+                del_resp = await self._client.delete_devices(
+                    stale,
+                    auth={
+                        "type": "m.login.password",
+                        "user": self._config.user_id,
+                        "password": "",
+                    },
+                )
+            if isinstance(del_resp, DeleteDevicesError):
+                logger.warning(
+                    "Failed to delete stale devices: %s", del_resp.message
+                )
+            else:
+                logger.info("Deleted stale device sessions: %s", ", ".join(stale))
+        else:
+            logger.warning("Could not list devices: %s", resp)
 
     async def _trust_all_devices(self) -> None:
         """Mark all devices of members in configured rooms as trusted.

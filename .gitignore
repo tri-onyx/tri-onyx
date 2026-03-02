@@ -27,8 +27,7 @@ test/tmp/
 tmp/
 
 # Runtime workspace (except agent definitions which are source-controlled)
-workspace/*
-!workspace/agent-definitions/
+workspace/
 
 # Session logs
 logs/
@@ -45,3 +44,6 @@ scripts/safe-push.sh
 # BetterBeads
 .betterbeads/
 site/
+
+.devcontainer/
+transcripts/

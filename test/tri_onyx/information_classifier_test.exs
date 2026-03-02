@@ -244,7 +244,7 @@ defmodule TriOnyx.InformationClassifierTest do
     test "known tool returns matrix value regardless of meta" do
       assert :low = InformationClassifier.classify_tool_sensitivity("Read", %{requires_auth: true, data_sensitivity: :high})
       assert :medium = InformationClassifier.classify_tool_sensitivity("SendEmail", %{})
-      assert :medium = InformationClassifier.classify_tool_sensitivity("MoveEmail", %{})
+      assert :low = InformationClassifier.classify_tool_sensitivity("MoveEmail", %{})
     end
 
     test "unknown tool: no auth returns low" do

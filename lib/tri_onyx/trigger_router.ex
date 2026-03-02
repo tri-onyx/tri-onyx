@@ -211,17 +211,26 @@ defmodule TriOnyx.TriggerRouter do
         unless updated == [],
           do: Logger.info("TriggerRouter: updated agents: #{Enum.join(updated, ", ")}")
 
-        # Cancel crons for removed and updated agents
-        Enum.each(MapSet.union(removed, MapSet.new(updated)), fn name ->
+        changed = MapSet.union(removed, MapSet.new(updated))
+
+        # Cancel crons and heartbeats for removed and updated agents
+        Enum.each(changed, fn name ->
           Scheduler.cancel_agent_crons(name)
+          Scheduler.cancel_heartbeat(name)
         end)
 
-        # Register crons for added and updated agents
+        # Register crons and heartbeats for added and updated agents
         Enum.each(MapSet.union(added, MapSet.new(updated)), fn name ->
           definition = Map.get(new_defs, name)
 
-          if definition && definition.cron_schedules != [] do
-            Scheduler.schedule_agent_crons(name, definition.cron_schedules)
+          if definition do
+            if definition.cron_schedules != [] do
+              Scheduler.schedule_agent_crons(name, definition.cron_schedules)
+            end
+
+            if definition.heartbeat_every do
+              Scheduler.schedule_heartbeat(name, definition.heartbeat_every)
+            end
           end
         end)
 
