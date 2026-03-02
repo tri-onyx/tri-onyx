@@ -98,10 +98,16 @@ defmodule TriOnyx.Sandbox do
 
     # Add read paths for each declared plugin so the agent can access
     # plugin files from /plugins/<name>/ within the workspace.
+    # Include /plugins/ itself so readdir on the parent directory works.
     plugin_read_paths =
-      Enum.map(definition.plugins, fn plugin ->
-        "/plugins/#{plugin}/**"
-      end)
+      if definition.plugins != [] do
+        ["/plugins/"] ++
+          Enum.map(definition.plugins, fn plugin ->
+            "/plugins/#{plugin}/**"
+          end)
+      else
+        []
+      end
 
     fs_read = Enum.uniq(definition.fs_read ++ skill_read_paths ++ plugin_read_paths)
 
