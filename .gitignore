@@ -29,7 +29,7 @@ tmp/
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/*
 !workspace/agent-definitions/
-!workspace/modules/
+!workspace/plugins/
 
 # Session logs
 logs/
@@ -39,6 +39,9 @@ logs/
 .memories/
 .tmp/
 .claude/settings.local.json
+
+# Scripts (local utilities)
+scripts/safe-push.sh
 
 # BetterBeads
 .betterbeads/
