@@ -1243,7 +1243,8 @@ defmodule TriOnyx.AgentSession do
       "system_prompt" => system_prompt,
       "max_turns" => 100,
       "cwd" => "/workspace",
-      "skills" => definition.skills
+      "skills" => definition.skills,
+      "plugins" => definition.plugins
     }
   end
 

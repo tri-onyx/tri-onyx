@@ -62,6 +62,7 @@ defmodule TriOnyx.Sandbox do
       fuse_flags() ++
       network_flags(definition.network) ++
       volume_flags(workspace_dir) ++
+      browser_flags(definition, workspace_dir) ++
       env_flags(definition, session_id) ++
       [image]
   end
@@ -95,7 +96,14 @@ defmodule TriOnyx.Sandbox do
         "/workspace/.claude/skills/#{skill}/**"
       end)
 
-    fs_read = Enum.uniq(definition.fs_read ++ skill_read_paths)
+    # Add read paths for each declared plugin so the agent can access
+    # plugin files from /plugins/<name>/ within the workspace.
+    plugin_read_paths =
+      Enum.map(definition.plugins, fn plugin ->
+        "/plugins/#{plugin}/**"
+      end)
+
+    fs_read = Enum.uniq(definition.fs_read ++ skill_read_paths ++ plugin_read_paths)
 
     policy = %{
       "fs_read" => fs_read,
@@ -185,6 +193,23 @@ defmodule TriOnyx.Sandbox do
     ["-v", "#{workspace_dir}:/mnt/host:rw"]
   end
 
+  @spec browser_flags(AgentDefinition.t(), String.t()) :: [String.t()]
+  defp browser_flags(%AgentDefinition{browser: true, name: name}, workspace_dir) do
+    sessions_dir = Path.join([workspace_dir, "browser-sessions", name])
+
+    [
+      # CHOWN lets the entrypoint chown bind-mounted session files
+      # (owned by the host UID) to tri_onyx before dropping privileges.
+      # Dropped after gosu — the agent process has no capabilities.
+      "--cap-add",
+      "CHOWN",
+      "-v",
+      "#{sessions_dir}:/home/tri_onyx/.browser-sessions:rw"
+    ]
+  end
+
+  defp browser_flags(%AgentDefinition{browser: false}, _workspace_dir), do: []
+
   @spec env_flags(AgentDefinition.t(), String.t()) :: [String.t()]
   defp env_flags(%AgentDefinition{} = definition, session_id) do
     fuse_policy = build_fuse_policy(definition)
@@ -196,13 +221,21 @@ defmodule TriOnyx.Sandbox do
       {"-e", "TRI_ONYX_SESSION_ID=#{session_id}"}
     ]
 
+    # Browser capability flag
+    browser_env =
+      if definition.browser do
+        [{"-e", "TRI_ONYX_BROWSER=true"}]
+      else
+        []
+      end
+
     # Pass through host credentials if set
     passthrough =
       ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY"]
       |> Enum.filter(&System.get_env/1)
       |> Enum.map(fn key -> {"-e", "#{key}=#{System.get_env(key)}"} end)
 
-    (env ++ passthrough)
+    (env ++ browser_env ++ passthrough)
     |> Enum.flat_map(fn {flag, value} -> [flag, value] end)
   end
 end

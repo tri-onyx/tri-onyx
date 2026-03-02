@@ -7,8 +7,9 @@ network: none
 cron: config
 receive_from:
   - main
+plugins:
+  - diary
 fs_read:
-  - "/plugins/diary/**"
   - "/AGENTS.md"
 fs_write:
   - "/plugins/diary/**"

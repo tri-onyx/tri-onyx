@@ -7,8 +7,9 @@ network: outbound
 heartbeat_every: 60m
 receive_from:
   - main
+plugins:
+  - newsagg
 fs_read:
-  - "/plugins/newsagg/**"
   - "/AGENTS.md"
 fs_write:
   - "/plugins/newsagg/**"

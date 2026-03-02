@@ -788,6 +788,129 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "browser parsing" do
+    test "defaults to false when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.browser == false
+    end
+
+    test "parses browser: true" do
+      content = """
+      ---
+      name: browser-agent
+      tools: Read, Bash
+      browser: true
+      network: outbound
+      ---
+
+      Browser agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.browser == true
+    end
+
+    test "parses browser: false" do
+      content = """
+      ---
+      name: no-browser
+      tools: Read
+      browser: false
+      ---
+
+      No browser.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.browser == false
+    end
+
+    test "rejects non-boolean browser value" do
+      content = """
+      ---
+      name: bad-browser
+      tools: Read
+      browser: "yes"
+      ---
+
+      Bad browser.
+      """
+
+      assert {:error, {:invalid_field_type, "browser", :expected_boolean}} =
+               AgentDefinition.parse(content)
+    end
+
+    test "logs warning when browser: true with network: none" do
+      import ExUnit.CaptureLog
+
+      content = """
+      ---
+      name: offline-browser
+      tools: Read, Bash
+      browser: true
+      network: none
+      ---
+
+      Offline browser.
+      """
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _def} = AgentDefinition.parse(content)
+        end)
+
+      assert log =~ "offline-browser"
+      assert log =~ "network: none"
+    end
+
+    test "logs warning when browser: true without Bash tool" do
+      import ExUnit.CaptureLog
+
+      content = """
+      ---
+      name: no-bash-browser
+      tools: Read
+      browser: true
+      network: outbound
+      ---
+
+      No bash browser.
+      """
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _def} = AgentDefinition.parse(content)
+        end)
+
+      assert log =~ "no-bash-browser"
+      assert log =~ "Bash is not in tools"
+    end
+  end
+
+  describe "plugins parsing" do
+    test "parses plugins list" do
+      content = """
+      ---
+      name: plugin-agent
+      tools: Read
+      plugins:
+        - newsagg
+        - diary
+      ---
+
+      Plugin agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.plugins == ["newsagg", "diary"]
+    end
+
+    test "defaults to empty list when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.plugins == []
+    end
+  end
+
   describe "parse!/1" do
     test "returns definition on success" do
       assert %AgentDefinition{name: "simple-agent"} = AgentDefinition.parse!(@minimal_definition)

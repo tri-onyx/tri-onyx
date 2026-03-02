@@ -13,8 +13,9 @@ bcp_channels:
     budget_bits: 500
     max_cat2_queries: 10
     max_cat3_queries: 0
+plugins:
+  - bookmarks
 fs_read:
-  - "/plugins/bookmarks/**"
   - "/AGENTS.md"
 fs_write:
   - "/plugins/bookmarks/**"
