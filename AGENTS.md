@@ -69,6 +69,21 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 - Options: `-o output.png` for output path, `-W 1920 -H 1080` for viewport size
 - Dependencies are managed inline via PEP 723 — no manual install needed
 
+## Plugin System
+
+Plugins are reusable agent extensions (e.g., newsagg, diary, bookmarks) that live in `workspace/plugins/`. Each plugin is a directory of files that agents can read/write via FUSE paths like `/plugins/<name>/**`.
+
+Plugins are managed with the CLI tool:
+
+```bash
+uv run scripts/tri-onyx-plugin.py add <git-url> [--name NAME] [--ref TAG/BRANCH]
+uv run scripts/tri-onyx-plugin.py upgrade <name>
+uv run scripts/tri-onyx-plugin.py remove <name>
+uv run scripts/tri-onyx-plugin.py list
+```
+
+When a plugin is installed from a git repo, its `.git/` directory is stripped so the files become mutable workspace content tracked by the workspace's own git repo. Plugin metadata is recorded in `workspace/plugins.yaml`.
+
 ## Temporary Files
 
 - Always use local tmp directories within the project (e.g., `./tmp/`) instead of system-wide `/tmp/`
