@@ -1809,12 +1809,24 @@ async def main() -> None:
                     )
                     mcp_servers[_CALENDAR_SERVER] = calendar_server
 
-                # Load project settings (including skills) when the agent has
-                # declared skills. This enables the Claude Code CLI to find and
-                # inject SKILL.md files from .claude/skills/<name>/ in the CWD.
+                # Load project settings (including skills/plugins) when the
+                # agent has declared skills or plugins. This enables the Claude
+                # Code CLI to find SKILL.md / plugin.json files in the CWD.
                 # FUSE policy has already restricted access to only the declared
-                # skill directories, so undeclared skills are not readable.
-                setting_sources = ["project"] if config.skills else None
+                # skill/plugin directories, so undeclared ones are not readable.
+                setting_sources = (
+                    ["project"] if config.skills or config.plugins else None
+                )
+
+                # Build SDK plugin paths for declared workspace plugins
+                sdk_plugins = (
+                    [
+                        {"type": "local", "path": f"/workspace/plugins/{p}"}
+                        for p in config.plugins
+                    ]
+                    if config.plugins
+                    else None
+                )
 
                 options = ClaudeAgentOptions(
                     system_prompt=config.system_prompt,
@@ -1825,6 +1837,7 @@ async def main() -> None:
                     cwd=config.cwd,
                     mcp_servers=mcp_servers,
                     setting_sources=setting_sources,
+                    **({"plugins": sdk_plugins} if sdk_plugins else {}),
                 )
 
                 # Create a persistent client that maintains conversation context

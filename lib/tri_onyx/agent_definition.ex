@@ -23,6 +23,7 @@ defmodule TriOnyx.AgentDefinition do
   - `receive_from` — list of agent names this agent is allowed to receive messages from
   - `idle_timeout` — duration after which an idle session auto-stops (e.g. "30s", "5m", "1h")
   - `skills` — list of Claude Code skill names to load (from `.claude/skills/<name>/SKILL.md`)
+  - `plugins` — list of workspace plugin names (auto-injects FUSE read paths for `/plugins/<name>/**`)
   - `base_taint` — inherent taint floor from model provenance: "low", "medium", or "high" (default: "low")
   """
 
@@ -64,8 +65,10 @@ defmodule TriOnyx.AgentDefinition do
           bcp_channels: [bcp_channel()],
           cron_schedules: [cron_schedule()],
           skills: [String.t()],
+          plugins: [String.t()],
           base_taint: :low | :medium | :high,
-          input_sources: [atom()]
+          input_sources: [atom()],
+          browser: boolean()
         }
 
   @enforce_keys [:name, :tools, :system_prompt]
@@ -86,8 +89,10 @@ defmodule TriOnyx.AgentDefinition do
     bcp_channels: [],
     cron_schedules: [],
     skills: [],
+    plugins: [],
     base_taint: :low,
-    input_sources: []
+    input_sources: [],
+    browser: false
   ]
 
   @doc """
@@ -163,8 +168,10 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, bcp_channels} <- parse_bcp_channels(yaml),
          {:ok, cron_schedules} <- parse_cron_schedules(yaml),
          {:ok, skills} <- parse_string_list(yaml, "skills"),
+         {:ok, plugins} <- parse_string_list(yaml, "plugins"),
          {:ok, base_taint} <- parse_base_taint(yaml),
-         {:ok, input_sources} <- parse_input_sources(yaml) do
+         {:ok, input_sources} <- parse_input_sources(yaml),
+         {:ok, browser} <- parse_optional_boolean(yaml, "browser") do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -176,6 +183,20 @@ defmodule TriOnyx.AgentDefinition do
         Logger.warning(
           "Agent '#{name}' has RestartAgent tool but no restart_targets declared. " <>
             "All restart requests will be rejected."
+        )
+      end
+
+      if browser and network == :none do
+        Logger.warning(
+          "Agent '#{name}' has browser: true but network: none. " <>
+            "Browser will not be able to reach external sites."
+        )
+      end
+
+      if browser and "Bash" not in tools do
+        Logger.warning(
+          "Agent '#{name}' has browser: true but Bash is not in tools list. " <>
+            "Agent cannot invoke playwright-cli."
         )
       end
 
@@ -197,8 +218,10 @@ defmodule TriOnyx.AgentDefinition do
          bcp_channels: bcp_channels,
          cron_schedules: cron_schedules,
          skills: skills,
+         plugins: plugins,
          base_taint: base_taint,
-         input_sources: auto_include_cron(input_sources, cron_schedules)
+         input_sources: auto_include_cron(input_sources, cron_schedules),
+         browser: browser
        }}
     end
   end
@@ -472,6 +495,14 @@ defmodule TriOnyx.AgentDefinition do
     case Crontab.CronExpression.Parser.parse(schedule_str) do
       {:ok, _expr} -> :ok
       {:error, reason} -> {:error, {:invalid_cron_schedule, idx, {:invalid_expression, reason}}}
+    end
+  end
+
+  @spec parse_optional_boolean(map(), String.t()) :: {:ok, boolean()} | {:error, term()}
+  defp parse_optional_boolean(yaml, key) do
+    case Map.get(yaml, key, false) do
+      val when is_boolean(val) -> {:ok, val}
+      _other -> {:error, {:invalid_field_type, key, :expected_boolean}}
     end
   end
 

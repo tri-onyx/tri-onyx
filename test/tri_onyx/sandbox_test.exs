@@ -76,19 +76,32 @@ defmodule TriOnyx.SandboxTest do
   Minimal agent.
   """
 
+  @browser_def """
+  ---
+  name: browser-agent
+  tools: Read, Bash
+  network: outbound
+  browser: true
+  ---
+
+  Browser agent.
+  """
+
   setup do
     {:ok, code_reviewer} = AgentDefinition.parse(@code_reviewer_def)
     {:ok, deployer} = AgentDefinition.parse(@deployer_def)
     {:ok, webhook_handler} = AgentDefinition.parse(@webhook_handler_def)
     {:ok, outbound_agent} = AgentDefinition.parse(@outbound_def)
     {:ok, minimal_agent} = AgentDefinition.parse(@minimal_def)
+    {:ok, browser_agent} = AgentDefinition.parse(@browser_def)
 
     %{
       code_reviewer: code_reviewer,
       deployer: deployer,
       webhook_handler: webhook_handler,
       outbound_agent: outbound_agent,
-      minimal_agent: minimal_agent
+      minimal_agent: minimal_agent,
+      browser_agent: browser_agent
     }
   end
 
@@ -299,6 +312,36 @@ defmodule TriOnyx.SandboxTest do
       name_idx = Enum.find_index(args, &(&1 == "--name"))
       assert Enum.at(args, name_idx + 1) == "tri-onyx-deployer-sess-deploy-42"
     end
+
+    # -- Browser capability tests --
+
+    test "browser: true adds browser session volume mount", %{browser_agent: def} do
+      args = Sandbox.build_docker_args(def, "sess-001", workspace_dir: "/host/workspace")
+      volumes = find_all_volume_args(args)
+
+      assert Enum.any?(volumes, fn v ->
+        String.contains?(v, "browser-sessions/browser-agent") and
+          String.contains?(v, "/home/tri_onyx/.browser-sessions")
+      end)
+    end
+
+    test "browser: true sets TRI_ONYX_BROWSER env var", %{browser_agent: def} do
+      args = Sandbox.build_docker_args(def, "sess-001", workspace_dir: "/host/workspace")
+      env_values = env_vars_from_args(args)
+      assert env_values["TRI_ONYX_BROWSER"] == "true"
+    end
+
+    test "browser: false does not add browser volume mount", %{minimal_agent: def} do
+      args = Sandbox.build_docker_args(def, "sess-001", workspace_dir: "/host/workspace")
+      volumes = find_all_volume_args(args)
+      refute Enum.any?(volumes, &String.contains?(&1, "browser-sessions"))
+    end
+
+    test "browser: false does not set TRI_ONYX_BROWSER env var", %{minimal_agent: def} do
+      args = Sandbox.build_docker_args(def, "sess-001", workspace_dir: "/host/workspace")
+      env_values = env_vars_from_args(args)
+      refute Map.has_key?(env_values, "TRI_ONYX_BROWSER")
+    end
   end
 
   describe "build_fuse_policy/1" do
@@ -340,6 +383,51 @@ defmodule TriOnyx.SandboxTest do
     end
   end
 
+  describe "plugin FUSE path injection" do
+    test "auto-injects read paths for declared plugins" do
+      content = """
+      ---
+      name: plugin-agent
+      tools: Read
+      plugins:
+        - newsagg
+        - bookmarks
+      fs_read:
+        - "/AGENTS.md"
+      ---
+
+      Plugin agent.
+      """
+
+      {:ok, definition} = AgentDefinition.parse(content)
+      json = Sandbox.build_fuse_policy(definition)
+      policy = Jason.decode!(json)
+
+      assert "/plugins/newsagg/**" in policy["fs_read"]
+      assert "/plugins/bookmarks/**" in policy["fs_read"]
+      assert "/AGENTS.md" in policy["fs_read"]
+    end
+
+    test "does not auto-inject write paths for plugins" do
+      content = """
+      ---
+      name: plugin-agent
+      tools: Read
+      plugins:
+        - diary
+      ---
+
+      Plugin agent.
+      """
+
+      {:ok, definition} = AgentDefinition.parse(content)
+      json = Sandbox.build_fuse_policy(definition)
+      policy = Jason.decode!(json)
+
+      refute "/plugins/diary/**" in policy["fs_write"]
+    end
+  end
+
   # --- Test Helpers ---
 
   # Extracts -e KEY=VALUE pairs from docker args into a map
@@ -370,7 +458,7 @@ defmodule TriOnyx.SandboxTest do
     |> Enum.map(fn ["--cap-add", value] -> value end)
   end
 
-  # Finds the -v volume argument value
+  # Finds the first -v volume argument value
   defp find_volume_arg(args) do
     args
     |> Enum.chunk_every(2, 1)
@@ -378,5 +466,16 @@ defmodule TriOnyx.SandboxTest do
       ["-v", value] -> value
       _ -> nil
     end)
+  end
+
+  # Finds all -v volume argument values
+  defp find_all_volume_args(args) do
+    args
+    |> Enum.chunk_every(2, 1)
+    |> Enum.filter(fn
+      ["-v", _value] -> true
+      _ -> false
+    end)
+    |> Enum.map(fn ["-v", value] -> value end)
   end
 end

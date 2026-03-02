@@ -54,6 +54,7 @@ class StartMessage:
     max_turns: int
     cwd: str
     skills: list[str]
+    plugins: list[str]
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StartMessage:
@@ -66,6 +67,7 @@ class StartMessage:
             max_turns=agent.get("max_turns", 10),
             cwd=agent.get("cwd", "/workspace"),
             skills=agent.get("skills", []),
+            plugins=agent.get("plugins", []),
         )
 
 

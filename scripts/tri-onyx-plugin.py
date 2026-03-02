@@ -5,6 +5,7 @@
 """TriOnyx plugin manager — install, upgrade, and remove workspace plugins."""
 
 import argparse
+import json
 import shutil
 import subprocess
 import sys
@@ -58,6 +59,9 @@ def cmd_add(args: argparse.Namespace) -> None:
     if git_dir.exists():
         shutil.rmtree(git_dir)
 
+    # Auto-create plugin.json manifest if not present
+    _ensure_plugin_json(dest, name)
+
     manifest = load_manifest()
     manifest["plugins"][name] = {
         "repo": repo,
@@ -66,6 +70,21 @@ def cmd_add(args: argparse.Namespace) -> None:
     }
     save_manifest(manifest)
     print(f"Plugin '{name}' installed.")
+
+
+def _ensure_plugin_json(dest: Path, name: str) -> None:
+    """Create a default .claude-plugin/plugin.json if one doesn't exist."""
+    plugin_dir = dest / ".claude-plugin"
+    plugin_json = plugin_dir / "plugin.json"
+    if not plugin_json.exists():
+        plugin_dir.mkdir(parents=True, exist_ok=True)
+        manifest = {
+            "name": name,
+            "description": f"TriOnyx workspace plugin: {name}",
+            "version": "0.1.0",
+        }
+        plugin_json.write_text(json.dumps(manifest, indent=2) + "\n")
+        print(f"  Created {plugin_json}")
 
 
 def cmd_upgrade(args: argparse.Namespace) -> None:
