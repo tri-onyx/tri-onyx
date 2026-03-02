@@ -280,7 +280,9 @@ function renderMain() {
   if (state.selectedSession) {
     main.innerHTML = `
       <div class="toolbar">
-        <div class="title">${state.selectedAgent} / ${state.selectedSession}</div>
+        <div class="title">${state.selectedAgent}/${state.selectedSession}.jsonl
+          <span style="font-size:11px;color:var(--accent);cursor:pointer;margin-left:8px" onclick="copyLogPath()">copy</span>
+        </div>
       </div>
       <div class="filter-bar">
         <span style="font-size:11px;color:var(--muted)">Filter:</span>
@@ -476,6 +478,14 @@ function formatTime(ts) {
   } catch {
     return ts;
   }
+}
+
+function copyLogPath() {
+  const path = `${state.selectedAgent}/${state.selectedSession}.jsonl`;
+  navigator.clipboard.writeText(path).then(() => {
+    const el = document.querySelector('.title span');
+    if (el) { el.textContent = 'copied!'; setTimeout(() => el.textContent = 'copy', 1500); }
+  });
 }
 
 function formatBytes(bytes) {
