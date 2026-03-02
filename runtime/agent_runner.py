@@ -81,18 +81,6 @@ from protocol import (
     emit_calendar_create_request,
     emit_calendar_update_request,
     emit_calendar_delete_request,
-    SocialPostResponse,
-    SocialReplyResponse,
-    SocialReadFeedResponse,
-    SocialReadNotificationsResponse,
-    SocialReadDMsResponse,
-    SocialSchedulePostResponse,
-    emit_social_post_request,
-    emit_social_reply_request,
-    emit_social_read_feed_request,
-    emit_social_read_notifications_request,
-    emit_social_read_dms_request,
-    emit_social_schedule_post_request,
     emit_log,
 )
 
@@ -187,12 +175,6 @@ class InboundDispatcher:
         self.calendar_create_responses: asyncio.Queue[CalendarCreateResponse] = asyncio.Queue()
         self.calendar_update_responses: asyncio.Queue[CalendarUpdateResponse] = asyncio.Queue()
         self.calendar_delete_responses: asyncio.Queue[CalendarDeleteResponse] = asyncio.Queue()
-        self.social_post_responses: asyncio.Queue[SocialPostResponse] = asyncio.Queue()
-        self.social_reply_responses: asyncio.Queue[SocialReplyResponse] = asyncio.Queue()
-        self.social_read_feed_responses: asyncio.Queue[SocialReadFeedResponse] = asyncio.Queue()
-        self.social_read_notifications_responses: asyncio.Queue[SocialReadNotificationsResponse] = asyncio.Queue()
-        self.social_read_dms_responses: asyncio.Queue[SocialReadDMsResponse] = asyncio.Queue()
-        self.social_schedule_post_responses: asyncio.Queue[SocialSchedulePostResponse] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -222,12 +204,6 @@ class InboundDispatcher:
             self.calendar_create_responses,
             self.calendar_update_responses,
             self.calendar_delete_responses,
-            self.social_post_responses,
-            self.social_reply_responses,
-            self.social_read_feed_responses,
-            self.social_read_notifications_responses,
-            self.social_read_dms_responses,
-            self.social_schedule_post_responses,
         ]
         for q in queues:
             while not q.empty():
@@ -322,42 +298,6 @@ class InboundDispatcher:
                     await self.calendar_delete_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse calendar_delete_response: %s", exc)
-            elif msg_type == "social_post_response":
-                try:
-                    response = SocialPostResponse.from_dict(data)
-                    await self.social_post_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_post_response: %s", exc)
-            elif msg_type == "social_reply_response":
-                try:
-                    response = SocialReplyResponse.from_dict(data)
-                    await self.social_reply_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_reply_response: %s", exc)
-            elif msg_type == "social_read_feed_response":
-                try:
-                    response = SocialReadFeedResponse.from_dict(data)
-                    await self.social_read_feed_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_read_feed_response: %s", exc)
-            elif msg_type == "social_read_notifications_response":
-                try:
-                    response = SocialReadNotificationsResponse.from_dict(data)
-                    await self.social_read_notifications_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_read_notifications_response: %s", exc)
-            elif msg_type == "social_read_dms_response":
-                try:
-                    response = SocialReadDMsResponse.from_dict(data)
-                    await self.social_read_dms_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_read_dms_response: %s", exc)
-            elif msg_type == "social_schedule_post_response":
-                try:
-                    response = SocialSchedulePostResponse.from_dict(data)
-                    await self.social_schedule_post_responses.put(response)
-                except Exception as exc:
-                    log.error("Failed to parse social_schedule_post_response: %s", exc)
             elif msg_type == "interrupt":
                 # Route directly to interrupt_event (not control_queue) because
                 # the main loop is blocked awaiting run_prompt, not reading control.
@@ -838,142 +778,6 @@ class CalendarHandler:
             await asyncio.sleep(0.01)
 
 
-_SOCIAL_OP_TIMEOUT_S = 120
-
-
-class SocialHandler:
-    """Handles gateway-mediated social media tools (SocialPost, SocialReply, etc.).
-
-    Each method emits a request to the gateway and awaits the response,
-    following the same pattern as CalendarHandler.
-    """
-
-    def __init__(self, dispatcher: InboundDispatcher) -> None:
-        self._dispatcher = dispatcher
-
-    async def social_post(self, draft_path: str) -> str:
-        """Post to social media from a draft file."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialPost draft=%s (request_id=%s)", draft_path, request_id)
-        emit_social_post_request(request_id=request_id, draft_path=draft_path)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_post_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialPost timed out (request_id=%s)", request_id)
-            return f"Error: SocialPost timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return f"Post published: {response.detail}"
-        return f"Error: {response.detail}"
-
-    async def social_reply(self, draft_path: str) -> str:
-        """Reply to a social media post from a draft file."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialReply draft=%s (request_id=%s)", draft_path, request_id)
-        emit_social_reply_request(request_id=request_id, draft_path=draft_path)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_reply_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialReply timed out (request_id=%s)", request_id)
-            return f"Error: SocialReply timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return f"Reply published: {response.detail}"
-        return f"Error: {response.detail}"
-
-    async def social_read_feed(self, platform: str, max_results: int = 20) -> str:
-        """Read social media feed/timeline."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialReadFeed platform=%s (request_id=%s)", platform, request_id)
-        emit_social_read_feed_request(request_id=request_id, platform=platform, max_results=max_results)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_read_feed_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialReadFeed timed out (request_id=%s)", request_id)
-            return f"Error: SocialReadFeed timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return json.dumps(response.posts)
-        return f"Error: {response.detail}"
-
-    async def social_read_notifications(self, platform: str, max_results: int = 20) -> str:
-        """Read social media notifications/mentions."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialReadNotifications platform=%s (request_id=%s)", platform, request_id)
-        emit_social_read_notifications_request(request_id=request_id, platform=platform, max_results=max_results)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_read_notifications_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialReadNotifications timed out (request_id=%s)", request_id)
-            return f"Error: SocialReadNotifications timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return json.dumps(response.notifications)
-        return f"Error: {response.detail}"
-
-    async def social_read_dms(self, platform: str, max_results: int = 20) -> str:
-        """Read social media direct messages."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialReadDMs platform=%s (request_id=%s)", platform, request_id)
-        emit_social_read_dms_request(request_id=request_id, platform=platform, max_results=max_results)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_read_dms_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialReadDMs timed out (request_id=%s)", request_id)
-            return f"Error: SocialReadDMs timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return json.dumps(response.messages)
-        return f"Error: {response.detail}"
-
-    async def social_schedule_post(self, draft_path: str) -> str:
-        """Schedule a social media post from a draft file."""
-        request_id = uuid.uuid4().hex
-        log.info("SocialSchedulePost draft=%s (request_id=%s)", draft_path, request_id)
-        emit_social_schedule_post_request(request_id=request_id, draft_path=draft_path)
-
-        try:
-            response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.social_schedule_post_responses, request_id),
-                timeout=_SOCIAL_OP_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("SocialSchedulePost timed out (request_id=%s)", request_id)
-            return f"Error: SocialSchedulePost timed out after {_SOCIAL_OP_TIMEOUT_S}s"
-
-        if response.success:
-            return f"Post scheduled: {response.detail}"
-        return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, queue: asyncio.Queue, request_id: str) -> Any:
-        while True:
-            response = await queue.get()
-            if response.request_id == request_id:
-                return response
-            await queue.put(response)
-            await asyncio.sleep(0.01)
-
-
 # ---------------------------------------------------------------------------
 # SDK MCP tool for inter-agent messaging
 # ---------------------------------------------------------------------------
@@ -1016,22 +820,6 @@ _CALENDAR_CREATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_CREATE_TOOL}"
 _CALENDAR_UPDATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_UPDATE_TOOL}"
 _CALENDAR_DELETE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_DELETE_TOOL}"
 
-# Social tool names
-_SOCIAL_POST_TOOL = "SocialPost"
-_SOCIAL_REPLY_TOOL = "SocialReply"
-_SOCIAL_READ_FEED_TOOL = "SocialReadFeed"
-_SOCIAL_READ_NOTIFICATIONS_TOOL = "SocialReadNotifications"
-_SOCIAL_READ_DMS_TOOL = "SocialReadDMs"
-_SOCIAL_SCHEDULE_POST_TOOL = "SocialSchedulePost"
-
-_SOCIAL_SERVER = "social"
-_SOCIAL_POST_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_POST_TOOL}"
-_SOCIAL_REPLY_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_REPLY_TOOL}"
-_SOCIAL_READ_FEED_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_READ_FEED_TOOL}"
-_SOCIAL_READ_NOTIFICATIONS_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_READ_NOTIFICATIONS_TOOL}"
-_SOCIAL_READ_DMS_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_READ_DMS_TOOL}"
-_SOCIAL_SCHEDULE_POST_MCP_NAME = f"mcp__{_SOCIAL_SERVER}__{_SOCIAL_SCHEDULE_POST_TOOL}"
-
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
@@ -1045,12 +833,6 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _CALENDAR_CREATE_MCP_NAME: _CALENDAR_CREATE_TOOL,
     _CALENDAR_UPDATE_MCP_NAME: _CALENDAR_UPDATE_TOOL,
     _CALENDAR_DELETE_MCP_NAME: _CALENDAR_DELETE_TOOL,
-    _SOCIAL_POST_MCP_NAME: _SOCIAL_POST_TOOL,
-    _SOCIAL_REPLY_MCP_NAME: _SOCIAL_REPLY_TOOL,
-    _SOCIAL_READ_FEED_MCP_NAME: _SOCIAL_READ_FEED_TOOL,
-    _SOCIAL_READ_NOTIFICATIONS_MCP_NAME: _SOCIAL_READ_NOTIFICATIONS_TOOL,
-    _SOCIAL_READ_DMS_MCP_NAME: _SOCIAL_READ_DMS_TOOL,
-    _SOCIAL_SCHEDULE_POST_MCP_NAME: _SOCIAL_SCHEDULE_POST_TOOL,
 }
 
 
@@ -1610,228 +1392,6 @@ def build_calendar_delete_tool(calendar_handler: CalendarHandler) -> Any:
     return calendar_delete
 
 
-def build_social_post_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialPost as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_POST_TOOL,
-        "Post to social media from a draft JSON file. Requires human approval.",
-        {
-            "type": "object",
-            "properties": {
-                "draft_path": {
-                    "type": "string",
-                    "description": "Path to draft JSON file in the agent workspace",
-                },
-            },
-            "required": ["draft_path"],
-        },
-    )
-    async def social_post(args: dict[str, Any]) -> dict[str, Any]:
-        draft_path = args.get("draft_path", "")
-        if not draft_path:
-            return {
-                "content": [{"type": "text", "text": "Error: 'draft_path' is required."}],
-                "isError": True,
-            }
-        result = await social_handler.social_post(draft_path)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_post
-
-
-def build_social_reply_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialReply as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_REPLY_TOOL,
-        "Reply to a social media post from a draft JSON file. Requires human approval.",
-        {
-            "type": "object",
-            "properties": {
-                "draft_path": {
-                    "type": "string",
-                    "description": "Path to draft JSON file in the agent workspace",
-                },
-            },
-            "required": ["draft_path"],
-        },
-    )
-    async def social_reply(args: dict[str, Any]) -> dict[str, Any]:
-        draft_path = args.get("draft_path", "")
-        if not draft_path:
-            return {
-                "content": [{"type": "text", "text": "Error: 'draft_path' is required."}],
-                "isError": True,
-            }
-        result = await social_handler.social_reply(draft_path)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_reply
-
-
-def build_social_read_feed_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialReadFeed as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_READ_FEED_TOOL,
-        "Read social media feed/timeline.",
-        {
-            "type": "object",
-            "properties": {
-                "platform": {
-                    "type": "string",
-                    "description": "Social media platform to read from",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return",
-                    "default": 20,
-                },
-            },
-            "required": ["platform"],
-        },
-    )
-    async def social_read_feed(args: dict[str, Any]) -> dict[str, Any]:
-        platform = args.get("platform", "")
-        if not platform:
-            return {
-                "content": [{"type": "text", "text": "Error: 'platform' is required."}],
-                "isError": True,
-            }
-        max_results = args.get("max_results", 20)
-        result = await social_handler.social_read_feed(platform, max_results)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_read_feed
-
-
-def build_social_read_notifications_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialReadNotifications as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_READ_NOTIFICATIONS_TOOL,
-        "Read social media notifications/mentions.",
-        {
-            "type": "object",
-            "properties": {
-                "platform": {
-                    "type": "string",
-                    "description": "Social media platform to read from",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return",
-                    "default": 20,
-                },
-            },
-            "required": ["platform"],
-        },
-    )
-    async def social_read_notifications(args: dict[str, Any]) -> dict[str, Any]:
-        platform = args.get("platform", "")
-        if not platform:
-            return {
-                "content": [{"type": "text", "text": "Error: 'platform' is required."}],
-                "isError": True,
-            }
-        max_results = args.get("max_results", 20)
-        result = await social_handler.social_read_notifications(platform, max_results)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_read_notifications
-
-
-def build_social_read_dms_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialReadDMs as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_READ_DMS_TOOL,
-        "Read social media direct messages.",
-        {
-            "type": "object",
-            "properties": {
-                "platform": {
-                    "type": "string",
-                    "description": "Social media platform to read from",
-                },
-                "max_results": {
-                    "type": "integer",
-                    "description": "Maximum number of results to return",
-                    "default": 20,
-                },
-            },
-            "required": ["platform"],
-        },
-    )
-    async def social_read_dms(args: dict[str, Any]) -> dict[str, Any]:
-        platform = args.get("platform", "")
-        if not platform:
-            return {
-                "content": [{"type": "text", "text": "Error: 'platform' is required."}],
-                "isError": True,
-            }
-        max_results = args.get("max_results", 20)
-        result = await social_handler.social_read_dms(platform, max_results)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_read_dms
-
-
-def build_social_schedule_post_tool(social_handler: SocialHandler) -> Any:
-    """Create SocialSchedulePost as an in-process SDK MCP tool."""
-
-    @tool(
-        _SOCIAL_SCHEDULE_POST_TOOL,
-        "Schedule a social media post from a draft JSON file. Requires human approval.",
-        {
-            "type": "object",
-            "properties": {
-                "draft_path": {
-                    "type": "string",
-                    "description": "Path to draft JSON file in the agent workspace",
-                },
-            },
-            "required": ["draft_path"],
-        },
-    )
-    async def social_schedule_post(args: dict[str, Any]) -> dict[str, Any]:
-        draft_path = args.get("draft_path", "")
-        if not draft_path:
-            return {
-                "content": [{"type": "text", "text": "Error: 'draft_path' is required."}],
-                "isError": True,
-            }
-        result = await social_handler.social_schedule_post(draft_path)
-        is_error = result.startswith("Error:")
-        return {
-            "content": [{"type": "text", "text": result}],
-            "isError": is_error,
-        }
-
-    return social_schedule_post
-
-
 # ---------------------------------------------------------------------------
 # BCP query → prompt formatting
 # ---------------------------------------------------------------------------
@@ -2168,12 +1728,6 @@ async def main() -> None:
                     _CALENDAR_CREATE_TOOL,
                     _CALENDAR_UPDATE_TOOL,
                     _CALENDAR_DELETE_TOOL,
-                    _SOCIAL_POST_TOOL,
-                    _SOCIAL_REPLY_TOOL,
-                    _SOCIAL_READ_FEED_TOOL,
-                    _SOCIAL_READ_NOTIFICATIONS_TOOL,
-                    _SOCIAL_READ_DMS_TOOL,
-                    _SOCIAL_SCHEDULE_POST_TOOL,
                 }
                 sdk_tools = [
                     t for t in config.tools if t not in _custom_tools
@@ -2254,41 +1808,6 @@ async def main() -> None:
                         tools=calendar_tools,
                     )
                     mcp_servers[_CALENDAR_SERVER] = calendar_server
-
-                # Social MCP tools — hosted on a separate "social" MCP server
-                social_handler = SocialHandler(dispatcher)
-                social_tools: list[Any] = []
-
-                if _SOCIAL_POST_TOOL in config.tools:
-                    social_tools.append(build_social_post_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_POST_MCP_NAME)
-
-                if _SOCIAL_REPLY_TOOL in config.tools:
-                    social_tools.append(build_social_reply_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_REPLY_MCP_NAME)
-
-                if _SOCIAL_READ_FEED_TOOL in config.tools:
-                    social_tools.append(build_social_read_feed_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_READ_FEED_MCP_NAME)
-
-                if _SOCIAL_READ_NOTIFICATIONS_TOOL in config.tools:
-                    social_tools.append(build_social_read_notifications_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_READ_NOTIFICATIONS_MCP_NAME)
-
-                if _SOCIAL_READ_DMS_TOOL in config.tools:
-                    social_tools.append(build_social_read_dms_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_READ_DMS_MCP_NAME)
-
-                if _SOCIAL_SCHEDULE_POST_TOOL in config.tools:
-                    social_tools.append(build_social_schedule_post_tool(social_handler))
-                    sdk_tools.append(_SOCIAL_SCHEDULE_POST_MCP_NAME)
-
-                if social_tools:
-                    social_server = create_sdk_mcp_server(
-                        name=_SOCIAL_SERVER,
-                        tools=social_tools,
-                    )
-                    mcp_servers[_SOCIAL_SERVER] = social_server
 
                 # Load project settings (including skills) when the agent has
                 # declared skills. This enables the Claude Code CLI to find and
