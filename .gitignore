@@ -29,7 +29,6 @@ tmp/
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/*
 !workspace/agent-definitions/
-!workspace/plugins/
 
 # Session logs
 logs/
