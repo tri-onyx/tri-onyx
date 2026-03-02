@@ -403,6 +403,7 @@ defmodule TriOnyx.SandboxTest do
       json = Sandbox.build_fuse_policy(definition)
       policy = Jason.decode!(json)
 
+      assert "/plugins/" in policy["fs_read"]
       assert "/plugins/newsagg/**" in policy["fs_read"]
       assert "/plugins/bookmarks/**" in policy["fs_read"]
       assert "/AGENTS.md" in policy["fs_read"]
