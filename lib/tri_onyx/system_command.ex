@@ -43,8 +43,17 @@ defmodule TriOnyx.SystemCommand do
 
       [name | args] ->
         case Map.fetch(@commands, name) do
-          {:ok, cmd} -> {:command, cmd, args}
-          :error -> {:command, :unknown, ["/" <> name]}
+          {:ok, cmd} ->
+            {:command, cmd, args}
+
+          :error ->
+            # Skill invocations use `/<library>:<action>` syntax and must
+            # pass through to the agent where the SDK handles them.
+            if String.contains?(name, ":") do
+              :not_a_command
+            else
+              {:command, :unknown, ["/" <> name]}
+            end
         end
     end
   end
