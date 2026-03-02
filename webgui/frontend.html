@@ -44,7 +44,7 @@
   }
   .agent-card .risk-square .risk-icon { font-size: 20px; margin-bottom: 2px; }
   .agent-card .risk-square.low { background: rgba(63,185,80,0.2); color: var(--green); }
-  .agent-card .risk-square.moderate { background: rgba(210,153,34,0.2); color: var(--yellow); }
+  .agent-card .risk-square.medium { background: rgba(210,153,34,0.2); color: var(--yellow); }
   .agent-card .risk-square.high { background: rgba(219,109,40,0.2); color: var(--orange); }
   .agent-card .risk-square.critical { background: rgba(248,81,73,0.25); color: var(--red); }
   .agent-card:hover { background: rgba(88,166,255,0.05); }
@@ -260,7 +260,7 @@ function renderAgentList() {
     const status = a.status || 'inactive';
     const aa = state.analysis[a.name] || {};
     const riskRaw = (aa.effective_risk || a.effective_risk || '').toLowerCase().replace(/[^a-z]/g, '') || 'low';
-    const risk = riskRaw === 'medium' ? 'moderate' : riskRaw;
+    const risk = riskRaw === 'moderate' ? 'medium' : riskRaw;
     const taint = aa.propagated_taint || a.taint_level || 'none';
     const sens = aa.propagated_sensitivity || a.sensitivity_level || 'none';
     const cap = aa.capability_level || a.capability_level || 'none';
@@ -268,7 +268,7 @@ function renderAgentList() {
     let badges = `<span class="axis-badge ${norm(taint)}">T:${taint}</span> `
       + `<span class="axis-badge ${norm(sens)}">S:${sens}</span> `
       + `<span class="axis-badge ${norm(cap)}">C:${cap}</span>`;
-    const riskIcons = { low: '●', moderate: '◆', high: '▲', critical: '⬟' };
+    const riskIcons = { low: '●', medium: '◆', high: '▲', critical: '⬟' };
     return `<div class="agent-card ${active}" onclick="selectAgent('${a.name}')">
       <div class="agent-info">
         <div class="agent-name"><span class="status-dot ${status}"></span>${a.name}</div>
@@ -523,14 +523,21 @@ async function startAgent() {
 
 async function stopAgent() {
   if (!state.selected) return;
+  disconnectSSE();
   try {
-    await api('POST', `/agents/${encodeURIComponent(state.selected)}/stop`);
-    disconnectSSE();
-    await refreshAgents();
-    renderMain();
+    const resp = await fetch(gatewayUrl() + `/agents/${encodeURIComponent(state.selected)}/stop`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: '{}',
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!resp.ok) console.warn('Stop returned', resp.status);
   } catch (err) {
-    alert('Failed to stop agent: ' + err.message);
+    // Termination may drop the connection — treat as success
+    console.warn('Stop request error (agent may still have stopped):', err.message);
   }
+  await refreshAgents();
+  renderMain();
 }
 
 async function sendPrompt() {

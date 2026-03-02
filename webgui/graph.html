@@ -686,16 +686,21 @@ function assignCurveOffsets(links) {
 function linkPath(d) {
   const sx = d.source.x, sy = d.source.y;
   const tx = d.target.x, ty = d.target.y;
-  if (!d.curveOffset) {
-    return `M${sx},${sy}L${tx},${ty}`;
-  }
-  // Perpendicular offset for the control point
+  // Shorten the path so it starts at source border and ends at target border
+  const sr = 0; // start from source center
+  const tr = nodeRadius(d.target) + 2; // end just outside target border for arrowhead
   const dx = tx - sx, dy = ty - sy;
   const len = Math.sqrt(dx * dx + dy * dy) || 1;
+  const ux = dx / len, uy = dy / len;
+  const x1 = sx + ux * sr, y1 = sy + uy * sr;
+  const x2 = tx - ux * tr, y2 = ty - uy * tr;
+  if (!d.curveOffset) {
+    return `M${x1},${y1}L${x2},${y2}`;
+  }
   const nx = -dy / len, ny = dx / len;
   const cx = (sx + tx) / 2 + nx * d.curveOffset;
   const cy = (sy + ty) / 2 + ny * d.curveOffset;
-  return `M${sx},${sy}Q${cx},${cy} ${tx},${ty}`;
+  return `M${x1},${y1}Q${cx},${cy} ${x2},${y2}`;
 }
 
 // Returns the visual midpoint of a link (on the curve, not just the
@@ -1007,9 +1012,23 @@ function renderGraph() {
       linkHitArea.attr('d', d => linkPath(d));
       link.attr('d', d => linkPath(d));
       node.attr('transform', d => `translate(${d.x},${d.y})`);
-      edgeLabels
-        .attr('x', d => linkMidpoint(d).x)
-        .attr('y', d => linkMidpoint(d).y - 4);
+      edgeLabels.each(function(d) {
+        const mid = linkMidpoint(d);
+        // Push label away from the edge perpendicular to avoid node occlusion
+        const sx = d.source.x, sy = d.source.y, tx = d.target.x, ty = d.target.y;
+        const dx = tx - sx, dy = ty - sy;
+        const len = Math.sqrt(dx * dx + dy * dy) || 1;
+        // Perpendicular unit vector
+        const nx = -dy / len, ny = dx / len;
+        // Offset scales with the larger of the two node radii
+        const maxR = Math.max(nodeRadius(d.source), nodeRadius(d.target));
+        const offset = maxR * 0.6 + 6;
+        // Use same side as curveOffset if present, otherwise default above
+        const sign = d.curveOffset ? Math.sign(d.curveOffset) : -1;
+        d3.select(this)
+          .attr('x', mid.x + nx * offset * sign)
+          .attr('y', mid.y + ny * offset * sign);
+      });
     });
 
   // Restore saved positions
