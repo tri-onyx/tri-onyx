@@ -19,6 +19,7 @@ defmodule TriOnyx.Router do
   - `PUT /webhook-endpoints/:id` — update webhook endpoint
   - `DELETE /webhook-endpoints/:id` — delete webhook endpoint
   - `POST /webhook-endpoints/:id/rotate-secret` — rotate signing secret
+  - `POST /heartbeats/:agent_name/trigger` — manually trigger a heartbeat
   - `GET /bcp/approvals` — list pending BCP approval items
   - `POST /bcp/approvals/:id/approve` — approve a pending BCP item
   - `POST /bcp/approvals/:id/reject` — reject a pending BCP item with reason
@@ -506,6 +507,26 @@ defmodule TriOnyx.Router do
           Jason.encode!(%{
             "error" => "invalid_body",
             "message" => "Expected JSON with positive integer \"interval_ms\" field"
+          })
+        )
+    end
+  end
+
+  post "/heartbeats/:agent_name/trigger" do
+    case Scheduler.trigger_heartbeat(agent_name) do
+      {:ok, _pid} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{"status" => "triggered", "agent_name" => agent_name}))
+
+      {:error, reason} ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(
+          500,
+          Jason.encode!(%{
+            "error" => "trigger_failed",
+            "reason" => inspect(reason)
           })
         )
     end
