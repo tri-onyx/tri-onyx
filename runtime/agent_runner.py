@@ -1596,6 +1596,15 @@ async def run_prompt(
                     duration_ms,
                 )
 
+            else:
+                # Log unhandled message types (e.g. SystemMessage from
+                # failed skill lookups) so they're visible in container logs.
+                log.warning(
+                    "Unhandled SDK message type %s: %s",
+                    type(message).__name__,
+                    getattr(message, "content", getattr(message, "message", str(message))),
+                )
+
         # Ensure a result is always emitted even if the SDK stream ends
         # without a ResultMessage (e.g. rate-limited or dropped connection).
         if not got_result:
