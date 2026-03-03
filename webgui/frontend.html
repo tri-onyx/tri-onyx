@@ -337,6 +337,7 @@ function renderMain() {
       ${!isActive
         ? '<button onclick="startAgent()">Start Session</button>'
         : '<button class="danger" onclick="stopAgent()">Stop</button>'}
+      ${isActive ? '<button onclick="testHeartbeat()" style="background:var(--yellow);color:#000">Test Heartbeat</button>' : ''}
       <button onclick="refreshAgents()" style="background:var(--border)">Refresh</button>
     </div>
     <div class="event-log" id="event-log">${renderEvents()}</div>
@@ -538,6 +539,19 @@ async function stopAgent() {
   }
   await refreshAgents();
   renderMain();
+}
+
+async function testHeartbeat() {
+  if (!state.selected) return;
+  state.events.push({ time: new Date(), type: 'text', data: { content: '> [Heartbeat triggered]' } });
+  const log = document.getElementById('event-log');
+  if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+  try {
+    await api('POST', `/heartbeats/${encodeURIComponent(state.selected)}/trigger`);
+  } catch (err) {
+    state.events.push({ time: new Date(), type: 'error', data: { message: 'Heartbeat trigger failed: ' + err.message } });
+    if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+  }
 }
 
 async function sendPrompt() {

@@ -114,6 +114,25 @@ defmodule TriOnyx.Triggers.Scheduler do
   end
 
   @doc """
+  Manually triggers a heartbeat for the given agent.
+
+  Builds the same heartbeat event as the timer path and dispatches it
+  through TriggerRouter. Skips enabled/empty checks since this is an
+  explicit manual trigger.
+  """
+  @spec trigger_heartbeat(String.t()) :: {:ok, pid()} | {:error, term()}
+  def trigger_heartbeat(agent_name) when is_binary(agent_name) do
+    event = %{
+      type: :heartbeat,
+      agent_name: agent_name,
+      payload: @heartbeat_prompt,
+      metadata: %{fired_at: DateTime.utc_now() |> DateTime.to_iso8601()}
+    }
+
+    TriggerRouter.dispatch(event)
+  end
+
+  @doc """
   Registers Quantum cron jobs for the given agent's cron schedules.
 
   Each schedule becomes a named Quantum job. Job names follow the convention
