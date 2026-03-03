@@ -547,7 +547,11 @@ async function testHeartbeat() {
   const log = document.getElementById('event-log');
   if (log) { log.innerHTML = renderEvents(); scrollLog(); }
   try {
-    await api('POST', `/heartbeats/${encodeURIComponent(state.selected)}/trigger`);
+    const resp = await api('POST', `/heartbeats/${encodeURIComponent(state.selected)}/trigger`);
+    if (resp.error) {
+      state.events.push({ time: new Date(), type: 'error', data: { message: 'Heartbeat trigger failed: ' + (resp.reason || resp.message || resp.error) } });
+      if (log) { log.innerHTML = renderEvents(); scrollLog(); }
+    }
   } catch (err) {
     state.events.push({ time: new Date(), type: 'error', data: { message: 'Heartbeat trigger failed: ' + err.message } });
     if (log) { log.innerHTML = renderEvents(); scrollLog(); }
