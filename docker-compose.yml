@@ -44,6 +44,7 @@ services:
       context: .
       dockerfile: connector.Dockerfile
     volumes:
+      - ./connector/connector:/app/connector
       - ./secrets/connector-config.yaml:/app/config.yaml:ro
       - ./secrets/matrix-store:/data
     environment:
