@@ -56,6 +56,7 @@ defmodule TriOnyx.AgentPort do
           | {:calendar_create_request, String.t(), String.t()}
           | {:calendar_update_request, String.t(), String.t()}
           | {:calendar_delete_request, String.t(), String.t(), String.t()}
+          | {:submit_article_request, String.t(), String.t(), String.t(), String.t(), String.t()}
           | {:log, String.t(), String.t()}
           | {:port_down, atom()}
 
@@ -348,6 +349,23 @@ defmodule TriOnyx.AgentPort do
          "success" => success,
          "detail" => detail,
          "event" => event
+       }}
+    )
+  end
+
+  @doc """
+  Sends a `submit_article_response` back to the runtime.
+  """
+  @spec send_submit_article_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_submit_article_response(server, request_id, success, detail \\ "") do
+    GenServer.cast(
+      server,
+      {:send,
+       %{
+         "type" => "submit_article_response",
+         "request_id" => request_id,
+         "success" => success,
+         "detail" => detail
        }}
     )
   end
@@ -692,6 +710,19 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(uid) and is_binary(calendar) ->
         {:ok, {:calendar_delete_request, req_id, uid, calendar}}
+
+      {:ok,
+       %{
+         "type" => "submit_article_request",
+         "request_id" => req_id,
+         "title" => title,
+         "url" => url,
+         "source" => source,
+         "summary" => summary
+       }}
+      when is_binary(req_id) and is_binary(title) and is_binary(url) and
+             is_binary(source) and is_binary(summary) ->
+        {:ok, {:submit_article_request, req_id, title, url, source, summary}}
 
       {:ok, %{"type" => "log", "level" => level, "message" => message}}
       when is_binary(level) and is_binary(message) ->

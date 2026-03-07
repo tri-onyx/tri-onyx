@@ -16,6 +16,7 @@ defmodule TriOnyx.ToolRegistry do
     BCPQuery BCPRespond RestartAgent Bash WebFetch WebSearch
     SendEmail MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
+    SubmitArticle
   )
 
   # Auth and capability metadata for built-in tools.
@@ -47,7 +48,8 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarQuery" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarCreate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
-    "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false}
+    "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "SubmitArticle" => %{requires_auth: false, capability_level: :low, requires_approval: false}
   }
 
   # Display metadata for the classification matrix UI.
@@ -74,7 +76,8 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "CalendarQuery",  display: "CalendarQuery",  variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarCreate", display: "CalendarCreate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarUpdate", display: "CalendarUpdate", variant: nil, group: "Calendar (CalDAV)", note: nil},
-    %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil}
+    %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil},
+    %{key: "SubmitArticle", display: "SubmitArticle", variant: nil, group: "Messaging",         note: "posts formatted article to chat"}
   ]
 
   @doc """

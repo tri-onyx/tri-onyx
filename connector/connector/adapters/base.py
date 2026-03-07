@@ -81,6 +81,24 @@ class BaseAdapter(ABC):
         """Split content into platform-appropriate chunks."""
         return chunk_message(content, max_len)
 
+    async def send_article(
+        self,
+        channel: dict[str, Any],
+        title: str,
+        url: str,
+        source: str,
+        summary: str,
+        *,
+        agent_name: str = "",
+    ) -> None:
+        """Send a formatted article to the given channel.
+
+        The default implementation formats as markdown and delegates to
+        ``send_text``.  Adapters may override for richer formatting.
+        """
+        text = f"**{title}** ({source})\n{summary}\n{url}"
+        await self.send_text(channel, text, agent_name=agent_name)
+
     async def send_step(self, channel: dict[str, Any], step: Any) -> None:
         """Send an agent step (tool use, tool result, completion) to the channel.
 

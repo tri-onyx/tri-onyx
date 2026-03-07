@@ -149,6 +149,16 @@ class ApprovalRequestMessage:
 
 
 @dataclass(slots=True)
+class ArticleMessage(OutboundMessage):
+    """An article submitted by an agent for posting to chat."""
+
+    title: str = ""
+    url: str = ""
+    source: str = ""
+    summary: str = ""
+
+
+@dataclass(slots=True)
 class ReactionMessage:
     """A reaction received from a chat platform, forwarded to the gateway."""
 
@@ -158,6 +168,7 @@ class ReactionMessage:
     agent_name: str = ""
     approval_id: str | None = None
     event_id: str = ""
+    article_url: str | None = None
     trust: dict[str, Any] = field(default_factory=lambda: {"level": "unverified"})
 
 
@@ -171,6 +182,7 @@ _OUTBOUND_TYPE_MAP: dict[str, type] = {
     "agent_result": AgentResultMessage,
     "agent_error": AgentErrorMessage,
     "agent_step": AgentStepMessage,
+    "article": ArticleMessage,
 }
 
 
