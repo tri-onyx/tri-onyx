@@ -966,6 +966,10 @@ class MatrixAdapter(BaseAdapter):
         elif not room_cfg.show_steps:
             return
 
+        # In brief mode, suppress tool_result messages (keep tool_use only)
+        if room_cfg.step_mode == "brief" and step.step_type == "tool_result":
+            return
+
         text = self._format_step(step, mode=room_cfg.step_mode)
         if not text:
             return
