@@ -518,6 +518,33 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  defp handle_agent_event({:submit_article_request, req_id, title, url, source, summary}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: submit_article_request title=#{title}"
+    )
+
+    # Validate required fields
+    if title == "" or url == "" or source == "" or summary == "" do
+      AgentPort.send_submit_article_response(
+        state.port, req_id, false, "all fields (title, url, source, summary) are required"
+      )
+    else
+      # Respond immediately — the article will be delivered asynchronously via EventBus
+      AgentPort.send_submit_article_response(state.port, req_id, true, "")
+
+      broadcast_event(state, %{
+        "type" => "article",
+        "agent_name" => state.definition.name,
+        "title" => title,
+        "url" => url,
+        "source" => source,
+        "summary" => summary
+      })
+    end
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:bcp_query_request, req_id, to, category, spec}, state) do
     Logger.info(
       "AgentSession #{state.id}: bcp_query_request to=#{to} cat=#{category} req_id=#{req_id}"

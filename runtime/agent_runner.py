@@ -61,6 +61,7 @@ from protocol import (
     CalendarCreateResponse,
     CalendarUpdateResponse,
     CalendarDeleteResponse,
+    SubmitArticleResponse,
     _INBOUND_PARSERS,
     parse_inbound,
     emit_ready,
@@ -81,6 +82,7 @@ from protocol import (
     emit_calendar_create_request,
     emit_calendar_update_request,
     emit_calendar_delete_request,
+    emit_submit_article_request,
     emit_log,
 )
 
@@ -175,6 +177,7 @@ class InboundDispatcher:
         self.calendar_create_responses: asyncio.Queue[CalendarCreateResponse] = asyncio.Queue()
         self.calendar_update_responses: asyncio.Queue[CalendarUpdateResponse] = asyncio.Queue()
         self.calendar_delete_responses: asyncio.Queue[CalendarDeleteResponse] = asyncio.Queue()
+        self.submit_article_responses: asyncio.Queue[SubmitArticleResponse] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -204,6 +207,7 @@ class InboundDispatcher:
             self.calendar_create_responses,
             self.calendar_update_responses,
             self.calendar_delete_responses,
+            self.submit_article_responses,
         ]
         for q in queues:
             while not q.empty():
@@ -298,6 +302,12 @@ class InboundDispatcher:
                     await self.calendar_delete_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse calendar_delete_response: %s", exc)
+            elif msg_type == "submit_article_response":
+                try:
+                    response = SubmitArticleResponse.from_dict(data)
+                    await self.submit_article_responses.put(response)
+                except Exception as exc:
+                    log.error("Failed to parse submit_article_response: %s", exc)
             elif msg_type == "interrupt":
                 # Route directly to interrupt_event (not control_queue) because
                 # the main loop is blocked awaiting run_prompt, not reading control.
@@ -448,6 +458,61 @@ class RestartAgentHandler:
                 return response
             # Not ours -- put it back for another consumer
             await self._dispatcher.restart_agent_responses.put(response)
+            await asyncio.sleep(0.01)
+
+
+# ---------------------------------------------------------------------------
+# SubmitArticle tool handler
+# ---------------------------------------------------------------------------
+
+_SUBMIT_ARTICLE_TIMEOUT_S = 30
+
+
+class SubmitArticleHandler:
+    """Handles the SubmitArticle virtual tool for posting articles to connectors.
+
+    When the LLM invokes SubmitArticle, this handler:
+      1. Emits a ``submit_article_request`` to stdout (picked up by the gateway)
+      2. Awaits a ``submit_article_response`` on the dispatcher's response queue
+      3. Returns an acknowledgment string to the SDK so the LLM sees the result
+    """
+
+    def __init__(self, dispatcher: InboundDispatcher) -> None:
+        self._dispatcher = dispatcher
+
+    async def handle(self, title: str, url: str, source: str, summary: str) -> str:
+        """Submit an article and wait for the gateway acknowledgment."""
+        request_id = uuid.uuid4().hex
+
+        log.info("SubmitArticle title=%r url=%s (request_id=%s)", title, url, request_id)
+        emit_submit_article_request(
+            request_id=request_id,
+            title=title,
+            url=url,
+            source=source,
+            summary=summary,
+        )
+
+        try:
+            response = await asyncio.wait_for(
+                self._wait_for_response(request_id),
+                timeout=_SUBMIT_ARTICLE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("SubmitArticle timed out (request_id=%s)", request_id)
+            return f"Error: SubmitArticle timed out after {_SUBMIT_ARTICLE_TIMEOUT_S}s"
+
+        if response.success:
+            return f"Article submitted: {title}"
+        return f"Error: {response.detail}"
+
+    async def _wait_for_response(self, request_id: str) -> SubmitArticleResponse:
+        """Poll the response queue until we get our matching response."""
+        while True:
+            response = await self._dispatcher.submit_article_responses.get()
+            if response.request_id == request_id:
+                return response
+            await self._dispatcher.submit_article_responses.put(response)
             await asyncio.sleep(0.01)
 
 
@@ -681,7 +746,7 @@ class CalendarHandler:
     following the same pattern as EmailHandler.
     """
 
-    def __init__(self, dispatcher: StdinDispatcher) -> None:
+    def __init__(self, dispatcher: InboundDispatcher) -> None:
         self._dispatcher = dispatcher
 
     async def calendar_query(self, calendar: str, from_dt: str = "", to_dt: str = "") -> str:
@@ -706,7 +771,6 @@ class CalendarHandler:
             return f"Error: CalendarQuery timed out after {_CALENDAR_OP_TIMEOUT_S}s"
 
         if response.success:
-            import json
             return json.dumps(response.events, indent=2)
         return f"Error: {response.detail}"
 
@@ -726,7 +790,6 @@ class CalendarHandler:
             return f"Error: CalendarCreate timed out after {_CALENDAR_OP_TIMEOUT_S}s"
 
         if response.success:
-            import json
             return f"Event created: {json.dumps(response.event, indent=2)}"
         return f"Error: {response.detail}"
 
@@ -746,7 +809,6 @@ class CalendarHandler:
             return f"Error: CalendarUpdate timed out after {_CALENDAR_OP_TIMEOUT_S}s"
 
         if response.success:
-            import json
             return f"Event updated: {json.dumps(response.event, indent=2)}"
         return f"Error: {response.detail}"
 
@@ -820,6 +882,10 @@ _CALENDAR_CREATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_CREATE_TOOL}"
 _CALENDAR_UPDATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_UPDATE_TOOL}"
 _CALENDAR_DELETE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_DELETE_TOOL}"
 
+# SubmitArticle tool name
+_SUBMIT_ARTICLE_TOOL = "SubmitArticle"
+_SUBMIT_ARTICLE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_ARTICLE_TOOL}"
+
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
@@ -833,6 +899,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _CALENDAR_CREATE_MCP_NAME: _CALENDAR_CREATE_TOOL,
     _CALENDAR_UPDATE_MCP_NAME: _CALENDAR_UPDATE_TOOL,
     _CALENDAR_DELETE_MCP_NAME: _CALENDAR_DELETE_TOOL,
+    _SUBMIT_ARTICLE_MCP_NAME: _SUBMIT_ARTICLE_TOOL,
 }
 
 
@@ -1393,6 +1460,71 @@ def build_calendar_delete_tool(calendar_handler: CalendarHandler) -> Any:
 
 
 # ---------------------------------------------------------------------------
+# SDK MCP tool for article submission
+# ---------------------------------------------------------------------------
+
+
+def build_submit_article_tool(article_handler: SubmitArticleHandler) -> Any:
+    """Create SubmitArticle as an in-process SDK MCP tool."""
+
+    @tool(
+        _SUBMIT_ARTICLE_TOOL,
+        "Submit a news article for posting to the chat. Each article is "
+        "posted as a separate formatted message. Users can react with "
+        "thumbs up/down to provide feedback.",
+        {
+            "type": "object",
+            "properties": {
+                "title": {
+                    "type": "string",
+                    "description": "Article headline",
+                },
+                "url": {
+                    "type": "string",
+                    "description": "URL to the full article",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "Source name (e.g. 'Hacker News', 'NRK')",
+                },
+                "summary": {
+                    "type": "string",
+                    "description": "Brief summary of the article (1-2 sentences)",
+                },
+            },
+            "required": ["title", "url", "source", "summary"],
+        },
+    )
+    async def submit_article(args: dict[str, Any]) -> dict[str, Any]:
+        title = args.get("title", "")
+        url = args.get("url", "")
+        source = args.get("source", "")
+        summary = args.get("summary", "")
+
+        if not title or not url or not source or not summary:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Error: 'title', 'url', 'source', and 'summary' are all required.",
+                    }
+                ],
+                "isError": True,
+            }
+
+        result = await article_handler.handle(
+            title=title, url=url, source=source, summary=summary,
+        )
+        is_error = result.startswith("Error:")
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": is_error,
+        }
+
+    return submit_article
+
+
+# ---------------------------------------------------------------------------
 # BCP query → prompt formatting
 # ---------------------------------------------------------------------------
 
@@ -1712,6 +1844,7 @@ async def main() -> None:
                 restart_handler = RestartAgentHandler(dispatcher)
                 bcp_handler = BCPHandler(dispatcher)
                 email_handler = EmailHandler(dispatcher)
+                article_handler = SubmitArticleHandler(dispatcher)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
                     config.name,
@@ -1737,6 +1870,7 @@ async def main() -> None:
                     _CALENDAR_CREATE_TOOL,
                     _CALENDAR_UPDATE_TOOL,
                     _CALENDAR_DELETE_TOOL,
+                    _SUBMIT_ARTICLE_TOOL,
                 }
                 sdk_tools = [
                     t for t in config.tools if t not in _custom_tools
@@ -1761,6 +1895,10 @@ async def main() -> None:
                 if _BCP_RESPOND_TOOL in config.tools:
                     interagent_tools.append(build_bcp_respond_tool(bcp_handler))
                     sdk_tools.append(_BCP_RESPOND_MCP_NAME)
+
+                if _SUBMIT_ARTICLE_TOOL in config.tools:
+                    interagent_tools.append(build_submit_article_tool(article_handler))
+                    sdk_tools.append(_SUBMIT_ARTICLE_MCP_NAME)
 
                 if interagent_tools:
                     server = create_sdk_mcp_server(

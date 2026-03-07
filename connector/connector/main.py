@@ -22,6 +22,7 @@ from connector.protocol import (
     AgentTypingMessage,
     AgentResultMessage,
     AgentErrorMessage,
+    ArticleMessage,
     ApprovalRequestMessage,
     HeartbeatNotification,
     InboundMessage,
@@ -81,7 +82,12 @@ async def _route_outbound(
         logger.warning("No adapter for platform %s", platform)
         return
 
-    if isinstance(msg, AgentTextMessage):
+    if isinstance(msg, ArticleMessage):
+        await adapter.send_article(
+            msg.channel, msg.title, msg.url, msg.source, msg.summary,
+            agent_name=msg.agent_name,
+        )
+    elif isinstance(msg, AgentTextMessage):
         await adapter.send_text(msg.channel, msg.content, agent_name=msg.agent_name)
     elif isinstance(msg, AgentResultMessage):
         # Result is a completion signal (duration_ms, cost, etc.) — not a

@@ -85,6 +85,9 @@ class MatrixAdapter(BaseAdapter):
         # Agent message tracking: matrix_event_id -> (agent_name, channel)
         self._sent_event_agents: dict[str, tuple[str, dict[str, Any]]] = {}
 
+        # Article tracking: matrix_event_id -> article URL
+        self._article_event_urls: dict[str, str] = {}
+
         # Reaction callback
         self._on_reaction: OnReactionCallback | None = None
 
@@ -817,6 +820,37 @@ class MatrixAdapter(BaseAdapter):
             if resp and agent_name:
                 self._sent_event_agents[resp.event_id] = (agent_name, channel)
 
+    async def send_article(
+        self,
+        channel: dict[str, Any],
+        title: str,
+        url: str,
+        source: str,
+        summary: str,
+        *,
+        agent_name: str = "",
+    ) -> None:
+        """Send a formatted article message and track the event for reaction feedback."""
+        assert self._client is not None
+        room_id = channel.get("room_id", "")
+        if not room_id:
+            return
+
+        markdown = f"**{title}** ({source})\n{summary}\n{url}"
+        html = self.format_message(markdown)
+
+        msg_content = {
+            "msgtype": "m.text",
+            "body": markdown,
+            "format": "org.matrix.custom.html",
+            "formatted_body": html,
+        }
+
+        resp = await self._room_send(room_id, "m.room.message", msg_content)
+        if resp and agent_name:
+            self._sent_event_agents[resp.event_id] = (agent_name, channel)
+            self._article_event_urls[resp.event_id] = url
+
     async def send_typing(self, channel: dict[str, Any], is_typing: bool) -> None:
         """Set the typing indicator."""
         assert self._client is not None
@@ -1156,12 +1190,14 @@ class MatrixAdapter(BaseAdapter):
         agent_info = self._sent_event_agents.get(target_event_id)
         if agent_info:
             agent_name, channel = agent_info
+            article_url = self._article_event_urls.get(target_event_id)
             msg = ReactionMessage(
                 emoji=emoji,
                 sender=sender,
                 channel=channel,
                 agent_name=agent_name,
                 event_id=target_event_id,
+                article_url=article_url,
                 trust=trust,
             )
             if self._on_reaction:

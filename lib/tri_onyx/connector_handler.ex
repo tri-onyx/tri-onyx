@@ -351,11 +351,24 @@ defmodule TriOnyx.ConnectorHandler do
         )
 
         trigger_type = trust_to_trigger(trust)
+        article_url = Map.get(frame, "article_url")
+
+        payload =
+          if is_binary(article_url) and article_url != "" do
+            vote = case emoji do
+              "👍" -> "up"
+              "👎" -> "down"
+              other -> other
+            end
+            Jason.encode!(%{"type" => "article_feedback", "url" => article_url, "vote" => vote})
+          else
+            "Reaction: #{emoji} from #{sender} on your message"
+          end
 
         event = %{
           type: trigger_type,
           agent_name: agent_name,
-          payload: "Reaction: #{emoji} from #{sender} on your message",
+          payload: payload,
           metadata: %{
             "source" => "connector",
             "connector_id" => state.connector_id,
@@ -628,6 +641,21 @@ defmodule TriOnyx.ConnectorHandler do
             })
 
           {:push, [{:text, typing_frame}], state}
+
+        "article" ->
+          frame =
+            Jason.encode!(%{
+              "type" => "article",
+              "agent_name" => Map.get(event, "agent_name", agent_name),
+              "session_id" => session_id,
+              "title" => Map.get(event, "title", ""),
+              "url" => Map.get(event, "url", ""),
+              "source" => Map.get(event, "source", ""),
+              "summary" => Map.get(event, "summary", ""),
+              "channel" => channel
+            })
+
+          {:push, [{:text, frame}], state}
 
         _other ->
           # Ignore events we don't map to connector frames

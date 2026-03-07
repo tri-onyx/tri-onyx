@@ -12,6 +12,7 @@ Gateway -> Runtime (stdin):
   shutdown               -- graceful shutdown request
   send_message_response  -- gateway response after routing an inter-agent message
   restart_agent_response -- gateway response after a restart_agent_request
+  submit_article_response -- gateway response after a submit_article_request
   bcp_query             -- BCP query delivered to a Reader agent
   bcp_response_delivery -- validated BCP response delivered to a Controller agent
 
@@ -26,6 +27,7 @@ Runtime -> Gateway (stdout):
   log                  -- runtime log message (level + message)
   send_message_request   -- request gateway to route a message to another agent
   restart_agent_request  -- request gateway to restart another agent
+  submit_article_request -- request gateway to post an article to the connector
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query
 """
@@ -345,6 +347,23 @@ class CalendarDeleteResponse:
         )
 
 
+@dataclass
+class SubmitArticleResponse:
+    """Response from the gateway after a submit_article_request."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitArticleResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+        )
+
+
 InboundMessage = (
     StartMessage
     | PromptMessage
@@ -362,6 +381,7 @@ InboundMessage = (
     | CalendarCreateResponse
     | CalendarUpdateResponse
     | CalendarDeleteResponse
+    | SubmitArticleResponse
 )
 
 _INBOUND_PARSERS: dict[str, type] = {
@@ -381,6 +401,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "calendar_create_response": CalendarCreateResponse,
     "calendar_update_response": CalendarUpdateResponse,
     "calendar_delete_response": CalendarDeleteResponse,
+    "submit_article_response": SubmitArticleResponse,
 }
 
 
@@ -630,4 +651,22 @@ def emit_bcp_response(
         "type": "bcp_response",
         "query_id": query_id,
         "response": response,
+    })
+
+
+def emit_submit_article_request(
+    request_id: str,
+    title: str,
+    url: str,
+    source: str,
+    summary: str,
+) -> None:
+    """Request the gateway to post an article to the connector."""
+    _emit({
+        "type": "submit_article_request",
+        "request_id": request_id,
+        "title": title,
+        "url": url,
+        "source": source,
+        "summary": summary,
     })
