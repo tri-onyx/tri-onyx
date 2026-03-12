@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-02-17
-- **Deciders:** Sondre
+- **Deciders:** Falense
 
 ## Context
 
@@ -74,7 +74,7 @@ The manifest records the review:
     "risk_level": "medium",
     "agent": "web-scraper",
     "updated_at": "2026-02-17T10:30:00Z",
-    "reviewed_by": "sondre",
+    "reviewed_by": "falense",
     "reviewed_at": "2026-02-17T11:00:00Z"
   }
 }
