@@ -95,6 +95,7 @@ cmd_open() {
     if [ ! -d "$profile_dir" ]; then
         echo "creating new profile: $profile"
         mkdir -p "$profile_dir"
+        chmod 755 "$profile_dir"
     fi
 
     # Clear stale locks so the browser can start cleanly.

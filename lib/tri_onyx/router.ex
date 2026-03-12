@@ -59,7 +59,7 @@ defmodule TriOnyx.Router do
 
   plug Plug.Logger, log: :debug
   plug :cors
-  plug Plug.Static, at: "/", from: Path.expand("../../webgui", __DIR__), only: ~w(matrix.html graph.html log-viewer.html frontend.html)
+  plug Plug.Static, at: "/", from: Path.expand("../../webgui", __DIR__), only: ~w(matrix.html graph.html log-viewer.html frontend.html v2.html)
   plug :match
   plug :fetch_raw_body
   plug :dispatch
