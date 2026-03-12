@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-02-17
-- **Deciders:** Sondre
+- **Deciders:** Falense
 
 ## Context
 

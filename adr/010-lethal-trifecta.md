@@ -2,7 +2,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-02-21
-- **Deciders:** Sondre
+- **Deciders:** Falense
 - **Supersedes:** Partially revises [ADR-001](001-information-is-the-threat.md)
 
 ## Context
