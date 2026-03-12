@@ -620,68 +620,39 @@ table.matrix-table .section-header td {
         </div>
       </div>
       <div class="graph-legend" id="graph-legend">
-        <h4>Legend</h4>
-        <div class="leg-section">
-          <div style="color:var(--muted);margin-bottom:4px;font-size:11px">Node = yin-yang split</div>
-          <div style="color:var(--muted);font-size:10px">Left = taint (integrity)</div>
-          <div style="color:var(--muted);font-size:10px;margin-bottom:4px">Right = sensitivity (confidentiality)</div>
-          <div class="leg-item"><div class="leg-dot" style="background:#3fb950"></div> Low</div>
-          <div class="leg-item"><div class="leg-dot" style="background:#db6d28"></div> Medium</div>
-          <div class="leg-item"><div class="leg-dot" style="background:#f85149"></div> High</div>
-        </div>
-        <div class="leg-section">
-          <div style="color:var(--muted);margin-bottom:4px;font-size:11px">Node size = effective risk</div>
-          <div class="leg-item"><div class="leg-dot" style="width:10px;height:10px;background:var(--muted)"></div> Low</div>
-          <div class="leg-item"><div class="leg-dot" style="width:14px;height:14px;background:var(--muted)"></div> Moderate</div>
-          <div class="leg-item"><div class="leg-dot" style="width:18px;height:18px;background:var(--muted)"></div> High</div>
-          <div class="leg-item"><div class="leg-dot" style="width:22px;height:22px;background:var(--muted)"></div> Critical</div>
-        </div>
-        <div class="leg-section">
-          <div style="color:var(--muted);margin-bottom:4px;font-size:11px">Effective risk = taint x sensitivity x capability</div>
-          <div style="color:var(--muted);font-size:10px;margin-bottom:4px">Capability modulates the 2D baseline:<br>Low cap = step down, Med = baseline, High = step up</div>
-          <table style="border-collapse:collapse;font-size:11px;width:100%;text-align:center;margin-bottom:4px">
-            <thead><tr>
-              <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg)"></th>
-              <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Low S</th>
-              <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Med S</th>
-              <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">High S</th>
-            </tr></thead>
-            <tbody>
-              <tr>
-                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Low T</th>
-                <td style="border:1px solid var(--border);padding:2px;color:#3fb950">low</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#3fb950">low</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#db6d28">mod</td>
-              </tr>
-              <tr>
-                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Med T</th>
-                <td style="border:1px solid var(--border);padding:2px;color:#3fb950">low</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#db6d28">mod</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#f85149">high</td>
-              </tr>
-              <tr>
-                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">High T</th>
-                <td style="border:1px solid var(--border);padding:2px;color:#db6d28">mod</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#f85149">high</td>
-                <td style="border:1px solid var(--border);padding:2px;color:#f85149">crit</td>
-              </tr>
-            </tbody>
-          </table>
-          <div style="color:var(--muted);font-size:9px">(Table shows medium capability baseline)</div>
-        </div>
-        <div class="leg-section">
-          <div style="color:var(--muted);margin-bottom:4px;font-size:11px">Capability levels</div>
-          <div class="leg-item"><span style="color:#3fb950;font-weight:600;min-width:50px">Low</span> Internal only (files, messages)</div>
-          <div class="leg-item"><span style="color:#db6d28;font-weight:600;min-width:50px">Medium</span> Bash (no net), email, web</div>
-          <div class="leg-item"><span style="color:#f85149;font-weight:600;min-width:50px">High</span> Bash + network access</div>
-        </div>
-        <div class="leg-section">
-          <div style="color:var(--muted);margin-bottom:4px;font-size:11px">Edges</div>
-          <div class="leg-item"><div class="leg-line" style="background:#3fb950"></div> Compliant</div>
-          <div class="leg-item"><div class="leg-line" style="background:#d29922"></div> Warning</div>
-          <div class="leg-item"><div class="leg-line" style="background:#f85149"></div> Violation</div>
-          <div class="leg-item"><div class="leg-line" style="background:#58a6ff;background-image:repeating-linear-gradient(90deg,#58a6ff 0,#58a6ff 6px,transparent 6px,transparent 10px);background-color:transparent;height:2px"></div> Messaging</div>
-          <div class="leg-item"><div class="leg-line" style="background:#bc8cff;background-image:repeating-linear-gradient(90deg,#bc8cff 0,#bc8cff 3px,transparent 3px,transparent 6px);background-color:transparent;height:2px"></div> BCP</div>
+        <h4 style="cursor:pointer" onclick="document.getElementById('graph-legend-body').style.display=document.getElementById('graph-legend-body').style.display==='none'?'':'none'">Legend <span style="font-size:10px;color:var(--muted);font-weight:400">(click to toggle)</span></h4>
+        <div id="graph-legend-body">
+          <div class="leg-section">
+            <div style="color:var(--muted);font-size:10px">Left = taint, Right = sensitivity</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#3fb950"></div> Low</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#db6d28"></div> Medium</div>
+            <div class="leg-item"><div class="leg-dot" style="background:#f85149"></div> High</div>
+          </div>
+          <div class="leg-section">
+            <div style="color:var(--muted);font-size:10px">Node size = risk</div>
+            <div class="leg-item"><div class="leg-dot" style="width:10px;height:10px;background:var(--muted)"></div> Low <div class="leg-dot" style="width:14px;height:14px;background:var(--muted);margin-left:8px"></div> Mod <div class="leg-dot" style="width:18px;height:18px;background:var(--muted);margin-left:8px"></div> High <div class="leg-dot" style="width:22px;height:22px;background:var(--muted);margin-left:8px"></div> Crit</div>
+          </div>
+          <div class="leg-section">
+            <div style="color:var(--muted);font-size:10px">Edges</div>
+            <div class="leg-item"><div class="leg-line" style="background:#3fb950"></div> Compliant <div class="leg-line" style="background:#d29922;margin-left:8px"></div> Warning <div class="leg-line" style="background:#f85149;margin-left:8px"></div> Violation</div>
+            <div class="leg-item"><div class="leg-line" style="background:#58a6ff;background-image:repeating-linear-gradient(90deg,#58a6ff 0,#58a6ff 6px,transparent 6px,transparent 10px);background-color:transparent;height:2px"></div> Messaging <div class="leg-line" style="background:#bc8cff;background-image:repeating-linear-gradient(90deg,#bc8cff 0,#bc8cff 3px,transparent 3px,transparent 6px);background-color:transparent;height:2px;margin-left:8px"></div> BCP</div>
+          </div>
+          <div class="leg-section">
+            <table style="border-collapse:collapse;font-size:10px;width:100%;text-align:center">
+              <thead><tr>
+                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg)"></th>
+                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Lo S</th>
+                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Md S</th>
+                <th style="border:1px solid var(--border);padding:2px 4px;background:var(--bg);color:var(--muted)">Hi S</th>
+              </tr></thead>
+              <tbody>
+                <tr><th style="border:1px solid var(--border);padding:2px;background:var(--bg);color:var(--muted)">Lo T</th><td style="border:1px solid var(--border);color:#3fb950">low</td><td style="border:1px solid var(--border);color:#3fb950">low</td><td style="border:1px solid var(--border);color:#db6d28">mod</td></tr>
+                <tr><th style="border:1px solid var(--border);padding:2px;background:var(--bg);color:var(--muted)">Md T</th><td style="border:1px solid var(--border);color:#3fb950">low</td><td style="border:1px solid var(--border);color:#db6d28">mod</td><td style="border:1px solid var(--border);color:#f85149">high</td></tr>
+                <tr><th style="border:1px solid var(--border);padding:2px;background:var(--bg);color:var(--muted)">Hi T</th><td style="border:1px solid var(--border);color:#db6d28">mod</td><td style="border:1px solid var(--border);color:#f85149">high</td><td style="border:1px solid var(--border);color:#f85149">crit</td></tr>
+              </tbody>
+            </table>
+            <div style="color:var(--muted);font-size:9px">Capability: low=step down, med=baseline, high=step up</div>
+          </div>
         </div>
       </div>
       <div class="graph-explainer" id="graph-explainer">
@@ -1825,11 +1796,11 @@ function updateGraphExplainer() {
   if (mode === 'biba') {
     document.getElementById('graph-explainer-title').textContent = 'Biba (integrity)';
     document.getElementById('graph-explainer-body').innerHTML = 'Flags where a low-taint agent reads data from a higher-taint source. The concern is integrity contamination: a clean agent ingesting potentially poisoned data that may contain prompt injection.';
-    panel.style.display = '';
+    panel.style.display = 'block';
   } else if (mode === 'blp') {
     document.getElementById('graph-explainer-title').textContent = 'Bell-LaPadula (confidentiality)';
     document.getElementById('graph-explainer-body').innerHTML = 'Flags where an agent with high sensitivity writes to a location readable by a lower-sensitivity, network-capable agent. The concern is data exfiltration: sensitive response data reaching an agent that can send it outside the system.';
-    panel.style.display = '';
+    panel.style.display = 'block';
   } else { panel.style.display = 'none'; }
 }
 
