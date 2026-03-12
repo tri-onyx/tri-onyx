@@ -518,28 +518,26 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
-  defp handle_agent_event({:submit_article_request, req_id, title, url, source, summary}, state) do
+  defp handle_agent_event({:submit_item_request, req_id, item_type, title, url, metadata}, state) do
     Logger.info(
-      "AgentSession #{state.id}: submit_article_request title=#{title}"
+      "AgentSession #{state.id}: submit_item_request type=#{item_type} title=#{title}"
     )
 
     # Validate required fields
-    if title == "" or url == "" or source == "" or summary == "" do
-      AgentPort.send_submit_article_response(
-        state.port, req_id, false, "all fields (title, url, source, summary) are required"
+    if item_type == "" or title == "" or url == "" do
+      AgentPort.send_submit_item_response(
+        state.port, req_id, false, "type, title, and url are required"
       )
     else
-      # Respond immediately — the article will be delivered asynchronously via EventBus
-      AgentPort.send_submit_article_response(state.port, req_id, true, "")
+      # Respond immediately — the item will be delivered asynchronously via EventBus
+      AgentPort.send_submit_item_response(state.port, req_id, true, "")
 
-      broadcast_event(state, %{
-        "type" => "article",
+      broadcast_event(state, Map.merge(%{
+        "type" => item_type,
         "agent_name" => state.definition.name,
         "title" => title,
-        "url" => url,
-        "source" => source,
-        "summary" => summary
-      })
+        "url" => url
+      }, metadata))
     end
 
     {:noreply, state}

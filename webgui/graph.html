@@ -781,7 +781,7 @@ function renderGraph() {
       if (d.type === 'bcp') {
         const bcpHtml = `
           <h3>${src} \u2192 ${tgt} (BCP)</h3>
-          <div class="row"><span class="label">Channel:</span><span>Bandwidth-Constrained Trust Protocol</span></div>
+          <div class="row"><span class="label">Channel:</span><span>Bandwidth-Constrained Protocol</span></div>
           <div class="row"><span class="label">Max category:</span><span class="badge low">Cat-${d.maxCategory || '?'}</span></div>
           <div class="row"><span class="label">Budget:</span><span>${d.budgetBits || '?'} bits/session</span></div>
           <div class="row"><span class="label">Taint effect:</span><span class="badge low">none (taint-neutral)</span></div>

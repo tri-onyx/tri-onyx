@@ -20,7 +20,7 @@ TriOnyx needs a mechanism that allows information to flow from tainted agents to
 
 ## Decision
 
-Adopt the **Bandwidth-Constrained Trust Protocol (BCP)**: a communication protocol between tainted and untainted agents where security is achieved by restricting the bandwidth — measured in bits — of the channel through which tainted output reaches a clean agent. The untainted agent controls the dialogue structure, the tainted agent can only respond within constraints it did not choose, and every response is validated by deterministic code before the untainted agent processes it.
+Adopt the **Bandwidth-Constrained Protocol (BCP)**: a communication protocol between tainted and untainted agents where security is achieved by restricting the bandwidth — measured in bits — of the channel through which tainted output reaches a clean agent. The untainted agent controls the dialogue structure, the tainted agent can only respond within constraints it did not choose, and every response is validated by deterministic code before the untainted agent processes it.
 
 ## Rationale
 

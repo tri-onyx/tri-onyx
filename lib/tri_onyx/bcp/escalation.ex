@@ -1,6 +1,6 @@
 defmodule TriOnyx.BCP.Escalation do
   @moduledoc """
-  Per-channel escalation state tracking for the Bandwidth-Constrained Trust Protocol.
+  Per-channel escalation state tracking for the Bandwidth-Constrained Protocol.
 
   Tracks how many times a communication channel has been escalated to a higher
   query category. Each channel has a configurable maximum number of escalations

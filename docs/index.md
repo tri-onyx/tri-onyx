@@ -64,6 +64,6 @@ Both axes are **monotonic** — they can only increase during a session. When ef
 - [Agent Runtime](agent-runtime.md) — Agent execution lifecycle
 - [Protocol](protocol.md) — Gateway-runtime JSON Lines protocol
 - [FUSE Driver](fuse-driver-spec.md) — FUSE driver specification
-- [BCP](bcp.md) — Bandwidth-Constrained Trust Protocol
+- [BCP](bcp.md) — Bandwidth-Constrained Protocol
 - [Matrix Setup](matrix-guide.md) — Matrix chat integration
 - [E2E Testing](e2e-testing.md) — End-to-end testing guide

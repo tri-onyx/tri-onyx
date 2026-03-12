@@ -2,7 +2,7 @@ defmodule TriOnyx.Integration.BCPTaintTest do
   @moduledoc """
   Integration tests for BCP taint-neutral delivery.
 
-  Verifies the core security property of the Bandwidth-Constrained Trust
+  Verifies the core security property of the Bandwidth-Constrained
   Protocol: BCP responses are always classified as low taint regardless of
   sender taint level, while free-text inter-agent messages propagate the
   sender's taint without step-down.

@@ -1,6 +1,6 @@
 defmodule TriOnyx.BCP.Query do
   @moduledoc """
-  Structured query definition for the Bandwidth-Constrained Trust Protocol.
+  Structured query definition for the Bandwidth-Constrained Protocol.
 
   A query defines the exact shape of information a controller agent may extract
   from a reader agent. Queries are categorized into three tiers of increasing

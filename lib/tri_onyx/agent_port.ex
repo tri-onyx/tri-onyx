@@ -56,7 +56,7 @@ defmodule TriOnyx.AgentPort do
           | {:calendar_create_request, String.t(), String.t()}
           | {:calendar_update_request, String.t(), String.t()}
           | {:calendar_delete_request, String.t(), String.t(), String.t()}
-          | {:submit_article_request, String.t(), String.t(), String.t(), String.t(), String.t()}
+          | {:submit_item_request, String.t(), String.t(), String.t(), String.t(), map()}
           | {:log, String.t(), String.t()}
           | {:port_down, atom()}
 
@@ -354,15 +354,15 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
-  Sends a `submit_article_response` back to the runtime.
+  Sends a `submit_item_response` back to the runtime.
   """
-  @spec send_submit_article_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
-  def send_submit_article_response(server, request_id, success, detail \\ "") do
+  @spec send_submit_item_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_submit_item_response(server, request_id, success, detail \\ "") do
     GenServer.cast(
       server,
       {:send,
        %{
-         "type" => "submit_article_response",
+         "type" => "submit_item_response",
          "request_id" => request_id,
          "success" => success,
          "detail" => detail
@@ -713,16 +713,16 @@ defmodule TriOnyx.AgentPort do
 
       {:ok,
        %{
-         "type" => "submit_article_request",
+         "type" => "submit_item_request",
          "request_id" => req_id,
+         "item_type" => item_type,
          "title" => title,
-         "url" => url,
-         "source" => source,
-         "summary" => summary
-       }}
-      when is_binary(req_id) and is_binary(title) and is_binary(url) and
-             is_binary(source) and is_binary(summary) ->
-        {:ok, {:submit_article_request, req_id, title, url, source, summary}}
+         "url" => url
+       } = payload}
+      when is_binary(req_id) and is_binary(item_type) and is_binary(title) and
+             is_binary(url) ->
+        metadata = Map.get(payload, "metadata", %{})
+        {:ok, {:submit_item_request, req_id, item_type, title, url, metadata}}
 
       {:ok, %{"type" => "log", "level" => level, "message" => message}}
       when is_binary(level) and is_binary(message) ->

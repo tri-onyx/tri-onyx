@@ -61,7 +61,7 @@ from protocol import (
     CalendarCreateResponse,
     CalendarUpdateResponse,
     CalendarDeleteResponse,
-    SubmitArticleResponse,
+    SubmitItemResponse,
     _INBOUND_PARSERS,
     parse_inbound,
     emit_ready,
@@ -82,7 +82,7 @@ from protocol import (
     emit_calendar_create_request,
     emit_calendar_update_request,
     emit_calendar_delete_request,
-    emit_submit_article_request,
+    emit_submit_item_request,
     emit_log,
 )
 
@@ -177,7 +177,7 @@ class InboundDispatcher:
         self.calendar_create_responses: asyncio.Queue[CalendarCreateResponse] = asyncio.Queue()
         self.calendar_update_responses: asyncio.Queue[CalendarUpdateResponse] = asyncio.Queue()
         self.calendar_delete_responses: asyncio.Queue[CalendarDeleteResponse] = asyncio.Queue()
-        self.submit_article_responses: asyncio.Queue[SubmitArticleResponse] = asyncio.Queue()
+        self.submit_item_responses: asyncio.Queue[SubmitItemResponse] = asyncio.Queue()
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -207,7 +207,7 @@ class InboundDispatcher:
             self.calendar_create_responses,
             self.calendar_update_responses,
             self.calendar_delete_responses,
-            self.submit_article_responses,
+            self.submit_item_responses,
         ]
         for q in queues:
             while not q.empty():
@@ -302,12 +302,12 @@ class InboundDispatcher:
                     await self.calendar_delete_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse calendar_delete_response: %s", exc)
-            elif msg_type == "submit_article_response":
+            elif msg_type == "submit_item_response":
                 try:
-                    response = SubmitArticleResponse.from_dict(data)
-                    await self.submit_article_responses.put(response)
+                    response = SubmitItemResponse.from_dict(data)
+                    await self.submit_item_responses.put(response)
                 except Exception as exc:
-                    log.error("Failed to parse submit_article_response: %s", exc)
+                    log.error("Failed to parse submit_item_response: %s", exc)
             elif msg_type == "interrupt":
                 # Route directly to interrupt_event (not control_queue) because
                 # the main loop is blocked awaiting run_prompt, not reading control.
@@ -462,57 +462,57 @@ class RestartAgentHandler:
 
 
 # ---------------------------------------------------------------------------
-# SubmitArticle tool handler
+# SubmitItem tool handler
 # ---------------------------------------------------------------------------
 
-_SUBMIT_ARTICLE_TIMEOUT_S = 30
+_SUBMIT_ITEM_TIMEOUT_S = 30
 
 
-class SubmitArticleHandler:
-    """Handles the SubmitArticle virtual tool for posting articles to connectors.
+class SubmitItemHandler:
+    """Handles the SubmitItem virtual tool for posting items to connectors.
 
-    When the LLM invokes SubmitArticle, this handler:
-      1. Emits a ``submit_article_request`` to stdout (picked up by the gateway)
-      2. Awaits a ``submit_article_response`` on the dispatcher's response queue
+    When the LLM invokes SubmitItem, this handler:
+      1. Emits a ``submit_item_request`` to stdout (picked up by the gateway)
+      2. Awaits a ``submit_item_response`` on the dispatcher's response queue
       3. Returns an acknowledgment string to the SDK so the LLM sees the result
     """
 
     def __init__(self, dispatcher: InboundDispatcher) -> None:
         self._dispatcher = dispatcher
 
-    async def handle(self, title: str, url: str, source: str, summary: str) -> str:
-        """Submit an article and wait for the gateway acknowledgment."""
+    async def handle(self, item_type: str, title: str, url: str, metadata: dict[str, str]) -> str:
+        """Submit an item and wait for the gateway acknowledgment."""
         request_id = uuid.uuid4().hex
 
-        log.info("SubmitArticle title=%r url=%s (request_id=%s)", title, url, request_id)
-        emit_submit_article_request(
+        log.info("SubmitItem type=%r title=%r url=%s (request_id=%s)", item_type, title, url, request_id)
+        emit_submit_item_request(
             request_id=request_id,
+            item_type=item_type,
             title=title,
             url=url,
-            source=source,
-            summary=summary,
+            metadata=metadata,
         )
 
         try:
             response = await asyncio.wait_for(
                 self._wait_for_response(request_id),
-                timeout=_SUBMIT_ARTICLE_TIMEOUT_S,
+                timeout=_SUBMIT_ITEM_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
-            log.error("SubmitArticle timed out (request_id=%s)", request_id)
-            return f"Error: SubmitArticle timed out after {_SUBMIT_ARTICLE_TIMEOUT_S}s"
+            log.error("SubmitItem timed out (request_id=%s)", request_id)
+            return f"Error: SubmitItem timed out after {_SUBMIT_ITEM_TIMEOUT_S}s"
 
         if response.success:
-            return f"Article submitted: {title}"
+            return f"Item submitted: {title}"
         return f"Error: {response.detail}"
 
-    async def _wait_for_response(self, request_id: str) -> SubmitArticleResponse:
+    async def _wait_for_response(self, request_id: str) -> SubmitItemResponse:
         """Poll the response queue until we get our matching response."""
         while True:
-            response = await self._dispatcher.submit_article_responses.get()
+            response = await self._dispatcher.submit_item_responses.get()
             if response.request_id == request_id:
                 return response
-            await self._dispatcher.submit_article_responses.put(response)
+            await self._dispatcher.submit_item_responses.put(response)
             await asyncio.sleep(0.01)
 
 
@@ -527,7 +527,7 @@ _BCP_RESPONSE_TIMEOUT_S = 330
 
 
 class BCPHandler:
-    """Handles BCP query/response tools for bandwidth-constrained trust protocol.
+    """Handles BCP query/response tools for bandwidth-constrained protocol.
 
     Controllers use ``send_query`` to request information from Reader agents.
     Readers use ``respond_to_query`` to answer incoming queries.  The gateway
@@ -882,9 +882,9 @@ _CALENDAR_CREATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_CREATE_TOOL}"
 _CALENDAR_UPDATE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_UPDATE_TOOL}"
 _CALENDAR_DELETE_MCP_NAME = f"mcp__{_CALENDAR_SERVER}__{_CALENDAR_DELETE_TOOL}"
 
-# SubmitArticle tool name
-_SUBMIT_ARTICLE_TOOL = "SubmitArticle"
-_SUBMIT_ARTICLE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_ARTICLE_TOOL}"
+# SubmitItem tool name
+_SUBMIT_ITEM_TOOL = "SubmitItem"
+_SUBMIT_ITEM_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_ITEM_TOOL}"
 
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
@@ -899,7 +899,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _CALENDAR_CREATE_MCP_NAME: _CALENDAR_CREATE_TOOL,
     _CALENDAR_UPDATE_MCP_NAME: _CALENDAR_UPDATE_TOOL,
     _CALENDAR_DELETE_MCP_NAME: _CALENDAR_DELETE_TOOL,
-    _SUBMIT_ARTICLE_MCP_NAME: _SUBMIT_ARTICLE_TOOL,
+    _SUBMIT_ITEM_MCP_NAME: _SUBMIT_ITEM_TOOL,
 }
 
 
@@ -1460,60 +1460,70 @@ def build_calendar_delete_tool(calendar_handler: CalendarHandler) -> Any:
 
 
 # ---------------------------------------------------------------------------
-# SDK MCP tool for article submission
+# SDK MCP tool for item submission
 # ---------------------------------------------------------------------------
 
 
-def build_submit_article_tool(article_handler: SubmitArticleHandler) -> Any:
-    """Create SubmitArticle as an in-process SDK MCP tool."""
+def build_submit_item_tool(item_handler: SubmitItemHandler) -> Any:
+    """Create SubmitItem as an in-process SDK MCP tool."""
 
     @tool(
-        _SUBMIT_ARTICLE_TOOL,
-        "Submit a news article for posting to the chat. Each article is "
-        "posted as a separate formatted message. Users can react with "
-        "thumbs up/down to provide feedback.",
+        _SUBMIT_ITEM_TOOL,
+        "Submit an item for posting to the chat. Each item is posted as a "
+        "separate formatted message. Users can react with thumbs up/down to "
+        "provide feedback. Set 'type' to indicate the kind of item:\n"
+        "- 'article': a news article (include 'source' and 'summary' in metadata)\n"
+        "- 'listing': a for-sale listing (include 'price' and 'location' in metadata)",
         {
             "type": "object",
             "properties": {
+                "type": {
+                    "type": "string",
+                    "description": "Item type: 'article' or 'listing'",
+                },
                 "title": {
                     "type": "string",
-                    "description": "Article headline",
+                    "description": "Item title or headline",
                 },
                 "url": {
                     "type": "string",
-                    "description": "URL to the full article",
+                    "description": "URL to the full item",
                 },
-                "source": {
-                    "type": "string",
-                    "description": "Source name (e.g. 'Hacker News', 'NRK')",
-                },
-                "summary": {
-                    "type": "string",
-                    "description": "Brief summary of the article (1-2 sentences)",
+                "metadata": {
+                    "type": "object",
+                    "description": (
+                        "Type-specific fields. "
+                        "For articles: {source, summary}. "
+                        "For listings: {price, location}."
+                    ),
+                    "additionalProperties": {"type": "string"},
                 },
             },
-            "required": ["title", "url", "source", "summary"],
+            "required": ["type", "title", "url"],
         },
     )
-    async def submit_article(args: dict[str, Any]) -> dict[str, Any]:
+    async def submit_item(args: dict[str, Any]) -> dict[str, Any]:
+        item_type = args.get("type", "")
         title = args.get("title", "")
         url = args.get("url", "")
-        source = args.get("source", "")
-        summary = args.get("summary", "")
+        metadata = args.get("metadata") or {}
 
-        if not title or not url or not source or not summary:
+        if not item_type or not title or not url:
             return {
                 "content": [
                     {
                         "type": "text",
-                        "text": "Error: 'title', 'url', 'source', and 'summary' are all required.",
+                        "text": "Error: 'type', 'title', and 'url' are all required.",
                     }
                 ],
                 "isError": True,
             }
 
-        result = await article_handler.handle(
-            title=title, url=url, source=source, summary=summary,
+        # Ensure metadata values are strings
+        metadata = {k: str(v) for k, v in metadata.items()}
+
+        result = await item_handler.handle(
+            item_type=item_type, title=title, url=url, metadata=metadata,
         )
         is_error = result.startswith("Error:")
         return {
@@ -1521,7 +1531,7 @@ def build_submit_article_tool(article_handler: SubmitArticleHandler) -> Any:
             "isError": is_error,
         }
 
-    return submit_article
+    return submit_item
 
 
 # ---------------------------------------------------------------------------
@@ -1844,7 +1854,7 @@ async def main() -> None:
                 restart_handler = RestartAgentHandler(dispatcher)
                 bcp_handler = BCPHandler(dispatcher)
                 email_handler = EmailHandler(dispatcher)
-                article_handler = SubmitArticleHandler(dispatcher)
+                item_handler = SubmitItemHandler(dispatcher)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
                     config.name,
@@ -1870,7 +1880,7 @@ async def main() -> None:
                     _CALENDAR_CREATE_TOOL,
                     _CALENDAR_UPDATE_TOOL,
                     _CALENDAR_DELETE_TOOL,
-                    _SUBMIT_ARTICLE_TOOL,
+                    _SUBMIT_ITEM_TOOL,
                 }
                 sdk_tools = [
                     t for t in config.tools if t not in _custom_tools
@@ -1896,9 +1906,9 @@ async def main() -> None:
                     interagent_tools.append(build_bcp_respond_tool(bcp_handler))
                     sdk_tools.append(_BCP_RESPOND_MCP_NAME)
 
-                if _SUBMIT_ARTICLE_TOOL in config.tools:
-                    interagent_tools.append(build_submit_article_tool(article_handler))
-                    sdk_tools.append(_SUBMIT_ARTICLE_MCP_NAME)
+                if _SUBMIT_ITEM_TOOL in config.tools:
+                    interagent_tools.append(build_submit_item_tool(item_handler))
+                    sdk_tools.append(_SUBMIT_ITEM_MCP_NAME)
 
                 if interagent_tools:
                     server = create_sdk_mcp_server(
