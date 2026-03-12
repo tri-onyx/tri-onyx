@@ -99,6 +99,30 @@ class BaseAdapter(ABC):
         text = f"**{title}** ({source})\n{summary}\n{url}"
         await self.send_text(channel, text, agent_name=agent_name)
 
+    async def send_listing(
+        self,
+        channel: dict[str, Any],
+        title: str,
+        url: str,
+        price: str,
+        location: str,
+        *,
+        agent_name: str = "",
+    ) -> None:
+        """Send a formatted for-sale listing to the given channel.
+
+        The default implementation formats as markdown and delegates to
+        ``send_text``.  Adapters may override for richer formatting.
+        """
+        parts = [f"**{title}**"]
+        if price:
+            parts.append(f"💰 {price}")
+        if location:
+            parts.append(f"📍 {location}")
+        parts.append(url)
+        text = "\n".join(parts)
+        await self.send_text(channel, text, agent_name=agent_name)
+
     async def send_step(self, channel: dict[str, Any], step: Any) -> None:
         """Send an agent step (tool use, tool result, completion) to the channel.
 
