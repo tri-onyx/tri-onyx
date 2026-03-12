@@ -1,8 +1,46 @@
 site_name: TriOnyx
+site_description: Security-first agent runtime with information flow control
+repo_url: https://github.com/tri-onyx/tri-onyx
+repo_name: tri-onyx/tri-onyx
+
 theme:
   name: material
+  palette:
+    - scheme: default
+      primary: teal
+      accent: deep orange
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: teal
+      accent: deep orange
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  icon:
+    repo: fontawesome/brands/github
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - toc:
+      permalink: true
+  - tables
+
 nav:
-  - Home: index.md
+  - Home:
+      - Overview: index.md
+      - Comparison: comparison.md
   - Architecture:
       - Agent Runtime: agent-runtime.md
       - Protocol: protocol.md
@@ -12,6 +50,9 @@ nav:
       - Matrix Setup: matrix-guide.md
       - Email Setup: email-setup.md
       - Email OAuth2: email-outlook-oauth2.md
+      - Browser Sessions: browser-sessions.md
+      - Plugins: plugins.md
       - Webhook Receiver: webhook-receiver-design.md
   - Development:
       - E2E Testing: e2e-testing.md
+      - Architecture Decisions: decisions.md
