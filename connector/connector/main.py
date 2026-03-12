@@ -23,6 +23,7 @@ from connector.protocol import (
     AgentResultMessage,
     AgentErrorMessage,
     ArticleMessage,
+    ListingMessage,
     ApprovalRequestMessage,
     HeartbeatNotification,
     InboundMessage,
@@ -85,6 +86,11 @@ async def _route_outbound(
     if isinstance(msg, ArticleMessage):
         await adapter.send_article(
             msg.channel, msg.title, msg.url, msg.source, msg.summary,
+            agent_name=msg.agent_name,
+        )
+    elif isinstance(msg, ListingMessage):
+        await adapter.send_listing(
+            msg.channel, msg.title, msg.url, msg.price, msg.location,
             agent_name=msg.agent_name,
         )
     elif isinstance(msg, AgentTextMessage):
