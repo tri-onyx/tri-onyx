@@ -7,8 +7,8 @@ theme:
   name: material
   palette:
     scheme: slate
-    primary: teal
-    accent: deep orange
+    primary: black
+    accent: teal
   icon:
     repo: fontawesome/brands/github
   features:
