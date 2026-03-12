@@ -32,6 +32,7 @@ defmodule TriOnyx.Sandbox do
   alias TriOnyx.AgentDefinition
 
   @agent_image "tri-onyx-agent:latest"
+  @runtime_dir "runtime"
 
   @doc """
   Builds a list of Docker CLI arguments for `docker run` from an agent
@@ -196,7 +197,26 @@ defmodule TriOnyx.Sandbox do
 
   @spec volume_flags(String.t()) :: [String.t()]
   defp volume_flags(workspace_dir) do
-    ["-v", "#{workspace_dir}:/mnt/host:rw"]
+    [
+      "-v", "#{workspace_dir}:/mnt/host:rw",
+      "-v", "#{runtime_host_path()}:/opt/tri_onyx:ro"
+    ]
+  end
+
+  defp runtime_host_path do
+    # The gateway runs inside a container where the host repo is mounted at
+    # /app. Docker bind mounts are resolved on the host, so translate
+    # the container path to its host equivalent when TRI_ONYX_HOST_ROOT is set.
+    container_path = Path.expand(@runtime_dir)
+
+    case System.get_env("TRI_ONYX_HOST_ROOT") do
+      nil -> container_path
+      host_root ->
+        case String.trim_trailing(container_path, "/") do
+          "/app" <> rest -> Path.join(host_root, rest)
+          _ -> container_path
+        end
+    end
   end
 
   @spec browser_flags(AgentDefinition.t(), String.t()) :: [String.t()]
