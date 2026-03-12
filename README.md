@@ -265,7 +265,7 @@ workspace/agent-definitions/   Agent definitions (markdown + YAML frontmatter)
 ### Security model
 
 - [Security Model](adr/SECURITY_MODEL.md) — Two-axis risk model, enforcement layers, violation detection
-- [Bandwidth-Constrained Trust Protocol](docs/bcp.md) — How tainted agents communicate with clean agents safely
+- [Bandwidth-Constrained Protocol](docs/bcp.md) — How tainted agents communicate with clean agents safely
 
 ### Architecture
 

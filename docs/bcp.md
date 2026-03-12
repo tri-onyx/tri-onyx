@@ -1,4 +1,4 @@
-# Bandwidth-Constrained Trust Protocol (BCP)
+# Bandwidth-Constrained Protocol (BCP)
 
 Protocol specification for secure communication between tainted and untainted agents in TriOnyx.
 

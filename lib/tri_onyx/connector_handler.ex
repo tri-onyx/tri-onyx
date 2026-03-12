@@ -351,16 +351,17 @@ defmodule TriOnyx.ConnectorHandler do
         )
 
         trigger_type = trust_to_trigger(trust)
-        article_url = Map.get(frame, "article_url")
+        item_url = Map.get(frame, "item_url") || Map.get(frame, "article_url")
+        item_type = Map.get(frame, "item_type", "article")
 
         payload =
-          if is_binary(article_url) and article_url != "" do
+          if is_binary(item_url) and item_url != "" do
             vote = case emoji do
               "👍" -> "up"
               "👎" -> "down"
               other -> other
             end
-            Jason.encode!(%{"type" => "article_feedback", "url" => article_url, "vote" => vote})
+            Jason.encode!(%{"type" => "item_feedback", "item_type" => item_type, "url" => item_url, "vote" => vote})
           else
             "Reaction: #{emoji} from #{sender} on your message"
           end
@@ -652,6 +653,21 @@ defmodule TriOnyx.ConnectorHandler do
               "url" => Map.get(event, "url", ""),
               "source" => Map.get(event, "source", ""),
               "summary" => Map.get(event, "summary", ""),
+              "channel" => channel
+            })
+
+          {:push, [{:text, frame}], state}
+
+        "listing" ->
+          frame =
+            Jason.encode!(%{
+              "type" => "listing",
+              "agent_name" => Map.get(event, "agent_name", agent_name),
+              "session_id" => session_id,
+              "title" => Map.get(event, "title", ""),
+              "url" => Map.get(event, "url", ""),
+              "price" => Map.get(event, "price", ""),
+              "location" => Map.get(event, "location", ""),
               "channel" => channel
             })
 
