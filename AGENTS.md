@@ -56,11 +56,12 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 ## Container Rebuilds
 
 - **Always rebuild containers after making changes** that affect baked-in artifacts
-- The agent image (`tri-onyx-agent`) bakes in the FUSE binary **and the entire `runtime/` directory** (including `agent_runner.py` and `protocol.py`). Changes to any Python file under `runtime/` require rebuilding the agent image with `--no-cache`. **Remember to recompile the FUSE binary first if Go code changed** (see FUSE Driver section above):
+- The agent image (`tri-onyx-agent`) bakes in the FUSE binary. The `runtime/` directory (including `agent_runner.py`, `protocol.py`, `entrypoint.sh`) is bind-mounted read-only at `/opt/tri_onyx`, so **Python/runtime changes take effect on next container start without rebuilding**. Only rebuild the agent image if `agent.Dockerfile` changes or Go code changes. **Remember to recompile the FUSE binary first if Go code changed** (see FUSE Driver section above):
   `docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .`
 - The gateway image (`tri-onyx-gateway`) mounts Elixir source at runtime, so it only needs rebuilding if `gateway.Dockerfile` itself changes:
   `docker build -t tri-onyx-gateway:latest -f gateway.Dockerfile .`
 - After rebuilding, restart any running containers to pick up the new image
+- For runtime-only changes (Python files under `runtime/`), just restart the agent container — no rebuild needed
 
 ## Screenshot Tool
 
