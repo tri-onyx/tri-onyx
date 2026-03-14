@@ -203,9 +203,21 @@ async def _route_heartbeat(
     adapters: dict[str, Any],
     msg: HeartbeatNotification,
 ) -> None:
-    """Route a heartbeat notification to the room configured for the agent."""
+    """Route a heartbeat notification to the room configured for the agent.
+
+    Checks ``heartbeat_rooms`` first, then falls back to the room where
+    the agent is configured in ``rooms``.
+    """
     for adapter_name, adapter in adapters.items():
         room_id = adapter._config.heartbeat_rooms.get(msg.agent_name)
+
+        # Fallback: find the room where this agent is configured
+        if not room_id:
+            for rid, room_cfg in adapter._config.rooms.items():
+                if room_cfg.agent == msg.agent_name:
+                    room_id = rid
+                    break
+
         if room_id:
             channel = {"platform": adapter_name, "room_id": room_id}
             logger.info(

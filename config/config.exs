@@ -12,7 +12,7 @@ config :tri_onyx, TriOnyx.Triggers.CronScheduler,
 
 # Logger configuration
 config :logger, :console,
-  format: "$time $metadata[$level] $message\n",
+  format: "$date $time $metadata[$level] $message\n",
   metadata: [:request_id, :agent_name, :session_id]
 
 # Import environment specific config
