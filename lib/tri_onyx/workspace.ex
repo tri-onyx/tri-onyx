@@ -141,50 +141,64 @@ defmodule TriOnyx.Workspace do
     dir = workspace_dir()
     safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
 
-    # Stage the modified files
-    add_args = safe ++ ["add", "--" | modified_paths]
+    # Filter out paths that no longer exist on disk (files created then
+    # deleted during the session, e.g. incoming articles that were reviewed
+    # and discarded). git add fails with exit 128 if any pathspec doesn't
+    # match, aborting the entire add and leaving all files uncommitted.
+    existing_paths =
+      Enum.filter(modified_paths, fn path ->
+        full = Path.join(dir, path)
+        File.exists?(full) or File.dir?(full)
+      end)
 
-    case System.cmd("git", add_args, cd: dir, stderr_to_stdout: true) do
-      {_, 0} ->
-        # Check if there are actual staged changes
-        case System.cmd("git", safe ++ ["diff", "--cached", "--quiet"], cd: dir, stderr_to_stdout: true) do
-          {_, 0} ->
-            Logger.debug("Workspace: no changes to commit for #{agent_name}/#{session_id}")
-            {:ok, :no_changes}
+    if existing_paths == [] do
+      Logger.debug("Workspace: no existing files to commit for #{agent_name}/#{session_id}")
+      {:ok, :no_changes}
+    else
+      add_args = safe ++ ["add", "--" | existing_paths]
 
-          {_, 1} ->
-            # There are staged changes — commit them
-            commit_msg = build_commit_message(agent_name, session_id, taint_level, sensitivity_level)
-            author = "#{agent_name} <#{agent_name}@tri_onyx>"
+      case System.cmd("git", add_args, cd: dir, stderr_to_stdout: true) do
+        {_, 0} ->
+          # Check if there are actual staged changes
+          case System.cmd("git", safe ++ ["diff", "--cached", "--quiet"], cd: dir, stderr_to_stdout: true) do
+            {_, 0} ->
+              Logger.debug("Workspace: no changes to commit for #{agent_name}/#{session_id}")
+              {:ok, :no_changes}
 
-            case System.cmd(
-                   "git",
-                   safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
-                   cd: dir,
-                   stderr_to_stdout: true,
-                   env: committer_env()
-                 ) do
-              {_, 0} ->
-                {hash, 0} =
-                  System.cmd("git", safe ++ ["rev-parse", "--short", "HEAD"], cd: dir, stderr_to_stdout: true)
+            {_, 1} ->
+              # There are staged changes — commit them
+              commit_msg = build_commit_message(agent_name, session_id, taint_level, sensitivity_level)
+              author = "#{agent_name} <#{agent_name}@tri_onyx>"
 
-                hash = String.trim(hash)
-                Logger.info("Workspace: committed #{hash} for #{agent_name}/#{session_id}")
-                {:ok, hash}
+              case System.cmd(
+                     "git",
+                     safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
+                     cd: dir,
+                     stderr_to_stdout: true,
+                     env: committer_env()
+                   ) do
+                {_, 0} ->
+                  {hash, 0} =
+                    System.cmd("git", safe ++ ["rev-parse", "--short", "HEAD"], cd: dir, stderr_to_stdout: true)
 
-              {output, _} ->
-                Logger.error("Workspace: git commit failed: #{output}")
-                {:error, {:commit_failed, output}}
-            end
+                  hash = String.trim(hash)
+                  Logger.info("Workspace: committed #{hash} for #{agent_name}/#{session_id}")
+                  {:ok, hash}
 
-          {output, code} ->
-            Logger.error("Workspace: git diff --cached failed (exit #{code}): #{output}")
-            {:error, {:diff_failed, output}}
-        end
+                {output, _} ->
+                  Logger.error("Workspace: git commit failed: #{output}")
+                  {:error, {:commit_failed, output}}
+              end
 
-      {output, _} ->
-        Logger.error("Workspace: git add failed: #{output}")
-        {:error, {:add_failed, output}}
+            {output, code} ->
+              Logger.error("Workspace: git diff --cached failed (exit #{code}): #{output}")
+              {:error, {:diff_failed, output}}
+          end
+
+        {output, _} ->
+          Logger.error("Workspace: git add failed: #{output}")
+          {:error, {:add_failed, output}}
+      end
     end
   end
 
