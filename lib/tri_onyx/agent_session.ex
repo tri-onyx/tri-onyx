@@ -48,7 +48,8 @@ defmodule TriOnyx.AgentSession do
           last_text: String.t() | nil,
           shutdown_reason: String.t() | nil,
           memory_save_timer: reference() | nil,
-          interrupt_prompt: {String.t(), map()} | nil
+          interrupt_prompt: {String.t(), map()} | nil,
+          session_key: String.t() | nil
         }
 
   @type start_opt ::
@@ -56,6 +57,7 @@ defmodule TriOnyx.AgentSession do
           | {:trigger_type, atom()}
           | {:id, String.t()}
           | {:name, GenServer.name()}
+          | {:session_key, String.t()}
 
   # --- Public API ---
 
@@ -141,6 +143,7 @@ defmodule TriOnyx.AgentSession do
     definition = Keyword.fetch!(opts, :definition)
     trigger_type = Keyword.get(opts, :trigger_type, :external_message)
     session_id = Keyword.get(opts, :id, generate_session_id())
+    session_key = Keyword.get(opts, :session_key)
 
     capability_level = RiskScorer.infer_capability(definition.tools, definition.network)
     input_risk = RiskScorer.infer_input_risk(trigger_type, definition.tools)
@@ -182,7 +185,8 @@ defmodule TriOnyx.AgentSession do
       idle_timer: nil,
       shutdown_reason: nil,
       memory_save_timer: nil,
-      interrupt_prompt: nil
+      interrupt_prompt: nil,
+      session_key: session_key
     }
 
     # Log session start
@@ -309,7 +313,8 @@ defmodule TriOnyx.AgentSession do
        :input_risk,
        :effective_risk,
        :started_at,
-       :status
+       :status,
+       :session_key
      ]), state}
   end
 

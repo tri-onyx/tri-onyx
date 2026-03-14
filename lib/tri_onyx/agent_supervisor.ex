@@ -107,10 +107,15 @@ defmodule TriOnyx.AgentSupervisor do
   @doc """
   Finds an active session by agent name.
 
+  When `session_key` is provided, matches on the session's stored key
+  (e.g. `"concierge:abc123"`) so that multiple concurrent sessions for
+  the same agent can be distinguished by external user/channel.
+
   Returns `{:ok, pid}` if found, `:error` if no session exists for that agent.
   """
-  @spec find_session(GenServer.server(), String.t()) :: {:ok, pid()} | :error
-  def find_session(supervisor \\ __MODULE__, agent_name) when is_binary(agent_name) do
+  @spec find_session(GenServer.server(), String.t(), String.t() | nil) :: {:ok, pid()} | :error
+  def find_session(supervisor \\ __MODULE__, agent_name, session_key \\ nil)
+      when is_binary(agent_name) do
     supervisor
     |> DynamicSupervisor.which_children()
     |> Enum.find_value(:error, fn
@@ -118,7 +123,16 @@ defmodule TriOnyx.AgentSupervisor do
         try do
           status = AgentSession.get_status(pid)
 
-          if status.definition.name == agent_name do
+          name_match = status.definition.name == agent_name
+
+          key_match =
+            if session_key do
+              Map.get(status, :session_key) == session_key
+            else
+              true
+            end
+
+          if name_match and key_match do
             {:ok, pid}
           else
             nil

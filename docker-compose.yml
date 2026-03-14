@@ -47,6 +47,8 @@ services:
       - ./connector/connector:/app/connector
       - ./secrets/connector-config.yaml:/app/config.yaml:ro
       - ./secrets/matrix-store:/data
+    env_file:
+      - .env
     environment:
       - TRI_ONYX_CONNECTOR_TOKEN
       - MATRIX_ACCESS_TOKEN

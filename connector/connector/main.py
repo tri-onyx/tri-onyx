@@ -13,6 +13,7 @@ import sys
 from typing import Any
 
 from connector.adapters.matrix import MatrixAdapter
+from connector.adapters.slack import SlackAdapter
 from connector.config import AdapterConfig, ConnectorConfig, load_config
 from connector.gateway_client import GatewayClient
 from connector.protocol import (
@@ -36,6 +37,7 @@ logger = logging.getLogger("connector")
 # Map of adapter names to their implementation classes
 _ADAPTER_REGISTRY: dict[str, type] = {
     "matrix": MatrixAdapter,
+    "slack": SlackAdapter,
 }
 
 
