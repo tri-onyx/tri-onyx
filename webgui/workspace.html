@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TriOnyx — Workspace Explorer</title>
+<style>
+  :root {
+    --bg: #0d1117; --surface: #161b22; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+    --orange: #db6d28; --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', monospace;
+    background: var(--bg); color: var(--text);
+    display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+  }
+
+  /* Header */
+  .header {
+    padding: 10px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 16px; flex-shrink: 0;
+  }
+  .header h1 { font-size: 15px; font-weight: 600; white-space: nowrap; }
+  .header h1 span { color: var(--muted); font-weight: 400; font-size: 12px; }
+  .header-nav { display: flex; gap: 8px; margin-left: auto; }
+  .header-nav a {
+    color: var(--muted); font-size: 12px; text-decoration: none;
+    padding: 4px 10px; border-radius: 4px; border: 1px solid var(--border);
+  }
+  .header-nav a:hover { color: var(--accent); border-color: var(--accent); }
+  .header-nav a.active { color: var(--accent); border-color: var(--accent); }
+
+  /* Stats bar */
+  .stats-bar {
+    padding: 8px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 20px; font-size: 11px; color: var(--muted);
+    flex-shrink: 0;
+  }
+  .stat { display: flex; align-items: center; gap: 6px; }
+  .stat-count { font-weight: 600; color: var(--text); }
+  .stat .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .dot-low { background: var(--green); }
+  .dot-medium { background: var(--yellow); }
+  .dot-high { background: var(--red); }
+  .dot-untracked { background: var(--purple); }
+  .dot-modified { background: var(--orange); }
+  .dot-deleted { background: var(--red); opacity: 0.6; }
+
+  /* Filters */
+  .filter-bar {
+    padding: 8px 20px; background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    display: flex; gap: 8px; align-items: center; flex-shrink: 0; flex-wrap: wrap;
+  }
+  .filter-bar input {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 10px; border-radius: 4px; font-size: 12px; width: 220px;
+    font-family: inherit;
+  }
+  .filter-bar input:focus { outline: none; border-color: var(--accent); }
+  .filter-bar select {
+    background: var(--bg); border: 1px solid var(--border); color: var(--text);
+    padding: 4px 8px; border-radius: 4px; font-size: 11px; font-family: inherit;
+  }
+  .filter-bar select:focus { outline: none; border-color: var(--accent); }
+  .filter-bar label { font-size: 11px; color: var(--muted); }
+
+  /* Main layout */
+  .page { display: flex; flex: 1; overflow: hidden; }
+
+  /* Tree panel */
+  .tree-panel {
+    flex: 1; display: flex; flex-direction: column;
+    border-right: 1px solid var(--border); min-width: 0;
+  }
+  .tree-scroll { flex: 1; overflow-y: auto; padding: 4px 0; }
+
+  /* Tree rows */
+  .tree-row {
+    display: flex; align-items: center; padding: 3px 12px; cursor: pointer;
+    font-size: 12px; gap: 6px; user-select: none;
+    border-left: 2px solid transparent;
+  }
+  .tree-row:hover { background: rgba(88, 166, 255, 0.06); }
+  .tree-row.selected {
+    background: rgba(88, 166, 255, 0.1);
+    border-left-color: var(--accent);
+  }
+  .tree-row.hidden { display: none; }
+  .tree-indent { flex-shrink: 0; }
+  .tree-toggle {
+    width: 16px; text-align: center; flex-shrink: 0;
+    color: var(--muted); font-size: 10px;
+  }
+  .tree-icon { flex-shrink: 0; width: 16px; text-align: center; font-size: 13px; }
+  .tree-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .tree-badges { display: flex; gap: 4px; flex-shrink: 0; }
+
+  .badge {
+    font-size: 9px; padding: 1px 5px; border-radius: 3px;
+    font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px;
+  }
+  .badge-git {
+    border: 1px solid var(--border);
+  }
+  .badge-git-M { color: var(--orange); border-color: var(--orange); }
+  .badge-git-D { color: var(--red); border-color: var(--red); }
+  .badge-git-U { color: var(--purple); border-color: var(--purple); }
+
+  .badge-taint { border: 1px solid; }
+  .badge-taint-low { color: var(--green); border-color: rgba(63, 185, 80, 0.3); background: rgba(63, 185, 80, 0.08); }
+  .badge-taint-medium { color: var(--yellow); border-color: rgba(210, 153, 34, 0.3); background: rgba(210, 153, 34, 0.08); }
+  .badge-taint-high { color: var(--red); border-color: rgba(248, 81, 73, 0.3); background: rgba(248, 81, 73, 0.08); }
+
+  .badge-sens { border: 1px solid; }
+  .badge-sens-low { color: var(--green); border-color: rgba(63, 185, 80, 0.3); background: rgba(63, 185, 80, 0.08); }
+  .badge-sens-medium { color: var(--purple); border-color: rgba(188, 140, 255, 0.3); background: rgba(188, 140, 255, 0.08); }
+  .badge-sens-high { color: var(--red); border-color: rgba(248, 81, 73, 0.3); background: rgba(248, 81, 73, 0.08); }
+
+  .badge-agent {
+    color: var(--muted); border: 1px solid var(--border); font-weight: 400;
+  }
+
+  .badge-none {
+    color: var(--muted); border: 1px solid var(--border); opacity: 0.5;
+  }
+
+  /* Detail panel */
+  .detail-panel {
+    width: 420px; flex-shrink: 0; display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .detail-header {
+    padding: 12px 16px; background: var(--surface);
+    border-bottom: 1px solid var(--border); flex-shrink: 0;
+  }
+  .detail-header h3 {
+    font-size: 13px; font-weight: 600;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .detail-header p { font-size: 11px; color: var(--muted); margin-top: 2px; }
+  .detail-scroll { flex: 1; overflow-y: auto; padding: 12px 16px; }
+
+  .detail-section { margin-bottom: 16px; }
+  .detail-section h4 {
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+  }
+  .detail-row {
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 4px 0; font-size: 12px;
+  }
+  .detail-row .label { color: var(--muted); }
+  .detail-row .value { font-weight: 500; }
+  .detail-row .value.low { color: var(--green); }
+  .detail-row .value.medium { color: var(--yellow); }
+  .detail-row .value.high { color: var(--red); }
+  .detail-row .value.unknown { color: var(--muted); font-style: italic; }
+
+  .commit-entry {
+    padding: 8px; margin-bottom: 6px; background: var(--bg);
+    border: 1px solid var(--border); border-radius: 4px; font-size: 11px;
+  }
+  .commit-entry .commit-msg { color: var(--text); margin-bottom: 4px; }
+  .commit-entry .commit-meta { color: var(--muted); font-size: 10px; }
+  .commit-entry .commit-trailers { margin-top: 4px; }
+  .commit-entry .trailer {
+    font-size: 10px; padding: 1px 4px; border-radius: 2px;
+    display: inline-block; margin: 1px 2px;
+  }
+  .trailer-taint { color: var(--yellow); background: rgba(210, 153, 34, 0.1); }
+  .trailer-sensitivity { color: var(--purple); background: rgba(188, 140, 255, 0.1); }
+  .trailer-override { color: var(--green); background: rgba(63, 185, 80, 0.1); }
+  .trailer-agent { color: var(--accent); background: rgba(88, 166, 255, 0.1); }
+
+  .detail-actions { margin-top: 12px; display: flex; gap: 8px; }
+  .btn {
+    font-size: 11px; padding: 5px 12px; border-radius: 4px; cursor: pointer;
+    font-family: inherit; font-weight: 500; border: 1px solid var(--border);
+    background: var(--surface); color: var(--text);
+  }
+  .btn:hover { border-color: var(--accent); }
+  .btn-primary { background: rgba(88, 166, 255, 0.15); border-color: var(--accent); color: var(--accent); }
+  .btn-danger { background: rgba(248, 81, 73, 0.1); border-color: var(--red); color: var(--red); }
+
+  /* Folder aggregate bar */
+  .agg-bar {
+    display: flex; height: 4px; border-radius: 2px; overflow: hidden;
+    width: 60px; flex-shrink: 0;
+  }
+  .agg-bar .seg-low { background: var(--green); }
+  .agg-bar .seg-medium { background: var(--yellow); }
+  .agg-bar .seg-high { background: var(--red); }
+  .agg-bar .seg-unknown { background: var(--border); }
+
+  /* Empty state */
+  .empty-detail {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 12px; text-align: center; padding: 20px;
+  }
+
+  /* Loading */
+  .loading {
+    flex: 1; display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 13px;
+  }
+  .loading::after {
+    content: ''; width: 16px; height: 16px; margin-left: 8px;
+    border: 2px solid var(--border); border-top-color: var(--accent);
+    border-radius: 50%; animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* Folder summary counts */
+  .folder-counts {
+    font-size: 10px; color: var(--muted); margin-left: 4px;
+  }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>TriOnyx <span>Workspace Explorer</span></h1>
+  <div class="header-nav">
+    <a href="/matrix.html">Matrix</a>
+    <a href="/graph.html">Graph</a>
+    <a href="/log-viewer.html">Logs</a>
+    <a href="/workspace.html" class="active">Workspace</a>
+  </div>
+</div>
+
+<div class="stats-bar" id="stats-bar">
+  <span class="stat"><span class="dot dot-low"></span> Loading...</span>
+</div>
+
+<div class="filter-bar">
+  <input type="text" id="search" placeholder="Filter by path..." autocomplete="off">
+  <label>Taint:</label>
+  <select id="filter-taint">
+    <option value="">All</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+    <option value="unknown">Unknown</option>
+  </select>
+  <label>Sensitivity:</label>
+  <select id="filter-sens">
+    <option value="">All</option>
+    <option value="high">High</option>
+    <option value="medium">Medium</option>
+    <option value="low">Low</option>
+  </select>
+  <label>Git:</label>
+  <select id="filter-git">
+    <option value="">All</option>
+    <option value="M">Modified</option>
+    <option value="D">Deleted</option>
+    <option value="??">Untracked</option>
+    <option value="clean">Clean</option>
+  </select>
+  <label>Agent:</label>
+  <select id="filter-agent">
+    <option value="">All</option>
+  </select>
+</div>
+
+<div class="page">
+  <div class="tree-panel">
+    <div class="tree-scroll" id="tree-container">
+      <div class="loading">Loading workspace</div>
+    </div>
+  </div>
+  <div class="detail-panel" id="detail-panel">
+    <div class="empty-detail">Select a file to view details</div>
+  </div>
+</div>
+
+<script>
+const API_BASE = '';
+let treeData = null;
+let selectedPath = null;
+let expandedDirs = new Set();
+
+// Always expand the first two levels on load
+const AUTO_EXPAND_DEPTH = 2;
+
+async function fetchTree() {
+  const resp = await fetch(`${API_BASE}/api/workspace/tree`);
+  return resp.json();
+}
+
+async function fetchFileDetail(path) {
+  const resp = await fetch(`${API_BASE}/api/workspace/file?path=${encodeURIComponent(path)}`);
+  return resp.json();
+}
+
+function buildTree(data) {
+  // data.files is a flat list: {path, taint, sensitivity, agent, git_status, updated_at}
+  const root = { name: '', children: {}, files: [] };
+
+  for (const file of data.files) {
+    const parts = file.path.split('/');
+    let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const dir = parts[i];
+      if (!node.children[dir]) {
+        node.children[dir] = { name: dir, children: {}, files: [] };
+      }
+      node = node.children[dir];
+    }
+    node.files.push(file);
+  }
+
+  return root;
+}
+
+function aggregateNode(node) {
+  let counts = { low: 0, medium: 0, high: 0, unknown: 0, total: 0 };
+  let sensCounts = { low: 0, medium: 0, high: 0 };
+  let gitCounts = { M: 0, D: 0, '??': 0, clean: 0 };
+  let worstTaint = 'low';
+  let worstSens = 'low';
+  const order = { unknown: -1, low: 0, medium: 1, high: 2 };
+
+  for (const f of node.files) {
+    const t = f.taint || 'unknown';
+    const s = f.sensitivity || 'low';
+    counts[t] = (counts[t] || 0) + 1;
+    counts.total++;
+    sensCounts[s] = (sensCounts[s] || 0) + 1;
+    const gs = f.git_status || 'clean';
+    gitCounts[gs] = (gitCounts[gs] || 0) + 1;
+    if (order[t] > order[worstTaint]) worstTaint = t;
+    if (order[s] > order[worstSens]) worstSens = s;
+  }
+
+  for (const key of Object.keys(node.children)) {
+    const child = aggregateNode(node.children[key]);
+    for (const k of ['low', 'medium', 'high', 'unknown', 'total'])
+      counts[k] += child.agg.counts[k];
+    for (const k of ['low', 'medium', 'high'])
+      sensCounts[k] += child.agg.sensCounts[k];
+    for (const k of ['M', 'D', '??', 'clean'])
+      gitCounts[k] += child.agg.gitCounts[k];
+    if (order[child.agg.worstTaint] > order[worstTaint]) worstTaint = child.agg.worstTaint;
+    if (order[child.agg.worstSens] > order[worstSens]) worstSens = child.agg.worstSens;
+  }
+
+  node.agg = { counts, sensCounts, gitCounts, worstTaint, worstSens };
+  return node;
+}
+
+function passesFilter(file) {
+  const search = document.getElementById('search').value.toLowerCase();
+  const taint = document.getElementById('filter-taint').value;
+  const sens = document.getElementById('filter-sens').value;
+  const git = document.getElementById('filter-git').value;
+  const agent = document.getElementById('filter-agent').value;
+
+  if (search && !file.path.toLowerCase().includes(search)) return false;
+  if (taint) {
+    const ft = file.taint || 'unknown';
+    if (ft !== taint) return false;
+  }
+  if (sens && (file.sensitivity || 'low') !== sens) return false;
+  if (git) {
+    const gs = file.git_status || 'clean';
+    if (gs !== git) return false;
+  }
+  if (agent && file.agent !== agent) return false;
+  return true;
+}
+
+function folderHasVisibleFiles(node, prefix) {
+  for (const f of node.files) {
+    if (passesFilter(f)) return true;
+  }
+  for (const key of Object.keys(node.children)) {
+    if (folderHasVisibleFiles(node.children[key], prefix + key + '/')) return true;
+  }
+  return false;
+}
+
+function renderTree(node, container, depth, prefix) {
+  // Sort: directories first, then files
+  const dirs = Object.keys(node.children).sort();
+  const files = [...node.files].sort((a, b) => {
+    const nameA = a.path.split('/').pop();
+    const nameB = b.path.split('/').pop();
+    return nameA.localeCompare(nameB);
+  });
+
+  for (const dirName of dirs) {
+    const child = node.children[dirName];
+    const dirPath = prefix + dirName;
+
+    if (!folderHasVisibleFiles(child, dirPath + '/')) continue;
+
+    const expanded = expandedDirs.has(dirPath);
+    const row = document.createElement('div');
+    row.className = 'tree-row';
+    row.dataset.path = dirPath;
+    row.dataset.type = 'dir';
+
+    const agg = child.agg;
+    const aggBarHtml = renderAggBar(agg.counts);
+    const dirtyCount = agg.gitCounts.M + agg.gitCounts.D + agg.gitCounts['??'];
+    const dirtyHtml = dirtyCount > 0
+      ? `<span class="folder-counts">${dirtyCount} dirty</span>` : '';
+
+    row.innerHTML =
+      `<span class="tree-indent" style="width:${depth * 16}px"></span>` +
+      `<span class="tree-toggle">${expanded ? '\u25BE' : '\u25B8'}</span>` +
+      `<span class="tree-icon">${expanded ? '\uD83D\uDCC2' : '\uD83D\uDCC1'}</span>` +
+      `<span class="tree-name">${dirName}</span>` +
+      dirtyHtml +
+      aggBarHtml +
+      renderTaintBadge(agg.worstTaint) +
+      renderSensBadge(agg.worstSens);
+
+    row.addEventListener('click', () => toggleDir(dirPath));
+    container.appendChild(row);
+
+    if (expanded) {
+      renderTree(child, container, depth + 1, dirPath + '/');
+    }
+  }
+
+  for (const file of files) {
+    if (!passesFilter(file)) continue;
+
+    const fileName = file.path.split('/').pop();
+    const row = document.createElement('div');
+    row.className = 'tree-row' + (file.path === selectedPath ? ' selected' : '');
+    row.dataset.path = file.path;
+    row.dataset.type = 'file';
+
+    const gitBadge = file.git_status && file.git_status !== 'clean'
+      ? `<span class="badge badge-git badge-git-${file.git_status === '??' ? 'U' : file.git_status}">${file.git_status === '??' ? 'NEW' : file.git_status === 'D' ? 'DEL' : 'MOD'}</span>`
+      : '';
+
+    const agentBadge = file.agent
+      ? `<span class="badge badge-agent">${file.agent}</span>` : '';
+
+    row.innerHTML =
+      `<span class="tree-indent" style="width:${(depth) * 16 + 16}px"></span>` +
+      `<span class="tree-icon" style="font-size:11px; color:var(--muted)">\uD83D\uDCC4</span>` +
+      `<span class="tree-name">${fileName}</span>` +
+      `<span class="tree-badges">${gitBadge}${agentBadge}${renderTaintBadge(file.taint || 'unknown')}${renderSensBadge(file.sensitivity)}</span>`;
+
+    row.addEventListener('click', () => selectFile(file.path));
+    container.appendChild(row);
+  }
+}
+
+function renderAggBar(counts) {
+  const total = counts.total || 1;
+  const pLow = (counts.low / total * 100).toFixed(1);
+  const pMed = (counts.medium / total * 100).toFixed(1);
+  const pHigh = (counts.high / total * 100).toFixed(1);
+  const pUnk = (counts.unknown / total * 100).toFixed(1);
+  return `<div class="agg-bar">` +
+    `<div class="seg-low" style="width:${pLow}%"></div>` +
+    `<div class="seg-medium" style="width:${pMed}%"></div>` +
+    `<div class="seg-high" style="width:${pHigh}%"></div>` +
+    `<div class="seg-unknown" style="width:${pUnk}%"></div>` +
+    `</div>`;
+}
+
+function renderTaintBadge(level) {
+  if (!level || level === 'unknown') return `<span class="badge badge-none">T:?</span>`;
+  return `<span class="badge badge-taint badge-taint-${level}">T:${level[0].toUpperCase()}</span>`;
+}
+
+function renderSensBadge(level) {
+  if (!level || level === 'low') return '';
+  return `<span class="badge badge-sens badge-sens-${level}">S:${level[0].toUpperCase()}</span>`;
+}
+
+function toggleDir(path) {
+  if (expandedDirs.has(path)) {
+    expandedDirs.delete(path);
+  } else {
+    expandedDirs.add(path);
+  }
+  refreshTree();
+}
+
+function refreshTree() {
+  const container = document.getElementById('tree-container');
+  container.innerHTML = '';
+  if (treeData) {
+    const root = buildTree(treeData);
+    aggregateNode(root);
+    renderTree(root, container, 0, '');
+  }
+}
+
+async function selectFile(path) {
+  selectedPath = path;
+  refreshTree();
+
+  const panel = document.getElementById('detail-panel');
+  panel.innerHTML = '<div class="loading">Loading</div>';
+
+  try {
+    const detail = await fetchFileDetail(path);
+    renderDetail(detail, path);
+  } catch (e) {
+    panel.innerHTML = `<div class="empty-detail">Failed to load details for ${path}</div>`;
+  }
+}
+
+function renderDetail(detail, path) {
+  const panel = document.getElementById('detail-panel');
+  const fileName = path.split('/').pop();
+  const dirPath = path.split('/').slice(0, -1).join('/');
+
+  const taintClass = detail.taint_level || 'unknown';
+  const sensClass = detail.sensitivity_level || 'low';
+  const gitLabel = { M: 'Modified', D: 'Deleted', '??': 'Untracked', clean: 'Clean' };
+
+  let commitsHtml = '';
+  if (detail.commits && detail.commits.length > 0) {
+    commitsHtml = detail.commits.map(c => {
+      let trailersHtml = '';
+      if (c.trailers && c.trailers.length > 0) {
+        trailersHtml = '<div class="commit-trailers">' +
+          c.trailers.map(t => {
+            let cls = 'trailer-agent';
+            if (t.key.includes('Taint')) cls = 'trailer-taint';
+            if (t.key.includes('Sensitivity')) cls = 'trailer-sensitivity';
+            if (t.key.includes('Override')) cls = 'trailer-override';
+            return `<span class="trailer ${cls}">${t.key}: ${t.value}</span>`;
+          }).join('') + '</div>';
+      }
+      return `<div class="commit-entry">
+        <div class="commit-msg">${escapeHtml(c.subject)}</div>
+        <div class="commit-meta">${c.hash} by ${escapeHtml(c.author)} &middot; ${c.date}</div>
+        ${trailersHtml}
+      </div>`;
+    }).join('');
+  } else {
+    commitsHtml = '<div style="font-size:11px;color:var(--muted)">No git history (untracked file)</div>';
+  }
+
+  let reviewedHtml = '';
+  if (detail.reviewed_by) {
+    reviewedHtml = `
+      <div class="detail-row"><span class="label">Reviewed by</span><span class="value">${escapeHtml(detail.reviewed_by)}</span></div>
+      <div class="detail-row"><span class="label">Reviewed at</span><span class="value">${detail.reviewed_at || '—'}</span></div>`;
+  }
+
+  panel.innerHTML = `
+    <div class="detail-header">
+      <h3>${escapeHtml(fileName)}</h3>
+      <p>${escapeHtml(dirPath)}</p>
+    </div>
+    <div class="detail-scroll">
+      <div class="detail-section">
+        <h4>Classification</h4>
+        <div class="detail-row"><span class="label">Taint</span><span class="value ${taintClass}">${taintClass}</span></div>
+        <div class="detail-row"><span class="label">Sensitivity</span><span class="value ${sensClass}">${sensClass}</span></div>
+        <div class="detail-row"><span class="label">Agent</span><span class="value">${detail.agent || '—'}</span></div>
+        <div class="detail-row"><span class="label">Git status</span><span class="value">${gitLabel[detail.git_status] || detail.git_status || 'Clean'}</span></div>
+        <div class="detail-row"><span class="label">Updated</span><span class="value">${detail.updated_at || '—'}</span></div>
+        ${reviewedHtml}
+      </div>
+      <div class="detail-section">
+        <h4>Git Provenance (recent commits)</h4>
+        ${commitsHtml}
+      </div>
+    </div>`;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function updateStats(data) {
+  const files = data.files;
+  let taintCounts = { low: 0, medium: 0, high: 0, unknown: 0 };
+  let gitCounts = { M: 0, D: 0, '??': 0, clean: 0 };
+  let agents = new Set();
+
+  for (const f of files) {
+    const t = f.taint || 'unknown';
+    taintCounts[t]++;
+    const gs = f.git_status || 'clean';
+    gitCounts[gs] = (gitCounts[gs] || 0) + 1;
+    if (f.agent) agents.add(f.agent);
+  }
+
+  document.getElementById('stats-bar').innerHTML = `
+    <span class="stat">${files.length} files</span>
+    <span class="stat"><span class="dot dot-low"></span> <span class="stat-count">${taintCounts.low}</span> low taint</span>
+    <span class="stat"><span class="dot dot-medium"></span> <span class="stat-count">${taintCounts.medium}</span> medium</span>
+    <span class="stat"><span class="dot dot-high"></span> <span class="stat-count">${taintCounts.high}</span> high</span>
+    <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${taintCounts.unknown}</span> unknown</span>
+    <span class="stat" style="margin-left:12px"><span class="dot dot-modified"></span> <span class="stat-count">${gitCounts.M}</span> modified</span>
+    <span class="stat"><span class="dot dot-deleted"></span> <span class="stat-count">${gitCounts.D}</span> deleted</span>
+    <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${gitCounts['??']}</span> untracked</span>
+  `;
+
+  // Populate agent filter
+  const agentSelect = document.getElementById('filter-agent');
+  const currentVal = agentSelect.value;
+  agentSelect.innerHTML = '<option value="">All</option>';
+  for (const a of [...agents].sort()) {
+    agentSelect.innerHTML += `<option value="${a}">${a}</option>`;
+  }
+  agentSelect.value = currentVal;
+}
+
+function autoExpand(node, prefix, depth) {
+  if (depth >= AUTO_EXPAND_DEPTH) return;
+  for (const key of Object.keys(node.children)) {
+    const dirPath = prefix ? prefix + '/' + key : key;
+    expandedDirs.add(dirPath);
+    autoExpand(node.children[key], dirPath, depth + 1);
+  }
+}
+
+async function init() {
+  try {
+    treeData = await fetchTree();
+    updateStats(treeData);
+
+    const root = buildTree(treeData);
+    autoExpand(root, '', 0);
+
+    refreshTree();
+  } catch (e) {
+    document.getElementById('tree-container').innerHTML =
+      `<div class="empty-detail">Failed to load workspace data.<br><br>${escapeHtml(e.message)}</div>`;
+  }
+}
+
+// Filter event listeners
+document.getElementById('search').addEventListener('input', refreshTree);
+document.getElementById('filter-taint').addEventListener('change', refreshTree);
+document.getElementById('filter-sens').addEventListener('change', refreshTree);
+document.getElementById('filter-git').addEventListener('change', refreshTree);
+document.getElementById('filter-agent').addEventListener('change', refreshTree);
+
+init();
+</script>
+</body>
+</html>
