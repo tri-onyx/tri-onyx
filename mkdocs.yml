@@ -34,6 +34,7 @@ markdown_extensions:
 nav:
   - Home:
       - Overview: index.md
+      - Getting Started: getting-started.md
       - Comparison: comparison.md
   - Architecture:
       - Agent Runtime: agent-runtime.md

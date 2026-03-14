@@ -26,6 +26,8 @@ See [how TriOnyx compares to OpenClaw](comparison-table.md) for a detailed side-
 
 ---
 
+**New here?** Start with the [Getting Started guide](docs/getting-started.md) for a complete walkthrough from clone to running agents.
+
 ## Quick start
 
 ### Prerequisites
@@ -360,6 +362,8 @@ scripts/                      Utility scripts
   tri-onyx-plugin.py            Plugin management CLI
   explain-risk.py               Risk score explainer
   log-viewer.py                 CLI log viewer
+  generate-templates.py         Generate .env.example, connector config, workspace templates
+  install-hooks.sh              Install pre-commit hooks (secret leak prevention)
   safe-push.sh                  Pre-push safety checks
 
 workspace/agent-definitions/  Agent definitions (markdown + YAML frontmatter)
