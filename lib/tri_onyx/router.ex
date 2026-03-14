@@ -30,6 +30,8 @@ defmodule TriOnyx.Router do
   - `GET /logs` — list agents with session logs
   - `GET /logs/:agent_name` — list sessions for an agent
   - `GET /logs/:agent_name/:session_id` — return JSONL session log
+  - `GET /api/workspace/tree` — workspace file tree with taint/sensitivity/git status
+  - `GET /api/workspace/file?path=...` — file detail with git provenance and commit trailers
 
   Uses Bandit as the HTTP server.
   """
@@ -59,7 +61,7 @@ defmodule TriOnyx.Router do
 
   plug Plug.Logger, log: :debug
   plug :cors
-  plug Plug.Static, at: "/", from: Path.expand("../../webgui", __DIR__), only: ~w(matrix.html graph.html log-viewer.html frontend.html v2.html)
+  plug Plug.Static, at: "/", from: Path.expand("../../webgui", __DIR__), only: ~w(matrix.html graph.html log-viewer.html frontend.html v2.html workspace.html)
   plug :match
   plug :fetch_raw_body
   plug :dispatch
@@ -1130,6 +1132,147 @@ defmodule TriOnyx.Router do
             "session_id" => session_id
           })
         )
+    end
+  end
+
+  # --- Workspace Explorer ---
+
+  get "/api/workspace/tree" do
+    dir = Workspace.workspace_dir()
+    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    manifest = Workspace.read_risk_manifest()
+
+    # Get git status (porcelain format) for all files
+    git_status_map =
+      case System.cmd("git", safe ++ ["status", "--porcelain"], cd: dir, stderr_to_stdout: true) do
+        {output, 0} ->
+          output
+          |> String.split("\n", trim: true)
+          |> Enum.reduce(%{}, fn line, acc ->
+            status = String.slice(line, 0, 2) |> String.trim()
+            path = String.slice(line, 3..-1//1)
+            Map.put(acc, path, status)
+          end)
+
+        _ ->
+          %{}
+      end
+
+    # Get all tracked files
+    tracked =
+      case System.cmd("git", safe ++ ["ls-files"], cd: dir, stderr_to_stdout: true) do
+        {output, 0} -> output |> String.split("\n", trim: true) |> MapSet.new()
+        _ -> MapSet.new()
+      end
+
+    # Combine: all tracked files + untracked from git status
+    all_paths =
+      MapSet.union(tracked, MapSet.new(Map.keys(git_status_map)))
+      |> Enum.sort()
+
+    files =
+      Enum.map(all_paths, fn path ->
+        entry = Map.get(manifest, path, %{})
+        git_st = Map.get(git_status_map, path, "clean")
+
+        %{
+          "path" => path,
+          "taint" => Map.get(entry, "taint_level"),
+          "sensitivity" => Map.get(entry, "sensitivity_level"),
+          "agent" => Map.get(entry, "agent"),
+          "updated_at" => Map.get(entry, "updated_at"),
+          "reviewed_by" => Map.get(entry, "reviewed_by"),
+          "git_status" => git_st
+        }
+      end)
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{"files" => files}))
+  end
+
+  get "/api/workspace/file" do
+    conn = Plug.Conn.fetch_query_params(conn)
+    path = conn.params["path"]
+
+    if is_nil(path) or path == "" do
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(400, Jason.encode!(%{"error" => "missing path parameter"}))
+    else
+      dir = Workspace.workspace_dir()
+      safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+      manifest = Workspace.read_risk_manifest()
+      entry = Map.get(manifest, path, %{})
+
+      # Git status for this file
+      git_st =
+        case System.cmd("git", safe ++ ["status", "--porcelain", "--", path],
+               cd: dir, stderr_to_stdout: true) do
+          {output, 0} ->
+            line = output |> String.split("\n", trim: true) |> List.first()
+            if line, do: String.slice(line, 0, 2) |> String.trim(), else: "clean"
+          _ -> "clean"
+        end
+
+      # Recent commits for this file (up to 10)
+      commits =
+        case System.cmd(
+               "git",
+               safe ++ ["log", "--format=%H%n%s%n%an%n%ai%n%B%n---END---", "-10", "--", path],
+               cd: dir, stderr_to_stdout: true
+             ) do
+          {output, 0} when output != "" ->
+            output
+            |> String.split("---END---\n", trim: true)
+            |> Enum.map(fn chunk ->
+              lines = String.split(chunk, "\n")
+              hash = Enum.at(lines, 0, "") |> String.slice(0, 8)
+              subject = Enum.at(lines, 1, "")
+              author = Enum.at(lines, 2, "")
+              date = Enum.at(lines, 3, "")
+              body = Enum.drop(lines, 4) |> Enum.join("\n") |> String.trim()
+
+              trailers =
+                body
+                |> String.split("\n")
+                |> Enum.filter(fn l ->
+                  trimmed = String.trim(l)
+                  String.starts_with?(trimmed, "Sc-") or
+                    String.starts_with?(trimmed, "Taint-Level:") or
+                    String.starts_with?(trimmed, "Sensitivity-Level:")
+                end)
+                |> Enum.map(fn l ->
+                  trimmed = String.trim(l)
+                  case String.split(trimmed, ":", parts: 2) do
+                    [key, value] -> %{"key" => String.trim(key), "value" => String.trim(value)}
+                    _ -> %{"key" => trimmed, "value" => ""}
+                  end
+                end)
+
+              %{"hash" => hash, "subject" => subject, "author" => author, "date" => date, "trailers" => trailers}
+            end)
+
+          _ ->
+            []
+        end
+
+      response =
+        %{
+          "path" => path,
+          "taint_level" => Map.get(entry, "taint_level"),
+          "sensitivity_level" => Map.get(entry, "sensitivity_level"),
+          "agent" => Map.get(entry, "agent"),
+          "updated_at" => Map.get(entry, "updated_at"),
+          "reviewed_by" => Map.get(entry, "reviewed_by"),
+          "reviewed_at" => Map.get(entry, "reviewed_at"),
+          "git_status" => git_st,
+          "commits" => commits
+        }
+
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(200, Jason.encode!(response))
     end
   end
 
