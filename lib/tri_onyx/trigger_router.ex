@@ -258,7 +258,9 @@ defmodule TriOnyx.TriggerRouter do
           map()
         ) :: {:ok, pid()} | {:error, term()}
   defp ensure_session_and_prompt(supervisor, definition, trigger_type, payload, metadata) do
-    case AgentSupervisor.find_session(supervisor, definition.name) do
+    session_key = Map.get(metadata, "session_key")
+
+    case AgentSupervisor.find_session(supervisor, definition.name, session_key) do
       {:ok, pid} ->
         Logger.info("TriggerRouter: routing to existing session for '#{definition.name}'")
 
@@ -270,10 +272,11 @@ defmodule TriOnyx.TriggerRouter do
       :error ->
         Logger.info("TriggerRouter: spawning new session for '#{definition.name}'")
 
-        case AgentSupervisor.start_session(supervisor,
-               definition: definition,
-               trigger_type: trigger_type
-             ) do
+        session_opts =
+          [definition: definition, trigger_type: trigger_type] ++
+            if(session_key, do: [session_key: session_key], else: [])
+
+        case AgentSupervisor.start_session(supervisor, session_opts) do
           {:ok, pid} ->
             # Queue the prompt — the session will flush it once the runtime
             # signals :ready. send_prompt returns :ok when the session
