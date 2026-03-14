@@ -73,6 +73,8 @@ Built on Elixir/OTP. Designed for a single operator running their own agents.
 
 **Web Dashboard** -- Static HTML frontends served by the gateway for monitoring agent topology, classification matrices, and session logs.
 
+**New here?** Start with the [Getting Started guide](getting-started.md) for a complete walkthrough.
+
 ## Quick start
 
 ### Prerequisites
