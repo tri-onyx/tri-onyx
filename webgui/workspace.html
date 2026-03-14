@@ -38,10 +38,20 @@
   .stats-bar {
     padding: 8px 20px; background: var(--surface);
     border-bottom: 1px solid var(--border);
-    display: flex; gap: 20px; font-size: 11px; color: var(--muted);
+    display: flex; gap: 0; font-size: 11px; color: var(--muted);
     flex-shrink: 0;
   }
-  .stat { display: flex; align-items: center; gap: 6px; }
+  .stats-group {
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 20px; border-right: 1px solid var(--border);
+  }
+  .stats-group:first-child { padding-left: 0; }
+  .stats-group:last-child { border-right: none; }
+  .stats-group-label {
+    font-size: 10px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px; color: var(--muted); white-space: nowrap;
+  }
+  .stat { display: flex; align-items: center; gap: 5px; }
   .stat-count { font-weight: 600; color: var(--text); }
   .stat .dot { width: 8px; height: 8px; border-radius: 50%; }
   .dot-low { background: var(--green); }
@@ -235,7 +245,7 @@
 </div>
 
 <div class="stats-bar" id="stats-bar">
-  <span class="stat"><span class="dot dot-low"></span> Loading...</span>
+  <span class="stat">Loading...</span>
 </div>
 
 <div class="filter-bar">
@@ -597,15 +607,35 @@ function updateStats(data) {
     if (f.agent) agents.add(f.agent);
   }
 
+  let sensCounts = { low: 0, medium: 0, high: 0 };
+  for (const f of files) {
+    const s = f.sensitivity || 'low';
+    sensCounts[s]++;
+  }
+
   document.getElementById('stats-bar').innerHTML = `
-    <span class="stat">${files.length} files</span>
-    <span class="stat"><span class="dot dot-low"></span> <span class="stat-count">${taintCounts.low}</span> low taint</span>
-    <span class="stat"><span class="dot dot-medium"></span> <span class="stat-count">${taintCounts.medium}</span> medium</span>
-    <span class="stat"><span class="dot dot-high"></span> <span class="stat-count">${taintCounts.high}</span> high</span>
-    <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${taintCounts.unknown}</span> unknown</span>
-    <span class="stat" style="margin-left:12px"><span class="dot dot-modified"></span> <span class="stat-count">${gitCounts.M}</span> modified</span>
-    <span class="stat"><span class="dot dot-deleted"></span> <span class="stat-count">${gitCounts.D}</span> deleted</span>
-    <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${gitCounts['??']}</span> untracked</span>
+    <div class="stats-group">
+      <span class="stat"><span class="stat-count">${files.length}</span> files</span>
+    </div>
+    <div class="stats-group">
+      <span class="stats-group-label">Taint</span>
+      <span class="stat"><span class="dot dot-low"></span> <span class="stat-count">${taintCounts.low}</span> low</span>
+      <span class="stat"><span class="dot dot-medium"></span> <span class="stat-count">${taintCounts.medium}</span> med</span>
+      <span class="stat"><span class="dot dot-high"></span> <span class="stat-count">${taintCounts.high}</span> high</span>
+      <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${taintCounts.unknown}</span> unknown</span>
+    </div>
+    <div class="stats-group">
+      <span class="stats-group-label">Sensitivity</span>
+      <span class="stat"><span class="dot dot-low"></span> <span class="stat-count">${sensCounts.low}</span> low</span>
+      <span class="stat"><span class="dot" style="background:var(--purple)"></span> <span class="stat-count">${sensCounts.medium}</span> med</span>
+      <span class="stat"><span class="dot dot-high"></span> <span class="stat-count">${sensCounts.high}</span> high</span>
+    </div>
+    <div class="stats-group">
+      <span class="stats-group-label">Git tracking</span>
+      <span class="stat"><span class="dot dot-modified"></span> <span class="stat-count">${gitCounts.M}</span> modified</span>
+      <span class="stat"><span class="dot dot-deleted"></span> <span class="stat-count">${gitCounts.D}</span> deleted</span>
+      <span class="stat"><span class="dot dot-untracked"></span> <span class="stat-count">${gitCounts['??']}</span> untracked</span>
+    </div>
   `;
 
   // Populate agent filter
