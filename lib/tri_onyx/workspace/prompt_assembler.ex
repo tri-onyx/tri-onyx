@@ -91,6 +91,8 @@ defmodule TriOnyx.Workspace.PromptAssembler do
     - **Daily memory**: `/workspace/agents/#{agent_name}/memory/#{today}.md` — append notes about what you worked on, key findings, and unfinished tasks. If the file already has content, read it first and append rather than overwrite.
     - **Heartbeat**: `/workspace/agents/#{agent_name}/HEARTBEAT.md` — update with your current state, ongoing work, and anything the next session should know immediately.
 
+    **Important:** Before writing to a file, you must Read it first. Always read each file in its own separate tool call — never read memory files in parallel with other reads. If a parallel read fails, the sibling reads are also marked as failed and subsequent writes will be blocked.
+
     You can write to these files at any time during a session, not just at shutdown. Keep entries concise and useful for future sessions.
     """
   end
