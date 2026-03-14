@@ -124,14 +124,12 @@ class ProtocolLogHandler(logging.Handler):
             pass
 
 
-logging.basicConfig(
-    stream=sys.stderr,
-    level=logging.INFO,
-    format="[agent-runner] %(levelname)s %(message)s",
-)
 log = logging.getLogger("agent_runner")
+log.setLevel(logging.INFO)
+log.propagate = False
 
-# Attach protocol handler so log messages also reach the gateway
+# Only use the protocol handler — stderr is merged into stdout by the gateway
+# port (:stderr_to_stdout), so plain-text log lines would break JSON parsing.
 _protocol_handler = ProtocolLogHandler()
 _protocol_handler.setLevel(logging.INFO)
 _protocol_handler.setFormatter(logging.Formatter("%(message)s"))
