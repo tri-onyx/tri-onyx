@@ -32,6 +32,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       iptables \
       tini \
       gosu \
+      docker.io \
       # Playwright/Chromium system dependencies
       libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
       libatspi2.0-0 libdbus-1-3 libdrm2 libxcomposite1 \
