@@ -6,6 +6,8 @@ on:
     paths:
       - 'docs/**'
       - 'mkdocs.yml'
+      - 'workspace/agent-definitions/**'
+      - 'scripts/generate-agent-docs.py'
 
 permissions:
   contents: read
@@ -26,7 +28,9 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install mkdocs-material
+      - run: pip install mkdocs-material pyyaml
+
+      - run: python scripts/generate-agent-docs.py
 
       - run: mkdocs build
 

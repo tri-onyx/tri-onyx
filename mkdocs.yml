@@ -48,6 +48,21 @@ nav:
       - Browser Sessions: browser-sessions.md
       - Plugins: plugins.md
       - Webhook Receiver: webhook-receiver-design.md
+  - Agents:
+      - Overview: agents/index.md
+      - bookmarks: agents/bookmarks.md
+      - cheerleader: agents/cheerleader.md
+      - concierge: agents/concierge.md
+      - diary: agents/diary.md
+      - email: agents/email.md
+      - finn: agents/finn.md
+      - introspector: agents/introspector.md
+      - linkedin: agents/linkedin.md
+      - main: agents/main.md
+      - news: agents/news.md
+      - researcher: agents/researcher.md
+      - twitter: agents/twitter.md
+      - webhook-handler: agents/webhook-handler.md
   - Development:
       - E2E Testing: e2e-testing.md
       - Architecture Decisions: decisions.md
