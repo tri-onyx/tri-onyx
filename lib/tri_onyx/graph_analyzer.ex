@@ -267,7 +267,15 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.map(&SensitivityMatrix.trigger_sensitivity/1)
       |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
 
-    InformationClassifier.higher_level(tool_sensitivity, input_source_sensitivity)
+    mount_sensitivity =
+      [{:docker_socket, Map.get(definition, :docker_socket, false)},
+       {:trionyx_repo, Map.get(definition, :trionyx_repo, false)}]
+      |> Enum.filter(fn {_mount, enabled} -> enabled end)
+      |> Enum.map(fn {mount, _} -> SensitivityMatrix.mount_sensitivity(mount) end)
+      |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+
+    [tool_sensitivity, input_source_sensitivity, mount_sensitivity]
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
   end
 
   @doc """
