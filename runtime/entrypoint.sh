@@ -262,6 +262,21 @@ fi
 # After hiding /mnt/host, gosu drops root privileges so the agent runs
 # as the unprivileged tri_onyx user with no capabilities.
 
+# If the Docker socket is mounted, add tri_onyx to its group so gosu
+# preserves socket access after privilege drop.
+# We write /etc/group directly because groupadd/usermod fail under
+# --cap-drop ALL (cannot write /etc/gshadow).
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
+    if ! getent group "$DOCKER_SOCK_GID" >/dev/null 2>&1; then
+        echo "docker_host:x:${DOCKER_SOCK_GID}:tri_onyx" >> /etc/group
+    else
+        GROUP_NAME=$(getent group "$DOCKER_SOCK_GID" | cut -d: -f1)
+        sed -i "s/^\(${GROUP_NAME}:.*\)$/\1,tri_onyx/" /etc/group
+    fi
+    log "Added tri_onyx to docker socket group (gid=$DOCKER_SOCK_GID)"
+fi
+
 log "Dropping privileges to tri_onyx user"
 exec unshare --mount -- sh -c '
     mount -t tmpfs none /mnt/host &&
