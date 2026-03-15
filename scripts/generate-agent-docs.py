@@ -24,7 +24,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFINITIONS_DIR = ROOT / "workspace" / "agent-definitions"
+_WORKSPACE_DIR = ROOT / "workspace" / "agent-definitions"
+_TEMPLATE_DIR = ROOT / "workspace.template" / "agent-definitions"
+DEFINITIONS_DIR = _WORKSPACE_DIR if _WORKSPACE_DIR.is_dir() else _TEMPLATE_DIR
 OUTPUT_DIR = ROOT / "docs" / "agents"
 MKDOCS_YML = ROOT / "mkdocs.yml"
 
