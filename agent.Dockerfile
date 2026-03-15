@@ -32,7 +32,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       iptables \
       tini \
       gosu \
-      docker.io \
       # Playwright/Chromium system dependencies
       libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
       libatspi2.0-0 libdbus-1-3 libdrm2 libxcomposite1 \
@@ -40,6 +39,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       libxkbcommon0 libx11-6 libx11-xcb1 libxext6 libasound2 \
       libexpat1 libcups2 libpango-1.0-0 libcairo2 \
     && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install the Docker CLI (static binary) for agents with docker_socket access.
+# Only the CLI is needed — the daemon runs on the host.
+ADD https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz /tmp/docker.tgz
+RUN tar -xzf /tmp/docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
+    && rm /tmp/docker.tgz
 
 # Allow non-root FUSE mounts (the entrypoint runs as root for FUSE/iptables,
 # but this ensures fuse3 works correctly inside the container).
