@@ -13,6 +13,9 @@ send_to:
   - bookmarks
   - twitter
   - linkedin
+  - introspector
+receive_from:
+  - introspector
   - finn
 restart_targets:
   - researcher
