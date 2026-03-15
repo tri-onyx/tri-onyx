@@ -793,8 +793,11 @@ class MatrixAdapter(BaseAdapter):
         room_id = channel.get("room_id", "")
         thread_id = channel.get("thread_id")
 
-        # Prefix messages from non-main agents so the user can identify the source
-        if agent_name and agent_name != "main":
+        # Prefix messages from non-main agents so the user can identify the source,
+        # but skip when the agent is posting to its own configured room.
+        room_cfg = self._rooms.get(room_id)
+        is_own_room = room_cfg is not None and room_cfg.agent == agent_name
+        if agent_name and agent_name != "main" and not is_own_room:
             content = f"({agent_name}) {content}"
 
         chunks = self.chunk_message(content)
@@ -1011,9 +1014,10 @@ class MatrixAdapter(BaseAdapter):
         if not text:
             return
 
-        # Prefix step messages from non-main agents
+        # Prefix step messages from non-main agents (skip in agent's own room)
         agent_name = step.agent_name
-        if agent_name and agent_name != "main":
+        is_own_room = room_cfg is not None and room_cfg.agent == agent_name
+        if agent_name and agent_name != "main" and not is_own_room:
             text = f"({agent_name}) {text}"
 
         thread_id = channel.get("thread_id")
