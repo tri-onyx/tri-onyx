@@ -180,7 +180,7 @@ defmodule TriOnyx.Router do
           "send_to" => definition.send_to,
           "receive_from" => definition.receive_from,
           "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
-          "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network))
+          "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network, definition))
         }
 
         detail =
@@ -919,7 +919,7 @@ defmodule TriOnyx.Router do
         merged_s = Map.get(sensitivity_levels, name, :low)
         eff_t = if prop_t, do: String.to_existing_atom(prop_t), else: merged_t
         eff_s = if prop_s, do: String.to_existing_atom(prop_s), else: merged_s
-        cap = RiskScorer.infer_capability(definition.tools, definition.network)
+        cap = RiskScorer.infer_capability(definition.tools, definition.network, definition)
         eff_risk = RiskScorer.effective_risk(eff_t, eff_s, cap)
 
         drivers = GraphAnalyzer.rating_drivers(definition, all_defs)

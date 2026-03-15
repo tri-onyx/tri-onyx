@@ -56,7 +56,7 @@ defmodule Mix.Tasks.TriOnyx.Status do
   @spec print_agent(TriOnyx.AgentDefinition.t()) :: :ok
   defp print_agent(definition) do
     taint = RiskScorer.infer_taint(:external_message, definition.tools)
-    sensitivity = RiskScorer.infer_sensitivity(definition.tools)
+    sensitivity = RiskScorer.infer_sensitivity(definition.tools, definition)
     effective_risk = RiskScorer.effective_risk(taint, sensitivity)
 
     Mix.shell().info("  Agent: #{definition.name}")

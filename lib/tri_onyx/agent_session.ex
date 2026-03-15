@@ -145,8 +145,8 @@ defmodule TriOnyx.AgentSession do
     session_id = Keyword.get(opts, :id, generate_session_id())
     session_key = Keyword.get(opts, :session_key)
 
-    capability_level = RiskScorer.infer_capability(definition.tools, definition.network)
-    input_risk = RiskScorer.infer_input_risk(trigger_type, definition.tools)
+    capability_level = RiskScorer.infer_capability(definition.tools, definition.network, definition)
+    input_risk = RiskScorer.infer_input_risk(trigger_type, definition.tools, definition)
     effective_risk = RiskScorer.effective_risk(input_risk, :low, capability_level)
 
     Logger.info(
@@ -1016,11 +1016,12 @@ defmodule TriOnyx.AgentSession do
       end
     end
 
-    # Push result text to connectors for non-heartbeat agents.
-    # The connector routes via heartbeat_rooms[agent_name] — agents without
-    # an entry are silently ignored, so this is safe to broadcast always.
-    # Heartbeat agents handle their own push above (with classification).
-    if state.trigger_type != :heartbeat && state.last_text do
+    # Push result text to connectors for non-heartbeat, non-interactive agents
+    # (cron, inter-agent, webhook). Interactive sessions (verified/unverified
+    # input from connectors) already deliver text via EventBus subscriptions,
+    # so broadcasting here would duplicate the message.
+    if state.trigger_type not in [:heartbeat, :verified_input, :unverified_input] &&
+         state.last_text do
       frame =
         Jason.encode!(%{
           "type" => "heartbeat_notification",

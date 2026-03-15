@@ -160,9 +160,9 @@ defmodule TriOnyx.Application do
         Enum.each(definitions, fn definition ->
           TriOnyx.TriggerRouter.register_agent(definition)
 
-          input_risk = RiskScorer.infer_input_risk(:external_message, definition.tools)
+          input_risk = RiskScorer.infer_input_risk(:external_message, definition.tools, definition)
           taint = RiskScorer.infer_taint(:external_message, definition.tools)
-          sensitivity = RiskScorer.infer_sensitivity(definition.tools)
+          sensitivity = RiskScorer.infer_sensitivity(definition.tools, definition)
           effective_risk = RiskScorer.effective_risk(taint, sensitivity)
 
           Logger.info(

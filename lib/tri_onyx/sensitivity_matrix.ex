@@ -30,6 +30,17 @@ defmodule TriOnyx.SensitivityMatrix do
   | Read          | provenance  | Dynamic: derived from git commit metadata       |
   | All others    | low         | No auth required; results are not session-tied  |
 
+  ## Privileged Mount Sensitivity
+
+  Agents may declare privileged bind mounts that grant ambient access to
+  sensitive host resources. These are not tool results but raise the
+  agent's baseline sensitivity floor.
+
+  | Mount         | Sensitivity | Reason                                          |
+  |---------------|-------------|-------------------------------------------------|
+  | docker_socket | high        | Can inspect container env vars (API keys, tokens)|
+  | trionyx_repo  | medium      | Internal source code, security logic             |
+
   ## Input Source Sensitivity
 
   All trigger sources produce `:low` sensitivity. Triggers carry event metadata
@@ -72,6 +83,14 @@ defmodule TriOnyx.SensitivityMatrix do
     "CalendarDelete" => :medium
   }
 
+  # Sensitivity levels for privileged mounts.
+  # These are ambient capabilities, not tool results — they represent
+  # what data the agent can access via its bind-mounted paths.
+  @mount_sensitivity %{
+    docker_socket: :high,
+    trionyx_repo: :medium
+  }
+
   @trigger_sensitivity %{
     webhook: :low,
     unverified_input: :medium,
@@ -110,6 +129,16 @@ defmodule TriOnyx.SensitivityMatrix do
   end
 
   @doc """
+  Returns the sensitivity level for a privileged mount.
+
+  Returns `:low` for unknown mount types.
+  """
+  @spec mount_sensitivity(atom()) :: sensitivity_level()
+  def mount_sensitivity(mount_type) when is_atom(mount_type) do
+    Map.get(@mount_sensitivity, mount_type, :low)
+  end
+
+  @doc """
   Returns the full tool sensitivity map.
   """
   @spec all_tool_sensitivities() :: %{String.t() => sensitivity_level()}
@@ -120,5 +149,11 @@ defmodule TriOnyx.SensitivityMatrix do
   """
   @spec all_trigger_sensitivities() :: %{atom() => sensitivity_level()}
   def all_trigger_sensitivities, do: @trigger_sensitivity
+
+  @doc """
+  Returns the full mount sensitivity map.
+  """
+  @spec all_mount_sensitivities() :: %{atom() => sensitivity_level()}
+  def all_mount_sensitivities, do: @mount_sensitivity
 
 end

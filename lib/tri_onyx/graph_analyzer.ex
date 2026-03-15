@@ -78,7 +78,7 @@ defmodule TriOnyx.GraphAnalyzer do
 
       max_risk = InformationClassifier.higher_level(max_taint, max_sensitivity)
       chain = trace_risk_chain(definition.name, edges, MapSet.new())
-      capability = RiskScorer.infer_capability(definition.tools, definition.network)
+      capability = RiskScorer.infer_capability(definition.tools, definition.network, definition)
 
       prop = Map.get(propagated, definition.name, %{})
 
@@ -555,6 +555,15 @@ defmodule TriOnyx.GraphAnalyzer do
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
+    # Privileged mount sensitivity sources
+    mount_sensitivity =
+      [{:docker_socket, definition.docker_socket}, {:trionyx_repo, definition.trionyx_repo}]
+      |> Enum.filter(fn {_mount, enabled} -> enabled end)
+      |> Enum.map(fn {mount, _} ->
+        %{source: to_string(mount), level: SensitivityMatrix.mount_sensitivity(mount), kind: :mount}
+      end)
+      |> Enum.filter(fn %{level: l} -> l != :low end)
+
     # Input sources (from definition.input_sources)
     input_taint =
       Map.get(definition, :input_sources, [])
@@ -618,8 +627,8 @@ defmodule TriOnyx.GraphAnalyzer do
     base_taint_entry =
       if base_taint_floor != :low, do: [%{source: "base_taint", level: base_taint_floor, kind: :input}], else: []
 
-    # Capability drivers (tools only, unchanged)
-    capability_drivers =
+    # Capability drivers (tools + privileged mounts)
+    tool_capability_drivers =
       definition.tools
       |> Enum.map(fn tool ->
         level = ToolRegistry.capability_level(tool)
@@ -628,9 +637,18 @@ defmodule TriOnyx.GraphAnalyzer do
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
+    mount_capability_drivers =
+      if definition.docker_socket do
+        [%{tool: "docker_socket", level: :high}]
+      else
+        []
+      end
+
+    capability_drivers = tool_capability_drivers ++ mount_capability_drivers
+
     %{
       taint_sources: tool_taint ++ input_taint ++ peer_taint ++ network_taint ++ bcp_taint ++ base_taint_entry,
-      sensitivity_sources: tool_sensitivity ++ input_sensitivity ++ bcp_sensitivity,
+      sensitivity_sources: tool_sensitivity ++ mount_sensitivity ++ input_sensitivity ++ bcp_sensitivity,
       capability_drivers: capability_drivers
     }
   end
