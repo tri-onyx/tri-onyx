@@ -8,11 +8,7 @@ docker_socket: true
 trionyx_repo: true
 fs_read:
   - "/AGENTS.md"
-  - "/data/**"
 fs_write:
-  - "/data/introspection/**"
-send_to:
-  - main
 idle_timeout: 30m
 base_taint: low
 ---
