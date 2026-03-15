@@ -3,7 +3,6 @@ name: cheerleader
 description: Friendly agent that checks in periodically with encouragement and nice things
 model: claude-sonnet-4-6
 tools: Read, Write
-heartbeat_every: 30m
 network: none
 fs_read:
   - "/AGENTS.md"
