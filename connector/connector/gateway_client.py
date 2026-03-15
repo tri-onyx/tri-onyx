@@ -127,7 +127,10 @@ class GatewayClient:
 
         while not self._closing:
             try:
-                async with websockets.connect(self._config.gateway_url) as ws:
+                async with websockets.connect(
+                    self._config.gateway_url,
+                    ping_timeout=60,
+                ) as ws:
                     self._ws = ws
                     backoff = _INITIAL_BACKOFF_S
                     await self._register()

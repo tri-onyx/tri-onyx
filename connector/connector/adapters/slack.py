@@ -134,7 +134,7 @@ class SlackAdapter(BaseAdapter):
         self._app_token = config.extra.get("app_token", "")
         self._owner_user_id = config.extra.get("owner_user_id", "")
         self._default_agent = config.extra.get("default_agent", "concierge")
-        self._consent_path = config.extra.get("consent_path", "/data/slack-consent.yaml")
+        self._consent_path = config.extra.get("consent_path", "/data/slack/consent.yaml")
         self._postamble_template = config.extra.get(
             "postamble",
             (
