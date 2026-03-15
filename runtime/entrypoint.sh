@@ -145,6 +145,12 @@ elif [ "$NETWORK_POLICY" = "none" ]; then
     log "Network policy: none — allowing only Claude API"
     apply_base_iptables
     allow_host "$CLAUDE_API_HOST"
+    # If DOCKER_HOST is set, allow the Docker socket proxy through iptables.
+    if [ -n "${DOCKER_HOST:-}" ]; then
+        # Extract host:port from tcp://host:port
+        DOCKER_PROXY_ADDR="${DOCKER_HOST#tcp://}"
+        allow_host "$DOCKER_PROXY_ADDR"
+    fi
     iptables -A OUTPUT -j DROP
     log "Network policy applied: only $CLAUDE_API_HOST reachable"
 else
@@ -160,6 +166,12 @@ else
     for entry in "${HOSTS[@]}"; do
         allow_host "$entry"
     done
+
+    # If DOCKER_HOST is set, allow the Docker socket proxy through iptables.
+    if [ -n "${DOCKER_HOST:-}" ]; then
+        DOCKER_PROXY_ADDR="${DOCKER_HOST#tcp://}"
+        allow_host "$DOCKER_PROXY_ADDR"
+    fi
 
     # Drop everything else.
     iptables -A OUTPUT -j DROP
@@ -261,21 +273,6 @@ fi
 #
 # After hiding /mnt/host, gosu drops root privileges so the agent runs
 # as the unprivileged tri_onyx user with no capabilities.
-
-# If the Docker socket is mounted, add tri_onyx to its group so gosu
-# preserves socket access after privilege drop.
-# We write /etc/group directly because groupadd/usermod fail under
-# --cap-drop ALL (cannot write /etc/gshadow).
-if [ -S /var/run/docker.sock ]; then
-    DOCKER_SOCK_GID=$(stat -c '%g' /var/run/docker.sock)
-    if ! getent group "$DOCKER_SOCK_GID" >/dev/null 2>&1; then
-        echo "docker_host:x:${DOCKER_SOCK_GID}:tri_onyx" >> /etc/group
-    else
-        GROUP_NAME=$(getent group "$DOCKER_SOCK_GID" | cut -d: -f1)
-        sed -i "s/^\(${GROUP_NAME}:.*\)$/\1,tri_onyx/" /etc/group
-    fi
-    log "Added tri_onyx to docker socket group (gid=$DOCKER_SOCK_GID)"
-fi
 
 log "Dropping privileges to tri_onyx user"
 exec unshare --mount -- sh -c '
