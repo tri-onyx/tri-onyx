@@ -23,6 +23,7 @@ defmodule TriOnyx.AgentSession do
   alias TriOnyx.EventBus
   alias TriOnyx.InformationClassifier
   alias TriOnyx.RiskScorer
+  alias TriOnyx.SensitivityMatrix
   alias TriOnyx.SessionLogger
   alias TriOnyx.ToolRegistry
   alias TriOnyx.ActionApprovalQueue
@@ -160,15 +161,20 @@ defmodule TriOnyx.AgentSession do
     # Apply base_taint as a floor — model provenance risk cannot be lower than declared
     effective_taint = InformationClassifier.higher_level(classification.taint, definition.base_taint)
 
+    # Apply mount sensitivity as a floor — privileged mounts raise baseline sensitivity
+    mount_sensitivity = mount_sensitivity_floor(definition)
+    effective_sensitivity = InformationClassifier.higher_level(classification.sensitivity, mount_sensitivity)
+
     state = %{
       id: session_id,
       definition: definition,
       port: nil,
       capability_level: capability_level,
       taint_level: effective_taint,
-      sensitivity_level: classification.sensitivity,
-      information_level: InformationClassifier.higher_level(effective_taint, classification.sensitivity),
+      sensitivity_level: effective_sensitivity,
+      information_level: InformationClassifier.higher_level(effective_taint, effective_sensitivity),
       information_sources:
+        mount_sensitivity_sources(definition) ++
         if(effective_taint != :low or classification.sensitivity != :low,
           do: [classification.reason | if(definition.base_taint != :low, do: ["base_taint: #{definition.base_taint}"], else: [])],
           else: if(definition.base_taint != :low, do: ["base_taint: #{definition.base_taint}"], else: [])
@@ -1288,6 +1294,25 @@ defmodule TriOnyx.AgentSession do
   @spec generate_session_id() :: String.t()
   defp generate_session_id do
     :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
+  end
+
+  @spec mount_sensitivity_floor(AgentDefinition.t()) :: InformationClassifier.sensitivity_level()
+  defp mount_sensitivity_floor(%AgentDefinition{} = definition) do
+    [{:docker_socket, definition.docker_socket}, {:trionyx_repo, definition.trionyx_repo}]
+    |> Enum.filter(fn {_mount, enabled} -> enabled end)
+    |> Enum.map(fn {mount, _} -> SensitivityMatrix.mount_sensitivity(mount) end)
+    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  end
+
+  @spec mount_sensitivity_sources(AgentDefinition.t()) :: [String.t()]
+  defp mount_sensitivity_sources(%AgentDefinition{} = definition) do
+    [{:docker_socket, definition.docker_socket}, {:trionyx_repo, definition.trionyx_repo}]
+    |> Enum.filter(fn {_mount, enabled} -> enabled end)
+    |> Enum.filter(fn {mount, _} -> SensitivityMatrix.mount_sensitivity(mount) != :low end)
+    |> Enum.map(fn {mount, _} ->
+      level = SensitivityMatrix.mount_sensitivity(mount)
+      "mount:#{mount} (sensitivity: #{level})"
+    end)
   end
 
   @spec broadcast_event(t(), map()) :: :ok
