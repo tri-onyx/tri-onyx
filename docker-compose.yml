@@ -5,7 +5,7 @@ services:
       dockerfile: gateway.Dockerfile
     command: ["sh", "-c", "mix deps.get && mix run --no-halt"]
     ports:
-      - "4000:4000"
+      - "127.0.0.1:4000:4000"
     environment:
       - TRI_ONYX_CONNECTOR_TOKEN
       - TRI_ONYX_AGENTS_DIR=/app/workspace/agent-definitions
