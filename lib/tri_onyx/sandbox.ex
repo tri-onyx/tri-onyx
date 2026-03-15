@@ -240,10 +240,18 @@ defmodule TriOnyx.Sandbox do
 
   @spec docker_socket_flags(AgentDefinition.t()) :: [String.t()]
   defp docker_socket_flags(%AgentDefinition{docker_socket: true}) do
-    ["-v", "/var/run/docker.sock:/var/run/docker.sock"]
+    ["-v", "/var/run/docker.sock:/var/run/docker.sock", "--group-add", docker_gid()]
   end
 
   defp docker_socket_flags(%AgentDefinition{docker_socket: false}), do: []
+
+  # Returns the GID of the docker group on the host. The gateway may not
+  # have the socket mounted, so we read from TRI_ONYX_DOCKER_GID env var
+  # with a fallback to the common default (999).
+  @spec docker_gid() :: String.t()
+  defp docker_gid do
+    System.get_env("TRI_ONYX_DOCKER_GID", "999")
+  end
 
   @spec trionyx_repo_flags(AgentDefinition.t()) :: [String.t()]
   defp trionyx_repo_flags(%AgentDefinition{trionyx_repo: true}) do
