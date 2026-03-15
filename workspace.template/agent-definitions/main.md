@@ -16,7 +16,6 @@ send_to:
   - introspector
 receive_from:
   - introspector
-  - finn
 restart_targets:
   - researcher
 bcp_channels:
