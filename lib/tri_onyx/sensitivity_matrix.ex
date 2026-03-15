@@ -38,7 +38,7 @@ defmodule TriOnyx.SensitivityMatrix do
 
   | Mount         | Sensitivity | Reason                                          |
   |---------------|-------------|-------------------------------------------------|
-  | docker_socket | high        | Can inspect container env vars (API keys, tokens)|
+  | docker_socket | medium      | Read-only proxy; can see container metadata       |
   | trionyx_repo  | medium      | Internal source code, security logic             |
 
   ## Input Source Sensitivity
@@ -87,7 +87,7 @@ defmodule TriOnyx.SensitivityMatrix do
   # These are ambient capabilities, not tool results — they represent
   # what data the agent can access via its bind-mounted paths.
   @mount_sensitivity %{
-    docker_socket: :high,
+    docker_socket: :medium,
     trionyx_repo: :medium
   }
 

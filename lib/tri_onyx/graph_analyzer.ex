@@ -645,14 +645,7 @@ defmodule TriOnyx.GraphAnalyzer do
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
 
-    mount_capability_drivers =
-      if definition.docker_socket do
-        [%{tool: "docker_socket", level: :high}]
-      else
-        []
-      end
-
-    capability_drivers = tool_capability_drivers ++ mount_capability_drivers
+    capability_drivers = tool_capability_drivers
 
     %{
       taint_sources: tool_taint ++ input_taint ++ peer_taint ++ network_taint ++ bcp_taint ++ base_taint_entry,

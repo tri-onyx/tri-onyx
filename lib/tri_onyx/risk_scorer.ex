@@ -117,18 +117,13 @@ defmodule TriOnyx.RiskScorer do
   @doc """
   Infers the aggregate capability level including privileged mounts.
 
-  Docker socket access forces capability to `:high` — it grants
-  host-level control equivalent to root.
+  Docker socket access is read-only (via proxy), so it does not boost
+  capability. This overload exists so call sites can pass the definition
+  uniformly; currently it delegates to the 2-arity version.
   """
   @spec infer_capability([String.t()], atom() | [String.t()], AgentDefinition.t()) :: :low | :medium | :high
-  def infer_capability(tools, network_policy, %AgentDefinition{} = definition) when is_list(tools) do
-    base = infer_capability(tools, network_policy)
-
-    if definition.docker_socket do
-      higher_capability(base, :high)
-    else
-      base
-    end
+  def infer_capability(tools, network_policy, %AgentDefinition{}) when is_list(tools) do
+    infer_capability(tools, network_policy)
   end
 
   @doc """
