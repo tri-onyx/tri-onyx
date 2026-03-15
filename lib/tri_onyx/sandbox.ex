@@ -64,6 +64,8 @@ defmodule TriOnyx.Sandbox do
       network_flags(definition.network) ++
       volume_flags(workspace_dir) ++
       browser_flags(definition, workspace_dir) ++
+      docker_socket_flags(definition) ++
+      trionyx_repo_flags(definition) ++
       env_flags(definition, session_id) ++
       [image]
   end
@@ -235,6 +237,26 @@ defmodule TriOnyx.Sandbox do
   end
 
   defp browser_flags(%AgentDefinition{browser: false}, _workspace_dir), do: []
+
+  @spec docker_socket_flags(AgentDefinition.t()) :: [String.t()]
+  defp docker_socket_flags(%AgentDefinition{docker_socket: true}) do
+    ["-v", "/var/run/docker.sock:/var/run/docker.sock"]
+  end
+
+  defp docker_socket_flags(%AgentDefinition{docker_socket: false}), do: []
+
+  @spec trionyx_repo_flags(AgentDefinition.t()) :: [String.t()]
+  defp trionyx_repo_flags(%AgentDefinition{trionyx_repo: true}) do
+    repo_host_path =
+      case System.get_env("TRI_ONYX_HOST_ROOT") do
+        nil -> File.cwd!()
+        host_root -> host_root
+      end
+
+    ["-v", "#{repo_host_path}:/repo:ro"]
+  end
+
+  defp trionyx_repo_flags(%AgentDefinition{trionyx_repo: false}), do: []
 
   @spec env_flags(AgentDefinition.t(), String.t()) :: [String.t()]
   defp env_flags(%AgentDefinition{} = definition, session_id) do

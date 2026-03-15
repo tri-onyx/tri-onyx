@@ -68,7 +68,9 @@ defmodule TriOnyx.AgentDefinition do
           plugins: [String.t()],
           base_taint: :low | :medium | :high,
           input_sources: [atom()],
-          browser: boolean()
+          browser: boolean(),
+          docker_socket: boolean(),
+          trionyx_repo: boolean()
         }
 
   @enforce_keys [:name, :tools, :system_prompt]
@@ -92,7 +94,9 @@ defmodule TriOnyx.AgentDefinition do
     plugins: [],
     base_taint: :low,
     input_sources: [],
-    browser: false
+    browser: false,
+    docker_socket: false,
+    trionyx_repo: false
   ]
 
   @doc """
@@ -171,7 +175,9 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, plugins} <- parse_string_list(yaml, "plugins"),
          {:ok, base_taint} <- parse_base_taint(yaml),
          {:ok, input_sources} <- parse_input_sources(yaml),
-         {:ok, browser} <- parse_optional_boolean(yaml, "browser") do
+         {:ok, browser} <- parse_optional_boolean(yaml, "browser"),
+         {:ok, docker_socket} <- parse_optional_boolean(yaml, "docker_socket"),
+         {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo") do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -221,7 +227,9 @@ defmodule TriOnyx.AgentDefinition do
          plugins: plugins,
          base_taint: base_taint,
          input_sources: auto_include_cron(input_sources, cron_schedules),
-         browser: browser
+         browser: browser,
+         docker_socket: docker_socket,
+         trionyx_repo: trionyx_repo
        }}
     end
   end

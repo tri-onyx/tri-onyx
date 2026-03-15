@@ -28,6 +28,7 @@ defmodule TriOnyx.RiskScorer do
   final authority.
   """
 
+  alias TriOnyx.AgentDefinition
   alias TriOnyx.ToolRegistry
   alias TriOnyx.TaintMatrix
   alias TriOnyx.SensitivityMatrix
@@ -114,6 +115,23 @@ defmodule TriOnyx.RiskScorer do
   end
 
   @doc """
+  Infers the aggregate capability level including privileged mounts.
+
+  Docker socket access forces capability to `:high` — it grants
+  host-level control equivalent to root.
+  """
+  @spec infer_capability([String.t()], atom() | [String.t()], AgentDefinition.t()) :: :low | :medium | :high
+  def infer_capability(tools, network_policy, %AgentDefinition{} = definition) when is_list(tools) do
+    base = infer_capability(tools, network_policy)
+
+    if definition.docker_socket do
+      higher_capability(base, :high)
+    else
+      base
+    end
+  end
+
+  @doc """
   Infers input taint from trigger type and agent configuration.
 
   This is a heuristic for worst-case taint. The actual taint status is
@@ -143,6 +161,24 @@ defmodule TriOnyx.RiskScorer do
   end
 
   @doc """
+  Infers input sensitivity from agent definition, including privileged mounts.
+
+  Folds in mount sensitivities for `docker_socket` and `trionyx_repo` on top
+  of the tool-based sensitivity.
+  """
+  @spec infer_sensitivity([String.t()], AgentDefinition.t()) :: atom()
+  def infer_sensitivity(tools, %AgentDefinition{} = definition) when is_list(tools) do
+    base = infer_sensitivity(tools)
+
+    mount_levels =
+      [{:docker_socket, definition.docker_socket}, {:trionyx_repo, definition.trionyx_repo}]
+      |> Enum.filter(fn {_mount, enabled} -> enabled end)
+      |> Enum.map(fn {mount, _} -> SensitivityMatrix.mount_sensitivity(mount) end)
+
+    Enum.reduce(mount_levels, base, &TriOnyx.InformationClassifier.higher_level/2)
+  end
+
+  @doc """
   Infers input_risk from trigger type and agent configuration.
 
   Returns `max(infer_taint, infer_sensitivity)`.
@@ -151,6 +187,17 @@ defmodule TriOnyx.RiskScorer do
   def infer_input_risk(trigger_type, tools) when is_atom(trigger_type) and is_list(tools) do
     taint = infer_taint(trigger_type, tools)
     sensitivity = infer_sensitivity(tools)
+    higher_level(taint, sensitivity)
+  end
+
+  @doc """
+  Infers input_risk from trigger type and agent definition, including mounts.
+  """
+  @spec infer_input_risk(atom(), [String.t()], AgentDefinition.t()) :: atom()
+  def infer_input_risk(trigger_type, tools, %AgentDefinition{} = definition)
+      when is_atom(trigger_type) and is_list(tools) do
+    taint = infer_taint(trigger_type, tools)
+    sensitivity = infer_sensitivity(tools, definition)
     higher_level(taint, sensitivity)
   end
 
