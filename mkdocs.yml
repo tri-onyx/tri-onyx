@@ -65,6 +65,8 @@ nav:
       - Protocol: protocol.md
       - FUSE Driver: fuse-driver-spec.md
       - BCP: bcp.md
+      - Web Dashboard: web-dashboard.md
+      - API Reference: api-reference.md
   - Guides:
       - Matrix Setup: matrix-guide.md
       - Email Setup: email-setup.md
@@ -88,5 +90,6 @@ nav:
       - twitter: agents/twitter.md
       - webhook-handler: agents/webhook-handler.md
   - Development:
+      - Project Structure: project-structure.md
       - E2E Testing: e2e-testing.md
       - Architecture Decisions: decisions.md
