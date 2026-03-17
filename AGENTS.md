@@ -63,6 +63,23 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 - After rebuilding, restart any running containers to pick up the new image
 - For runtime-only changes (Python files under `runtime/`), just restart the agent container — no rebuild needed
 
+## Documentation
+
+The docs site uses MkDocs Material and is served via Docker for local development:
+
+```bash
+# Start docs server (live-reload on file changes, serves at http://localhost:8000)
+docker compose -f docker-compose.docs.yml up -d
+
+# Stop
+docker compose -f docker-compose.docs.yml down
+```
+
+- Source files are in `docs/`, config in `mkdocs.yml`, custom styles in `docs/stylesheets/extra.css`
+- The volume mount means edits to any file under `docs/` or `mkdocs.yml` trigger an automatic reload — no container restart needed
+- Use `uv run scripts/screenshot.py http://localhost:8000/<path> -o ./tmp/screenshot.png` to visually verify changes
+- Agent docs in `docs/agents/` are auto-generated from definitions by CI — don't edit them by hand unless also updating the generator
+
 ## Screenshot Tool
 
 - Use `uv run scripts/screenshot.py <url-or-file>` to render a page and save a screenshot
