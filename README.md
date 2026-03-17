@@ -1,12 +1,18 @@
 # TriOnyx
 
+[![Elixir](https://img.shields.io/badge/Elixir-OTP-4B275F?logo=elixir&logoColor=white)](https://elixir-lang.org)
+[![Python](https://img.shields.io/badge/Python-Agent_Runtime-3776AB?logo=python&logoColor=white)](https://python.org)
+[![Go](https://img.shields.io/badge/Go-FUSE_Driver-00ADD8?logo=go&logoColor=white)](https://go.dev)
+[![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)](https://docker.com)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 **Track what agents see, not just what they do.**
 
 A security-first agent runtime that tracks **information flow** between isolated LLM agents. Taint tracking, sensitivity labels, and bandwidth-constrained communication — built on Elixir/OTP for a single operator running their own agents.
 
-[Documentation](https://tri-onyx.com) | [Getting Started](https://tri-onyx.com/getting-started/) | [API Reference](https://tri-onyx.com/api-reference/)
-
-![Agent topology showing taint and sensitivity propagation](docs/agent-graph.png)
+<p>
+  <a href="https://tri-onyx.com"><strong>Documentation</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://tri-onyx.com/getting-started/"><strong>Getting Started</strong></a>&nbsp;&nbsp;|&nbsp;&nbsp;<a href="https://tri-onyx.com/api-reference/"><strong>API Reference</strong></a>
+</p>
 
 ---
 
@@ -14,14 +20,13 @@ A security-first agent runtime that tracks **information flow** between isolated
 
 Other agent runtimes sandbox **capability** — restrict filesystem, disable shell, limit network. This misses the point. The real danger isn't any single property. It's the combination of three:
 
-| | | |
-|:---:|:---:|:---:|
-| **Untrusted content** | **Sensitive information** | **Capabilities** |
-| Web pages, emails, API responses — any of which can carry prompt injections | Credentials, private files, internal APIs — things an attacker wants to reach | Shell access, file writes, inter-agent messaging — tools to act on a hijacked context |
-
-**Untrusted content x Sensitive information x Capabilities = High-risk agent**
-
-TriOnyx tracks **information**, not just capability — blocking tainted data from reaching sensitive resources.
+> **Untrusted content** — Web pages, emails, API responses — any of which can carry prompt injections.
+>
+> **x Sensitive information** — Credentials, private files, internal APIs — things an attacker wants to reach.
+>
+> **x Capabilities** — Shell access, file writes, inter-agent messaging — tools to act on a hijacked context.
+>
+> **= High-risk agent** — TriOnyx tracks **information**, not just capability — blocking tainted data from reaching sensitive resources.
 
 ---
 
@@ -37,34 +42,27 @@ TriOnyx tracks **information**, not just capability — blocking tainted data fr
 - **Plugin system** — reusable agent extensions installable from git repos
 - **Auditable everything** — structured logs for file access, tool calls, message routing, and policy violations
 
+![Agent topology showing taint and sensitivity propagation](docs/agent-graph.png)
+
 ---
 
 ## Architecture
 
 ```
-                External Triggers
-                (webhooks, chat, cron, email)
-                        |
-                        v
-+------------------------------------------+
-|          Elixir/OTP Gateway              |
-|                                          |
-|  Non-agentic. No LLM. No autonomy.      |
-|  Deterministic security boundary.        |
-|                                          |
-|  Agent lifecycle, taint & sensitivity    |
-|  tracking, message interception,         |
-|  risk scoring, credential management     |
-+---------+--------------+-----------------+
-          |              |
-          v              v
-+-------------+  +-------------+       +-------------+
-| Agent A     |  | Agent B     |       | Connector   |
-| Python +    |  | Python +    |       | (Python)    |
-| Claude SDK  |  | Claude SDK  |       | Matrix      |
-| FUSE (Go)   |  | FUSE (Go)   |       | adapter     |
-| Docker      |  | Docker      |       +-------------+
-+-------------+  +-------------+
+            External Triggers (webhooks, chat, cron, email)
+                            |
+                            v
++----------------------------------------------+
+|             Elixir/OTP Gateway               |
+|  Non-agentic. No LLM. Deterministic policy.  |
++-------------+----------------+---------------+
+              |                |
+              v                v
++---------------+  +---------------+     +-------------+
+| Agent A       |  | Agent B       |     | Connector   |
+| Python+Claude |  | Python+Claude |     | Matrix      |
+| FUSE (Go)     |  | FUSE (Go)     |     +-------------+
++---------------+  +---------------+
 ```
 
 See the [full architecture docs](https://tri-onyx.com/agent-runtime/) for details.
@@ -154,5 +152,5 @@ Full documentation is available at **[tri-onyx.com](https://tri-onyx.com)**:
 - [API Reference](https://tri-onyx.com/api-reference/) — full HTTP API documentation
 - [Web Dashboard](https://tri-onyx.com/web-dashboard/) — monitoring and management UI
 - [Comparison with OpenClaw](https://tri-onyx.com/comparison/) — detailed side-by-side
-- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001–010
+- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001-010
 - [Project Structure](https://tri-onyx.com/project-structure/) — full source tree reference
