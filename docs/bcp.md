@@ -2,7 +2,8 @@
 
 Protocol specification for secure communication between tainted and untainted agents in TriOnyx.
 
-For the security rationale behind this protocol, see [ADR-001: Information Is the Threat](../adr/001-information-is-the-threat.md) and [ADR-005: Bandwidth-Constrained Trust](../adr/005-bandwidth-constrained-trust.md).
+!!! abstract "Design rationale"
+    Every bit of channel capacity between a tainted and untainted agent is a bit of attack surface. BCP minimizes bandwidth to the task requirement, prefers structure over free text, and makes escalation expensive by design.
 
 ---
 
@@ -125,46 +126,47 @@ The human approval step provides two security properties:
 1. **Content review:** A human can recognize injection-style attacks, suspicious URLs, and social engineering.
 2. **Latency as defense:** The approval step introduces delay. Many attack strategies depend on speed — rapid exfiltration, time-pressure social engineering, chained exploits. The latency disrupts these patterns structurally.
 
+!!! danger "Elevated risk"
+    A 100-word summary carries ~1,100 bits of attacker-controllable content — enough to encode convincing natural-language instructions. **Mandatory human-in-the-loop approval** is the primary defense.
+
 **Use when:** The information need is genuinely open-ended and cannot be decomposed into Category 1 or 2 queries. This should be rare.
 
 ---
 
 ## Protocol Flow
 
-```
-┌─────────────┐                           ┌─────────────┐
-│  Controller  │                           │   Reader     │
-│ (Untainted)  │                           │  (Tainted)   │
-└──────┬──────┘                           └──────┬───────┘
-       │                                          │
-       │  1. Analyze task, identify info needs    │
-       │                                          │
-       │  2. Select minimum category per need     │
-       │                                          │
-       │  3. Send Cat-1 query ───────────────────>│
-       │                                          │  Process untrusted
-       │  4. Receive structured response <────────│  content, respond
-       │                                          │  within constraints
-       │  5. Validate (deterministic) ✓           │
-       │                                          │
-       │  6. Send Cat-2 query ───────────────────>│
-       │                                          │
-       │  7. Receive Q&A response <───────────────│
-       │                                          │
-       │  8. Validate (format + consistency) ✓    │
-       │                                          │
-       │  [If needed, escalate to Cat-3]          │
-       │                                          │
-       │  9. Send Cat-3 query ───────────────────>│
-       │                                          │
-       │  10. Receive summary <───────────────────│
-       │                                          │
-       │  11. Route to human approval ──> [Human] │
-       │                                          │
-       │  12. Approved ✓ / Rejected ✗             │
-       │                                          │
-       │  13. Act on validated information         │
-       │                                          │
+```mermaid
+sequenceDiagram
+    participant C as Controller<br/>(Untainted)
+    participant G as Gateway
+    participant R as Reader<br/>(Tainted)
+    participant H as Human
+
+    Note over C: 1. Analyze task<br/>2. Select minimum category
+
+    C->>G: Cat-1 query (structured fields)
+    G->>R: Route query
+    R->>G: Structured response
+    G->>G: Validate (deterministic)
+    G->>C: Validated response
+
+    C->>G: Cat-2 query (constrained Q&A)
+    G->>R: Route query
+    R->>G: Q&A response
+    G->>G: Validate (format + consistency)
+    G->>C: Validated response
+
+    Note over C: Escalate only if needed
+
+    C->>G: Cat-3 query (free summary)
+    G->>R: Route query
+    R->>G: Summary
+    G->>G: Length enforcement
+    G->>H: Route to approval queue
+    H->>G: Approved / Rejected
+    G->>C: Validated summary
+
+    Note over C: Act on validated information
 ```
 
 ### Category Selection Policy
