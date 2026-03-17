@@ -13,7 +13,8 @@ This guide walks you through setting up a working TriOnyx instance from a fresh 
 - A **Claude API key** or OAuth token (from [console.anthropic.com](https://console.anthropic.com))
 - A **Matrix account** for the bot (see [Matrix Setup](matrix-guide.md) for details), or a **Slack workspace** with a bot app
 
-Linux is recommended. The FUSE driver requires `/dev/fuse`, which is available natively on Linux. macOS works for gateway and connector development but cannot run agent containers with FUSE sandboxing without a Linux VM.
+!!! warning "Linux recommended"
+    The FUSE driver requires `/dev/fuse`, which is available natively on Linux. macOS works for gateway and connector development but cannot run agent containers with FUSE sandboxing without a Linux VM.
 
 ---
 
@@ -48,7 +49,8 @@ cp secrets/connector-config.yaml.example secrets/connector-config.yaml
 cp -r workspace.template/ workspace/
 ```
 
-The `.env` and `secrets/` directory are gitignored — your secrets will never be committed.
+!!! tip "Secrets are safe"
+    The `.env` and `secrets/` directory are gitignored — your secrets will never be committed.
 
 ---
 
@@ -285,34 +287,29 @@ uv run scripts/generate-templates.py --check
 
 ## Troubleshooting
 
-### Agent container fails to start
+??? question "Agent container fails to start"
+    - Check that `fuse/tri-onyx-fs` exists and was compiled for Linux (not macOS)
+    - Ensure Docker has access to `/dev/fuse`: `ls -la /dev/fuse`
+    - Verify `HOST_UID`/`HOST_GID` match your user: `id -u && id -g`
 
-- Check that `fuse/tri-onyx-fs` exists and was compiled for Linux (not macOS)
-- Ensure Docker has access to `/dev/fuse`: `ls -la /dev/fuse`
-- Verify `HOST_UID`/`HOST_GID` match your user: `id -u && id -g`
+??? question "connector_token mismatch"
+    `TRI_ONYX_CONNECTOR_TOKEN` must be identical in `.env` (read by both services via Docker Compose) and in `secrets/connector-config.yaml` under `gateway.token`.
 
-### "connector_token mismatch"
+??? question "Matrix sync fails"
+    - Verify the homeserver URL is reachable from inside the container
+    - Check that the access token hasn't expired (re-login to get a new one)
+    - See [Matrix Setup](matrix-guide.md) for detailed troubleshooting
 
-`TRI_ONYX_CONNECTOR_TOKEN` must be identical in `.env` (read by both services via Docker Compose) and in `secrets/connector-config.yaml` under `gateway.token`.
-
-### Matrix sync fails
-
-- Verify the homeserver URL is reachable from inside the container
-- Check that the access token hasn't expired (re-login to get a new one)
-- See [Matrix Setup](matrix-guide.md) for detailed troubleshooting
-
-### No response from agent
-
-1. Check gateway logs: `docker compose logs gateway | tail -50`
-2. Check if the agent started: `curl http://localhost:4000/agents`
-3. Verify the room-to-agent mapping in `secrets/connector-config.yaml`
-4. Make sure `CLAUDE_CODE_OAUTH_TOKEN` is set and valid
+??? question "No response from agent"
+    1. Check gateway logs: `docker compose logs gateway | tail -50`
+    2. Check if the agent started: `curl http://localhost:4000/agents`
+    3. Verify the room-to-agent mapping in `secrets/connector-config.yaml`
+    4. Make sure `CLAUDE_CODE_OAUTH_TOKEN` is set and valid
 
 ---
 
 ## Next steps
 
-- [Security Model](../adr/SECURITY_MODEL.md) — Understand taint, sensitivity, and capability tracking
 - [Matrix Setup](matrix-guide.md) — Detailed chat connector configuration
 - [Agent Runtime](agent-runtime.md) — How agent sessions work
 - [Plugins](plugins.md) — Install and manage agent plugins

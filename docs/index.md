@@ -1,132 +1,195 @@
-# TriOnyx -- What OpenClaw would be if security came first
+---
+hide:
+  - toc
+---
 
-A complete agent runtime that tracks what agents have *seen*, not just what they can *do*.
+<div class="tx-hero" markdown>
+<div class="tx-hero__content" markdown>
 
-![Agent topology showing taint and sensitivity propagation](agent-graph.png)
+# TriOnyx
 
-## The core problem
+<p class="tx-hero__tagline">track what agents see, not just what they do</p>
 
-OpenClaw sandboxes **capability** -- restrict filesystem access, disable shell, limit network. This misses the point. An LLM that has ingested a prompt injection is dangerous regardless of what tools it has. The real threat is **information**: what enters an agent's context, and where it flows next.
+<p class="tx-hero__subtitle">
+A security-first agent runtime that tracks <strong>information flow</strong> between isolated LLM agents.
+Taint tracking, sensitivity labels, and bandwidth-constrained communication &mdash;
+built on Elixir/OTP for a single operator running their own agents.
+</p>
 
-## What TriOnyx does
+<div class="tx-hero__actions">
+  <a href="getting-started/" class="md-button md-button--primary">Get Started</a>
+  <a href="agent-runtime/" class="md-button md-button--secondary">Architecture</a>
+</div>
 
-- **Isolated agent containers** -- each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state
-- **Taint and sensitivity tracking** -- two independent axes (Biba integrity, Bell-LaPadula confidentiality) that measure what each agent has been exposed to
-- **Information flow enforcement** -- the gateway intercepts all inter-agent communication and blocks flows that would violate integrity or confidentiality constraints
-- **Bandwidth-Constrained Protocol** -- tainted agents can communicate with clean agents through structured, human-approvable message formats
-- **Browser sessions** -- agents can get a headless Chromium browser with persistent login sessions from the host
-- **Plugin system** -- reusable agent extensions (news aggregation, bookmarks, diary, etc.) installable from git repos
-- **Web dashboard** -- real-time agent topology graph, classification matrix, and log viewer
-- **Auditable everything** -- structured logs for file access, tool calls, message routing, and policy violations
-- **Risk reduction, not elimination** -- the security model makes attacks harder and detectable, not theoretically impossible
+</div>
+</div>
 
-Built on Elixir/OTP. Designed for a single operator running their own agents.
+<div class="tx-section-header" markdown>
+
+## The lethal trifecta
+
+Other agent runtimes sandbox **capability** &mdash; restrict filesystem, disable shell, limit network.
+This misses the point. The real danger isn't any single property of an agent. It's the combination of three.
+
+</div>
+
+<div class="tx-trifecta">
+  <div class="tx-trifecta__card">
+    <div class="tx-trifecta__icon">&#x2623;</div>
+    <div class="tx-trifecta__title">Untrusted content</div>
+    <div class="tx-trifecta__desc">Web pages, emails, API responses &mdash; any of which can carry prompt injections.</div>
+  </div>
+  <div class="tx-trifecta__op">&times;</div>
+  <div class="tx-trifecta__card">
+    <div class="tx-trifecta__icon">&#x1F511;</div>
+    <div class="tx-trifecta__title">Sensitive information</div>
+    <div class="tx-trifecta__desc">Credentials, private files, internal APIs &mdash; things an attacker wants to reach.</div>
+  </div>
+  <div class="tx-trifecta__op">&times;</div>
+  <div class="tx-trifecta__card">
+    <div class="tx-trifecta__icon">&#x26A1;</div>
+    <div class="tx-trifecta__title">Capabilities</div>
+    <div class="tx-trifecta__desc">Shell access, file writes, inter-agent messaging &mdash; tools to act on a hijacked context.</div>
+  </div>
+</div>
+
+<div class="tx-trifecta-equals">
+  <div class="tx-trifecta-equals__op">=</div>
+  <div class="tx-trifecta-equals__card">
+    <div class="tx-trifecta-equals__headline">High-risk agent</div>
+    <div class="tx-trifecta-equals__desc">TriOnyx tracks <strong>information</strong>, not just capability &mdash; blocking tainted data from reaching sensitive resources.</div>
+  </div>
+</div>
 
 ## Architecture
 
+```mermaid
+graph TB
+    subgraph triggers["External Triggers"]
+        WH[Webhooks]
+        CH[Chat]
+        CR[Cron]
+        EM[Email]
+    end
+
+    subgraph gateway["Elixir/OTP Gateway"]
+        direction TB
+        LC[Agent Lifecycle]
+        TT[Taint & Sensitivity Tracking]
+        MV[Message Validation]
+        RS[Risk Scoring]
+        CM[Credential Management]
+        BQ[BCP Approval Queue]
+    end
+
+    subgraph agents["Agent Containers"]
+        direction LR
+        subgraph agentA["Agent A"]
+            PA[Python + Claude SDK]
+            FA[FUSE Driver]
+        end
+        subgraph agentB["Agent B"]
+            PB[Python + Claude SDK]
+            FB[FUSE Driver]
+        end
+    end
+
+    CON[Connector<br/>Matrix / Slack]
+
+    triggers --> gateway
+    gateway --> agents
+    gateway <--> CON
+
+    style triggers fill:#1c2536,stroke:#30363d,color:#8b949e
+    style gateway fill:#0f2d1a,stroke:#238636,color:#3fb950
+    style agents fill:#1a1e24,stroke:#30363d,color:#c9d1d9
+    style agentA fill:#161b22,stroke:#21262d,color:#c9d1d9
+    style agentB fill:#161b22,stroke:#21262d,color:#c9d1d9
+    style CON fill:#1c2536,stroke:#1f6feb,color:#58a6ff
 ```
-                External Triggers
-                (webhooks, chat, cron, email)
-                        |
-                        v
-+------------------------------------------+
-|          Elixir/OTP Gateway              |
-|                                          |
-|  * Agent lifecycle (supervision trees)   |
-|  * Taint & sensitivity tracking          |
-|  * Message interception & validation     |
-|  * Risk scoring & violation detection    |
-|  * Credential management (sole holder)   |
-|  * Graph analysis (transitive risk)      |
-|  * BCP approval queue                    |
-|  * Webhook receiver & routing            |
-|  * Cron scheduler & heartbeats           |
-|                                          |
-|  Non-agentic. No LLM. No autonomy.      |
-|  Deterministic security boundary.        |
-+---------+--------------+-----------------+
-          |              |
-          v              v
-+-------------+  +-------------+       +-------------+
-| Agent A     |  | Agent B     |       | Connector   |
-|             |  |             |       | (Python)    |
-| Python +    |  | Python +    |       |             |
-| Claude SDK  |  | Claude SDK  |       | Matrix      |
-|             |  |             |       | adapter     |
-| +---------+ |  | +---------+ |       +-------------+
-| |FUSE     | |  | |FUSE     | |
-| |Driver   | |  | |Driver   | |
-| |(Go)     | |  | |(Go)     | |
-| +---------+ |  | +---------+ |
-| Docker      |  | Docker      |
-| Container   |  | Container   |
-+-------------+  +-------------+
-```
 
-**Gateway (Elixir/OTP)** -- Non-agentic control plane. Manages agent lifecycles, intercepts all inter-agent messages, tracks information exposure, computes risk scores, enforces security policies, and routes webhooks, emails, and scheduled triggers.
+<div style="text-align: center; margin-top: -0.5rem; margin-bottom: 2rem;">
+<small style="color: #8b949e;">
+<strong>Gateway</strong> &mdash; Non-agentic control plane. No LLM. No autonomy. Deterministic security boundary.<br/>
+<strong>Agents</strong> &mdash; Python + Claude SDK inside Docker. Communicate with the gateway over JSON Lines.<br/>
+<strong>FUSE</strong> &mdash; Go driver enforcing per-file read/write policies. Logs all access.<br/>
+<strong>Connector</strong> &mdash; Bridges the gateway to Matrix, Slack, or email.
+</small>
+</div>
 
-**Agent Runtime (Python)** -- Drives Claude sessions via the Claude Agent SDK inside Docker containers. Communicates with the gateway over JSON Lines on stdin/stdout. Optionally runs a headless browser for web interaction.
+<div class="tx-section-header" markdown>
 
-**FUSE Driver (Go)** -- Passthrough filesystem enforcing per-file read/write policies inside each container. Logs all access and denials as structured events.
+## Features
 
-**Connector (Python)** -- Bridges the gateway to chat platforms via WebSocket. Currently supports Matrix.
+</div>
 
-**Web Dashboard** -- Static HTML frontends served by the gateway for monitoring agent topology, classification matrices, and session logs.
+<div class="tx-features">
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F4E6;</span><h3>Isolated containers</h3><p>Each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F6E1;</span><h3>Taint tracking</h3><p>Biba integrity model tracks what each agent has been exposed to. Untrusted web data, user uploads, and API responses all carry taint.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F512;</span><h3>Sensitivity labels</h3><p>Bell-LaPadula confidentiality tracks access to secrets, credentials, and private data. The two axes are independent.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F504;</span><h3>Information flow enforcement</h3><p>The gateway intercepts all inter-agent messages and blocks flows that violate integrity or confidentiality constraints.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F4AC;</span><h3>Bandwidth-Constrained Protocol</h3><p>Tainted agents communicate with clean agents through structured, bandwidth-limited, human-approvable message formats.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F4C2;</span><h3>FUSE filesystem</h3><p>Custom Go driver enforces per-file read/write policies inside each container. O(1) path-trie lookups, structured access logging.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F310;</span><h3>Browser sessions</h3><p>Agents can get a headless Chromium browser with persistent login sessions from the host. No credential sharing.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F9E9;</span><h3>Plugin system</h3><p>Reusable agent extensions (news aggregation, bookmarks, diary) installable from git repos with FUSE-enforced access.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F50D;</span><h3>Auditable everything</h3><p>Structured logs for file access, tool calls, message routing, and policy violations. Queryable audit API.</p></div>
+</div>
 
-**New here?** Start with the [Getting Started guide](getting-started.md) for a complete walkthrough.
+!!! tip "New here?"
+    Start with the [Getting Started guide](getting-started.md) for a complete walkthrough,
+    or read the [Comparison with OpenClaw](comparison.md) to understand the security model.
 
 ## Quick start
 
-### Prerequisites
+=== "Build"
 
-- Docker
+    ```bash
+    # Gateway image (Elixir/OTP)
+    docker build -f gateway.Dockerfile -t tri-onyx-gateway:latest .
 
-### Build
+    # Agent runtime image (Python + FUSE sandbox)
+    docker build -f agent.Dockerfile -t tri-onyx-agent:latest .
 
-```bash
-# Gateway image (Elixir/OTP)
-docker build -f gateway.Dockerfile -t tri-onyx-gateway:latest .
+    # Connector image (Python, for Matrix chat bridge)
+    docker build -f connector.Dockerfile -t connector:latest .
+    ```
 
-# Agent runtime image (Python + FUSE sandbox)
-docker build -f agent.Dockerfile -t tri-onyx-agent:latest .
+    The agent image requires a pre-built FUSE driver binary at `fuse/tri-onyx-fs`.
+    See the [FUSE Driver spec](fuse-driver-spec.md) for build instructions.
 
-# Connector image (Python, for Matrix chat bridge)
-docker build -f connector.Dockerfile -t connector:latest .
-```
+=== "Run"
 
-The agent image requires a pre-built FUSE driver binary at `fuse/tri-onyx-fs`. See `fuse/README.md` for build instructions.
+    ```bash
+    docker compose up
+    ```
 
-### Run
+    Or run the gateway standalone:
 
-```bash
-docker compose up
-```
+    ```bash
+    docker run --rm -p 4000:4000 \
+      -v $(pwd):/app -w /app \
+      -v /var/run/docker.sock:/var/run/docker.sock \
+      -e TRI_ONYX_HOST_ROOT=$(pwd) \
+      --env-file .env \
+      tri-onyx-gateway:latest mix run --no-halt
+    ```
 
-Or run the gateway standalone:
+=== "Test"
 
-```bash
-docker run --rm -p 4000:4000 \
-  -v $(pwd):/app -w /app \
-  -v /var/run/docker.sock:/var/run/docker.sock \
-  -e TRI_ONYX_HOST_ROOT=$(pwd) \
-  --env-file .env \
-  tri-onyx-gateway:latest mix run --no-halt
-```
+    ```bash
+    # Elixir gateway tests
+    docker run --rm -v $(pwd):/app -w /app \
+      tri-onyx-gateway:latest mix test
 
-`TRI_ONYX_HOST_ROOT` tells the gateway the real host path so that agent container bind mounts resolve correctly.
+    # Go FUSE driver tests
+    docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
+      --security-opt apparmor=unconfined \
+      -v $(pwd)/fuse:/src -w /src golang:1.22 \
+      bash -c "apt-get update -qq && \
+        apt-get install -y -qq fuse3 2>/dev/null && \
+        go test ./..."
 
-### Test
-
-```bash
-# Elixir gateway tests
-docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test
-
-# Go FUSE driver tests
-docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
-  --security-opt apparmor=unconfined \
-  -v $(pwd)/fuse:/src -w /src golang:1.22 \
-  bash -c "apt-get update -qq && apt-get install -y -qq fuse3 2>/dev/null && go test ./..."
-
-# Python connector tests
-docker run --rm -v $(pwd)/connector:/app -w /app connector:latest uv run pytest
-```
+    # Python connector tests
+    docker run --rm -v $(pwd)/connector:/app -w /app \
+      connector:latest uv run pytest
+    ```

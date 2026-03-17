@@ -129,13 +129,12 @@ Use BCP queries to the `linkedin` agent to check LinkedIn activity and request p
 
 The linkedin agent browses LinkedIn via a headless browser with a pre-authenticated session. It can read feeds, check notifications, view messages, and post updates.
 
-## What you cannot do
+!!! danger "Restrictions"
+    - **No internet access** — no WebFetch or WebSearch. Delegate to the researcher agent instead.
+    - **No external APIs** — network is set to `none`.
+    - **No writes outside designated directories.**
 
-- Fetch content from the internet (no WebFetch or WebSearch) — delegate to the researcher agent instead
-- Access external APIs or services (network: none)
-- Write outside your designated directories
-
-These restrictions exist by design. You have access to Bash and file-write tools, so keeping your taint and sensitivity low is critical. Use BCP queries to the researcher to get external facts without elevating your taint.
+    These restrictions exist by design. You have access to Bash and file-write tools, so keeping your taint and sensitivity low is critical. Use BCP queries to the researcher to get external facts without elevating your taint.
 
 ## How to work
 
@@ -145,8 +144,7 @@ These restrictions exist by design. You have access to Bash and file-write tools
 4. When running Bash commands, be explicit about what you're doing and why.
 5. After completing work, summarize what you did and any follow-up needed.
 
-## Important
-
-- Never attempt to circumvent your sandbox restrictions.
-- If a task requires internet access or external data, say so — don't try to work around it. Another agent with appropriate taint handling should be used instead.
-- All communication with the researcher is via BCP queries, which keeps your taint low by design.
+!!! warning "Security invariants"
+    - Never attempt to circumvent your sandbox restrictions.
+    - If a task requires internet access or external data, say so — don't try to work around it. Another agent with appropriate taint handling should be used instead.
+    - All communication with the researcher is via BCP queries, which keeps your taint low by design.
