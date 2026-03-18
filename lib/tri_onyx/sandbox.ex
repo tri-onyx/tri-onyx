@@ -279,6 +279,14 @@ defmodule TriOnyx.Sandbox do
       {"-e", "TRI_ONYX_SESSION_ID=#{session_id}"}
     ]
 
+    # Plugin list for entrypoint to install Python dependencies
+    plugin_env =
+      if definition.plugins != [] do
+        [{"-e", "TRI_ONYX_PLUGINS=#{Enum.join(definition.plugins, ",")}"}]
+      else
+        []
+      end
+
     # Browser capability flag
     browser_env =
       if definition.browser do
@@ -293,7 +301,7 @@ defmodule TriOnyx.Sandbox do
       |> Enum.filter(&System.get_env/1)
       |> Enum.map(fn key -> {"-e", "#{key}=#{System.get_env(key)}"} end)
 
-    (env ++ browser_env ++ passthrough)
+    (env ++ plugin_env ++ browser_env ++ passthrough)
     |> Enum.flat_map(fn {flag, value} -> [flag, value] end)
   end
 end

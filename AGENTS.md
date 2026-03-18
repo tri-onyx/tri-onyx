@@ -10,6 +10,7 @@ The `workspace/` directory is tracked by a separate git repository outside the s
 
 - **NEVER delete `.git` directories** — especially inside submodules or nested repos. Losing `.git` means losing all commit history, and if there is no upstream remote, that history is **unrecoverable**.
 - **NEVER run `rm -rf` on directories you don't fully understand** — always ask the user before deleting anything that could contain irreplaceable data.
+- **NEVER use `sudo`** — if a command requires elevated privileges, ask the user to run it themselves.
 - When converting a submodule to regular files, only remove the index entry (`git rm --cached`) and stage the contents. Do not touch the `.git` directory inside it.
 
 ## Development Workflow
@@ -62,6 +63,11 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
   `docker build -t tri-onyx-gateway:latest -f gateway.Dockerfile .`
 - After rebuilding, restart any running containers to pick up the new image
 - For runtime-only changes (Python files under `runtime/`), just restart the agent container — no rebuild needed
+
+## Source of Truth
+
+- **Never duplicate logic or data** across languages/files if it can be avoided. Duplication leads to silent drift across sessions.
+- **Elixir is the source of truth** for risk model data (taint, sensitivity, capability matrices), tool metadata, and agent configuration logic. When other languages (Python scripts, docs generators, etc.) need this data, export it from Elixir (e.g., Mix task outputting JSON) rather than maintaining a parallel copy.
 
 ## Documentation
 

@@ -79,6 +79,25 @@ done
 log "FUSE mount ready at /workspace"
 
 # -----------------------------------------------------------------------
+# 2.5. Install plugin Python dependencies
+# -----------------------------------------------------------------------
+# Plugins with a pyproject.toml need their dependencies available in the
+# container. Install them into the system Python (no venv, no symlinks)
+# BEFORE network lockdown so PyPI is reachable. Uses /mnt/host (raw bind
+# mount) to avoid FUSE symlink restrictions during the build/install.
+
+if [ -n "${TRI_ONYX_PLUGINS:-}" ]; then
+    IFS=',' read -ra PLUGINS <<< "$TRI_ONYX_PLUGINS"
+    for plugin in "${PLUGINS[@]}"; do
+        pyproject="/mnt/host/plugins/${plugin}/pyproject.toml"
+        if [ -f "$pyproject" ]; then
+            log "Installing Python deps for plugin '${plugin}'"
+            uv pip install --system "/mnt/host/plugins/${plugin}" 2>&1 | while read -r line; do log "  $line"; done
+        fi
+    done
+fi
+
+# -----------------------------------------------------------------------
 # 3. Network policy
 # -----------------------------------------------------------------------
 

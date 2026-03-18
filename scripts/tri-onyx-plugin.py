@@ -62,6 +62,9 @@ def cmd_add(args: argparse.Namespace) -> None:
     # Auto-create plugin.json manifest if not present
     _ensure_plugin_json(dest, name)
 
+    # Install Python dependencies if the plugin has a pyproject.toml
+    _sync_python_deps(dest)
+
     manifest = load_manifest()
     manifest["plugins"][name] = {
         "repo": repo,
@@ -85,6 +88,19 @@ def _ensure_plugin_json(dest: Path, name: str) -> None:
         }
         plugin_json.write_text(json.dumps(manifest, indent=2) + "\n")
         print(f"  Created {plugin_json}")
+
+
+def _sync_python_deps(dest: Path) -> None:
+    """Run `uv sync` if the plugin has a pyproject.toml."""
+    pyproject = dest / "pyproject.toml"
+    if not pyproject.exists():
+        return
+    print(f"  Syncing Python dependencies ...")
+    result = subprocess.run(["uv", "sync"], cwd=dest)
+    if result.returncode == 0:
+        print(f"  Python dependencies installed.")
+    else:
+        print(f"  Warning: uv sync failed (exit {result.returncode}).", file=sys.stderr)
 
 
 def cmd_upgrade(args: argparse.Namespace) -> None:
@@ -112,6 +128,9 @@ def cmd_upgrade(args: argparse.Namespace) -> None:
     git_dir = dest / ".git"
     if git_dir.exists():
         shutil.rmtree(git_dir)
+
+    # Re-install Python dependencies if the plugin has a pyproject.toml
+    _sync_python_deps(dest)
 
     entry["installed"] = str(date.today())
     save_manifest(manifest)
