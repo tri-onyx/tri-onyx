@@ -18,12 +18,17 @@ from typing import Any
 
 @dataclass(slots=True)
 class InboundMessage:
-    """A message received from a chat platform, forwarded to the gateway."""
+    """A message received from a chat platform, forwarded to the gateway.
+
+    Images are base64-encoded attachments with media_type metadata, forwarded
+    to the agent runtime for Claude vision processing.
+    """
 
     agent_name: str
     content: str
     channel: dict[str, Any]
     trust: dict[str, Any] = field(default_factory=lambda: {"level": "unverified"})
+    images: list[dict[str, str]] = field(default_factory=list)
 
 
 @dataclass(slots=True)

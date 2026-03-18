@@ -1635,16 +1635,39 @@ def _truncate(text: str, max_len: int = _MAX_TOOL_RESULT_LEN) -> str:
     return text[: max_len - 20] + "... [truncated]"
 
 
+def _build_content_blocks(
+    text: str, images: list[dict[str, str]]
+) -> list[dict[str, Any]]:
+    """Build Claude API content blocks from text and optional images."""
+    blocks: list[dict[str, Any]] = []
+    for img in images:
+        blocks.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": img.get("media_type", "image/png"),
+                "data": img["data"],
+            },
+        })
+    if text:
+        blocks.append({"type": "text", "text": text})
+    return blocks
+
+
 async def run_prompt(
     client: ClaudeSDKClient,
     prompt: str,
     interrupt_event: asyncio.Event | None = None,
+    images: list[dict[str, str]] | None = None,
 ) -> bool:
     """Send a prompt and stream the response through the protocol.
 
     Uses the persistent ClaudeSDKClient which maintains conversation context
     across calls.  Each call to client.query() followed by
     client.receive_response() is a single turn within an ongoing conversation.
+
+    When *images* are provided, the prompt is sent as structured content blocks
+    (image + text) for Claude vision processing.
 
     Streams all events to the gateway via stdout for observation:
       - text events     -- LLM text output (audit logging)
@@ -1663,8 +1686,26 @@ async def run_prompt(
     got_result = False
 
     try:
-        log.info("Calling client.query()...")
-        await client.query(prompt)
+        if images:
+            # Send structured content blocks for vision
+            content_blocks = _build_content_blocks(prompt, images)
+            log.info(
+                "Calling client.query() with %d image(s) + text...",
+                len(images),
+            )
+
+            async def _single_message():
+                yield {
+                    "type": "user",
+                    "message": {"role": "user", "content": content_blocks},
+                    "parent_tool_use_id": None,
+                    "session_id": "default",
+                }
+
+            await client.query(_single_message())
+        else:
+            log.info("Calling client.query()...")
+            await client.query(prompt)
         log.info("client.query() returned, calling receive_response()...")
 
         response_iter = client.receive_response().__aiter__()
@@ -1778,7 +1819,10 @@ async def run_prompt(
 
 
 async def run_prompt_interruptible(
-    client: ClaudeSDKClient, prompt: str, dispatcher: InboundDispatcher
+    client: ClaudeSDKClient,
+    prompt: str,
+    dispatcher: InboundDispatcher,
+    images: list[dict[str, str]] | None = None,
 ) -> bool:
     """Run a prompt with cooperative interrupt support.
 
@@ -1788,7 +1832,9 @@ async def run_prompt_interruptible(
     """
     dispatcher.interrupt_event.clear()
 
-    completed = await run_prompt(client, prompt, interrupt_event=dispatcher.interrupt_event)
+    completed = await run_prompt(
+        client, prompt, interrupt_event=dispatcher.interrupt_event, images=images
+    )
 
     if completed:
         return True
@@ -2006,11 +2052,17 @@ async def main() -> None:
                 if client is None or config is None:
                     emit_error("Received prompt before start message")
                     continue
-                if not msg.content:
+                if not msg.content and not msg.images:
                     emit_error("Empty prompt content")
                     continue
-                log.info("Received prompt (%d chars), dispatching to SDK", len(msg.content))
-                await run_prompt_interruptible(client, msg.content, dispatcher)
+                log.info(
+                    "Received prompt (%d chars, %d images), dispatching to SDK",
+                    len(msg.content), len(msg.images),
+                )
+                await run_prompt_interruptible(
+                    client, msg.content, dispatcher,
+                    images=msg.images if msg.images else None,
+                )
 
             elif isinstance(msg, BCPQueryMessage):
                 if client is None or config is None:

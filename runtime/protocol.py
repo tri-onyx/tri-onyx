@@ -66,7 +66,7 @@ class StartMessage:
             tools=agent.get("tools", []),
             model=agent.get("model", "claude-sonnet-4-20250514"),
             system_prompt=agent.get("system_prompt", ""),
-            max_turns=agent.get("max_turns", 10),
+            max_turns=agent.get("max_turns", 200),
             cwd=agent.get("cwd", "/workspace"),
             skills=agent.get("skills", []),
             plugins=agent.get("plugins", []),
@@ -79,12 +79,17 @@ class PromptMessage:
 
     content: str
     metadata: dict[str, Any] = field(default_factory=dict)
+    images: list[dict[str, str]] = field(default_factory=list)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PromptMessage:
+        metadata = data.get("metadata", {})
+        # Images may be passed at top level or nested in metadata
+        images = data.get("images", metadata.get("images", []))
         return cls(
             content=data.get("content", ""),
-            metadata=data.get("metadata", {}),
+            metadata=metadata,
+            images=images,
         )
 
 

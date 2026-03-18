@@ -25,8 +25,10 @@ from nio import (
     MatrixRoom,
     MegolmEvent,
     RoomEncryptedAudio,
+    RoomEncryptedImage,
     RoomKeyRequestError,
     RoomMessageAudio,
+    RoomMessageImage,
     RoomMessageText,
     RoomSendResponse,
     ReactionEvent,
@@ -62,8 +64,8 @@ class MatrixAdapter(BaseAdapter):
         self._running = False
         self._sync_task: asyncio.Task[None] | None = None
 
-        # Merge buffer: room_id -> list of (timestamp_ms, sender, body)
-        self._merge_buffers: dict[str, list[tuple[float, str, str]]] = {}
+        # Merge buffer: room_id -> list of (timestamp_ms, sender, body, images)
+        self._merge_buffers: dict[str, list[tuple[float, str, str, list[dict[str, str]]]]] = {}
         self._merge_tasks: dict[str, asyncio.Task[None]] = {}
 
         # Room configs keyed by room_id
@@ -145,6 +147,8 @@ class MatrixAdapter(BaseAdapter):
 
         # Register event callbacks
         self._client.add_event_callback(self._on_room_message, RoomMessageText)
+        self._client.add_event_callback(self._on_room_image, RoomMessageImage)
+        self._client.add_event_callback(self._on_room_image, RoomEncryptedImage)
         if self._transcriber is not None:
             self._client.add_event_callback(self._on_room_audio, RoomMessageAudio)
             self._client.add_event_callback(self._on_room_audio, RoomEncryptedAudio)
@@ -305,7 +309,7 @@ class MatrixAdapter(BaseAdapter):
 
         # Buffer the message for merging
         buf = self._merge_buffers.setdefault(room.room_id, [])
-        buf.append((now_ms, event.sender, event.body))
+        buf.append((now_ms, event.sender, event.body, []))
 
         # Reset or start the merge timer
         if room.room_id in self._merge_tasks:
@@ -313,6 +317,93 @@ class MatrixAdapter(BaseAdapter):
 
         self._merge_tasks[room.room_id] = asyncio.create_task(
             self._flush_merge_buffer(room.room_id, room_cfg, thread_id, merge_window)
+        )
+
+    async def _on_room_image(
+        self, room: MatrixRoom, event: RoomMessageImage | RoomEncryptedImage
+    ) -> None:
+        """Handle an incoming image message by downloading and base64-encoding it."""
+        if not self._initial_sync_done:
+            return
+
+        if event.sender == self._config.user_id:
+            return
+
+        if event.event_id in self._own_event_ids:
+            self._own_event_ids.discard(event.event_id)
+            return
+
+        room_cfg = self._rooms.get(room.room_id)
+        if room_cfg is None:
+            return
+
+        assert self._client is not None
+
+        mxc_url = event.url
+        if not mxc_url:
+            logger.warning("Image event %s has no URL", event.event_id)
+            return
+
+        logger.info(
+            "Image from %s in %s (%s), downloading...",
+            event.sender,
+            room.room_id,
+            type(event).__name__,
+        )
+
+        resp = await self._client.download(mxc_url)
+        if not isinstance(resp, DownloadResponse):
+            logger.error("Failed to download image: %s", resp)
+            return
+
+        image_data = resp.body
+
+        # Decrypt if this is an encrypted media event
+        if isinstance(event, RoomEncryptedImage):
+            try:
+                key = event.key.get("k", "")
+                sha256_hash = event.hashes.get("sha256", "")
+                image_data = decrypt_attachment(image_data, key, sha256_hash, event.iv)
+            except Exception:
+                logger.exception("Failed to decrypt image for event %s", event.event_id)
+                return
+
+        import base64
+
+        b64_data = base64.b64encode(image_data).decode("ascii")
+
+        # Determine media type from the mimetype field or content-type header
+        media_type = getattr(event, "mimetype", None) or resp.content_type or "image/png"
+
+        image_entry = {
+            "data": b64_data,
+            "media_type": media_type,
+        }
+
+        # Use the image body (caption) as text, or empty string
+        body = getattr(event, "body", "") or ""
+
+        logger.info(
+            "Image downloaded (%.1f KB, %s) from %s in %s",
+            len(image_data) / 1024,
+            media_type,
+            event.sender,
+            room.room_id,
+        )
+
+        # Feed into merge buffer (same path as text messages).
+        # Images bypass mention gating since you can't @-mention in an image.
+        now_ms = time.monotonic() * 1000
+        merge_window = room_cfg.merge_window_ms
+
+        buf = self._merge_buffers.setdefault(room.room_id, [])
+        buf.append((now_ms, event.sender, body, [image_entry]))
+
+        if room.room_id in self._merge_tasks:
+            self._merge_tasks[room.room_id].cancel()
+
+        self._merge_tasks[room.room_id] = asyncio.create_task(
+            self._flush_merge_buffer(room.room_id, room_cfg, None, merge_window)
         )
 
     async def _on_room_audio(
@@ -392,7 +483,7 @@ class MatrixAdapter(BaseAdapter):
         merge_window = room_cfg.merge_window_ms
 
         buf = self._merge_buffers.setdefault(room.room_id, [])
-        buf.append((now_ms, event.sender, text))
+        buf.append((now_ms, event.sender, text, []))
 
         if room.room_id in self._merge_tasks:
             self._merge_tasks[room.room_id].cancel()
@@ -740,10 +831,13 @@ class MatrixAdapter(BaseAdapter):
 
         # Merge messages from the same sender
         merged_parts: list[str] = []
+        merged_images: list[dict[str, str]] = []
         primary_sender: str = buf[0][1]
-        for _, sender, body in buf:
+        for _, sender, body, images in buf:
             if sender == primary_sender:
-                merged_parts.append(body)
+                if body:
+                    merged_parts.append(body)
+                merged_images.extend(images)
             else:
                 # Different sender breaks the merge — only take the first batch
                 break
@@ -762,6 +856,7 @@ class MatrixAdapter(BaseAdapter):
             content=merged_content,
             channel=channel,
             trust=trust,
+            images=merged_images,
         )
 
         if self._on_message:

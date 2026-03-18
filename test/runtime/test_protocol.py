@@ -79,7 +79,7 @@ class TestStartMessage:
         assert msg.tools == []
         assert msg.model == "claude-sonnet-4-20250514"
         assert msg.system_prompt == ""
-        assert msg.max_turns == 10
+        assert msg.max_turns == 200
         assert msg.cwd == "/workspace"
 
     def test_parse_missing_agent_key(self):
@@ -106,6 +106,33 @@ class TestPromptMessage:
     def test_parse_empty(self):
         msg = PromptMessage.from_dict({})
         assert msg.content == ""
+        assert msg.images == []
+
+    def test_parse_with_images_in_metadata(self):
+        img = {"data": "aGVsbG8=", "media_type": "image/png"}
+        msg = PromptMessage.from_dict({
+            "content": "What is this?",
+            "metadata": {"source": "connector", "images": [img]},
+        })
+        assert msg.content == "What is this?"
+        assert len(msg.images) == 1
+        assert msg.images[0]["media_type"] == "image/png"
+
+    def test_parse_with_images_at_top_level(self):
+        img = {"data": "aGVsbG8=", "media_type": "image/jpeg"}
+        msg = PromptMessage.from_dict({
+            "content": "",
+            "images": [img],
+        })
+        assert msg.content == ""
+        assert len(msg.images) == 1
+        assert msg.images[0]["media_type"] == "image/jpeg"
+
+    def test_parse_image_only_no_text(self):
+        img = {"data": "aGVsbG8=", "media_type": "image/png"}
+        msg = PromptMessage.from_dict({"images": [img]})
+        assert msg.content == ""
+        assert len(msg.images) == 1
 
 
 class TestShutdownMessage:

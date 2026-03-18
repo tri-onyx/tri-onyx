@@ -180,6 +180,7 @@ defmodule TriOnyx.ConnectorHandler do
     content = Map.get(frame, "content", "")
     channel = Map.get(frame, "channel", %{})
     trust = Map.get(frame, "trust", %{})
+    images = Map.get(frame, "images", [])
 
     case SystemCommand.parse(content) do
       {:command, cmd, args} ->
@@ -217,7 +218,8 @@ defmodule TriOnyx.ConnectorHandler do
             "connector_id" => state.connector_id,
             "platform" => state.platform,
             "channel" => channel,
-            "session_key" => session_key
+            "session_key" => session_key,
+            "images" => images
           }
         }
 
