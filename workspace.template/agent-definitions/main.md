@@ -11,6 +11,7 @@ send_to:
   - calendar
   - diary
   - bookmarks
+  - knowledgebase
   - twitter
   - linkedin
   - introspector
