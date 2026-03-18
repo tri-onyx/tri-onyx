@@ -514,7 +514,7 @@ defmodule TriOnyx.Connectors.Email do
   defp imap_move(uid, source_folder, dest_folder) do
     case get_imap_config() do
       :not_configured ->
-        :ok
+        {:error, "IMAP not configured — email moved on filesystem only, IMAP inbox unchanged"}
 
       {:ok, imap} ->
         # Ensure destination folder exists on the IMAP server before moving
@@ -565,7 +565,7 @@ defmodule TriOnyx.Connectors.Email do
   defp imap_create_folder(folder_name) do
     case get_imap_config() do
       :not_configured ->
-        :ok
+        {:error, "IMAP not configured — folder created on filesystem only, IMAP server unchanged"}
 
       {:ok, imap} ->
         with_imap_connection(imap, fn socket, transport ->

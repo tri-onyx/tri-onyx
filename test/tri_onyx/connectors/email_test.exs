@@ -90,17 +90,18 @@ defmodule TriOnyx.Connectors.EmailTest do
   end
 
   describe "move_email/4" do
-    test "moves email directory between folders" do
+    test "returns error when IMAP not configured" do
       agent_dir = Path.join(@tmp_dir, "agent")
       source = Path.join([agent_dir, "inbox", "12345"])
       File.mkdir_p!(source)
       File.write!(Path.join(source, "message.json"), "{}")
 
-      assert {:ok, :moved} = Email.move_email("12345", "inbox", "receipts", agent_dir)
+      assert {:error, msg} = Email.move_email("12345", "inbox", "receipts", agent_dir)
+      assert msg =~ "IMAP not configured"
 
-      refute File.dir?(source)
-      assert File.dir?(Path.join([agent_dir, "receipts", "12345"]))
-      assert File.exists?(Path.join([agent_dir, "receipts", "12345", "message.json"]))
+      # Source should NOT have been moved — no partial filesystem-only move
+      assert File.dir?(source)
+      refute File.dir?(Path.join([agent_dir, "receipts", "12345"]))
     end
 
     test "rejects path traversal in source_folder" do
@@ -127,25 +128,19 @@ defmodule TriOnyx.Connectors.EmailTest do
       agent_dir = Path.join(@tmp_dir, "agent-empty")
       File.mkdir_p!(agent_dir)
 
+      # Without IMAP configured, fails on IMAP check before reaching filesystem check
       assert {:error, msg} = Email.move_email("99999", "inbox", "dest", agent_dir)
-      assert msg =~ "source email directory not found"
+      assert msg =~ "IMAP not configured"
     end
   end
 
   describe "create_folder/2" do
-    test "creates folder directory" do
+    test "returns error when IMAP not configured" do
       agent_dir = Path.join(@tmp_dir, "agent-folder")
       File.mkdir_p!(agent_dir)
 
-      assert {:ok, :created} = Email.create_folder("receipts", agent_dir)
-      assert File.dir?(Path.join(agent_dir, "receipts"))
-    end
-
-    test "succeeds when folder already exists" do
-      agent_dir = Path.join(@tmp_dir, "agent-exists")
-      File.mkdir_p!(Path.join(agent_dir, "receipts"))
-
-      assert {:ok, :created} = Email.create_folder("receipts", agent_dir)
+      assert {:error, msg} = Email.create_folder("receipts", agent_dir)
+      assert msg =~ "IMAP not configured"
     end
 
     test "rejects folder names with path traversal" do
@@ -163,13 +158,16 @@ defmodule TriOnyx.Connectors.EmailTest do
       assert msg =~ "alphanumeric"
     end
 
-    test "accepts valid folder names with hyphens and underscores" do
+    test "accepts valid folder names with hyphens and underscores (fails on IMAP, not validation)" do
       agent_dir = Path.join(@tmp_dir, "agent-valid")
       File.mkdir_p!(agent_dir)
 
-      assert {:ok, :created} = Email.create_folder("important-emails", agent_dir)
-      assert {:ok, :created} = Email.create_folder("work_items", agent_dir)
-      assert {:ok, :created} = Email.create_folder("Archive2024", agent_dir)
+      # These pass validation but fail because IMAP is not configured in test
+      assert {:error, msg} = Email.create_folder("important-emails", agent_dir)
+      assert msg =~ "IMAP not configured"
+
+      assert {:error, _} = Email.create_folder("work_items", agent_dir)
+      assert {:error, _} = Email.create_folder("Archive2024", agent_dir)
     end
   end
 
