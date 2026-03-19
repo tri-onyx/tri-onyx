@@ -85,18 +85,27 @@ defmodule TriOnyx.BCP.Channel do
          {:ok, channel_config} <- find_bcp_channel(from_def, to_agent, :controller),
          :ok <- validate_category(query_spec, channel_config),
          {:ok, query} <- build_query(from_agent, to_agent, query_spec),
-         bandwidth <- Query.compute_bandwidth(query),
-         :ok <- dispatch_to_reader(to_agent, query) do
-      # Store the query so the response handler can look it up for validation
+         bandwidth <- Query.compute_bandwidth(query) do
+      # Store the query BEFORE dispatching so the reader's response can always
+      # find it via pop_query (avoids race where a fast reader responds before
+      # dispatch_to_reader returns).
       ensure_table()
       :ets.insert(@pending_queries_table, {query.id, query})
 
-      Logger.info(
-        "BCP.Channel: query #{query.id} from #{from_agent} to #{to_agent} " <>
-          "(cat-#{query.category}, #{Float.round(bandwidth, 1)} bits)"
-      )
+      case dispatch_to_reader(to_agent, query) do
+        :ok ->
+          Logger.info(
+            "BCP.Channel: query #{query.id} from #{from_agent} to #{to_agent} " <>
+              "(cat-#{query.category}, #{Float.round(bandwidth, 1)} bits)"
+          )
 
-      {:ok, query}
+          {:ok, query}
+
+        {:error, _reason} = error ->
+          # Clean up the stored query since it was never delivered
+          :ets.delete(@pending_queries_table, query.id)
+          error
+      end
     end
   end
 

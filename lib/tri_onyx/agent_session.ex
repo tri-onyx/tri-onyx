@@ -26,7 +26,6 @@ defmodule TriOnyx.AgentSession do
   alias TriOnyx.SensitivityMatrix
   alias TriOnyx.SessionLogger
   alias TriOnyx.ToolRegistry
-  alias TriOnyx.ActionApprovalQueue
   alias TriOnyx.BCP
   alias TriOnyx.SystemCommand
   alias TriOnyx.Triggers.InterAgent
@@ -770,24 +769,34 @@ defmodule TriOnyx.AgentSession do
       Task.start(fn ->
         proceed =
           if ToolRegistry.requires_approval?("SendEmail") do
+            # Read draft for approval context
+            draft_summary = read_draft_summary(host_path)
+
             {:ok, approval_id} =
-              ActionApprovalQueue.submit(%{
+              BCP.ApprovalQueue.submit(%{
+                kind: "action",
                 agent_name: agent_name,
                 session_id: session_id,
                 tool_name: "SendEmail",
-                tool_input: %{"draft_path" => draft_path}
+                tool_input: Map.merge(%{"draft_path" => draft_path}, draft_summary)
               })
 
-            EventBus.broadcast(session_id, %{
-              "type" => "action_approval_request",
-              "approval_id" => approval_id,
-              "agent_name" => agent_name,
-              "session_id" => session_id,
-              "tool_name" => "SendEmail",
-              "tool_input" => %{"draft_path" => draft_path}
-            })
+            approval_frame =
+              Jason.encode!(%{
+                "type" => "approval_request",
+                "approval_id" => approval_id,
+                "kind" => "action",
+                "from_agent" => agent_name,
+                "to_agent" => "",
+                "category" => 0,
+                "query_summary" => "SendEmail: #{Map.get(draft_summary, "subject", draft_path)}",
+                "response_content" => format_draft_for_approval(draft_summary),
+                "anomalies" => []
+              })
 
-            case ActionApprovalQueue.await_decision(approval_id) do
+            TriOnyx.ConnectorHandler.broadcast_to_connectors(approval_frame)
+
+            case BCP.ApprovalQueue.await_decision(BCP.ApprovalQueue, approval_id) do
               {:approved, _item} -> :proceed
               {:rejected, reason} -> {:rejected, reason}
               {:error, :timeout} -> {:rejected, "approval timed out"}
@@ -1554,4 +1563,36 @@ defmodule TriOnyx.AgentSession do
     do: "Failed to start reader agent '#{agent}': #{msg}"
 
   defp format_bcp_error(reason), do: inspect(reason)
+
+  # Reads a draft JSON file and returns a map with to/subject/body for approval context.
+  @spec read_draft_summary(String.t()) :: map()
+  defp read_draft_summary(host_path) do
+    case File.read(host_path) do
+      {:ok, contents} ->
+        case Jason.decode(contents) do
+          {:ok, draft} ->
+            Map.take(draft, ["to", "subject", "body", "cc", "in_reply_to"])
+
+          _ ->
+            %{}
+        end
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp format_draft_for_approval(draft) do
+    parts =
+      [
+        if(draft["to"], do: "To: #{draft["to"]}"),
+        if(draft["cc"], do: "Cc: #{draft["cc"]}"),
+        if(draft["subject"], do: "Subject: #{draft["subject"]}"),
+        if(draft["in_reply_to"], do: "In-Reply-To: #{draft["in_reply_to"]}"),
+        if(draft["body"], do: "\n#{draft["body"]}")
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    Enum.join(parts, "\n")
+  end
 end
