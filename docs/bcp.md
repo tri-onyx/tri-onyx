@@ -318,6 +318,16 @@ The Controller's system prompt should include explicit instructions that all inf
 
 ---
 
+## Subscriptions
+
+BCP supports push-based information delivery via subscriptions. A Controller declares subscriptions in its agent definition, specifying a category and query spec. The Reader can then publish data against these subscriptions using the `BCPPublish` tool. Published data is validated identically to query responses.
+
+BCP queries are asynchronous — the `BCPQuery` tool returns immediately and the validated response is delivered later as a prompt to the Controller's session.
+
+See [BCP Subscriptions](bcp-subscriptions.md) for the full specification.
+
+---
+
 ## Design Principles
 
 1. **The untainted agent always controls the dialogue.** It asks; the tainted agent answers. Never the reverse.

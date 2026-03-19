@@ -13,8 +13,12 @@ Gateway -> Runtime (stdin):
   send_message_response  -- gateway response after routing an inter-agent message
   restart_agent_response -- gateway response after a restart_agent_request
   submit_item_response -- gateway response after a submit_item_request
-  bcp_query             -- BCP query delivered to a Reader agent
-  bcp_response_delivery -- validated BCP response delivered to a Controller agent
+  bcp_query              -- BCP query delivered to a Reader agent
+  bcp_response_delivery  -- validated BCP response delivered to a Controller agent
+                            (carries optional subscription_id for subscription deliveries)
+  bcp_validation_result  -- result of BCP response validation sent back to the Reader
+                            (carries optional subscription_id for subscription publish results)
+  bcp_subscriptions_active -- active subscription specs delivered to a Reader at session start
 
 Runtime -> Gateway (stdout):
   ready                -- runtime initialized, awaiting configuration
@@ -29,7 +33,8 @@ Runtime -> Gateway (stdout):
   restart_agent_request  -- request gateway to restart another agent
   submit_item_request -- request gateway to post an item to the connector
   bcp_query_request     -- Controller requests a BCP query to a Reader
-  bcp_response        -- Reader responds to a BCP query
+  bcp_response        -- Reader responds to a BCP query (query_id for queries,
+                          subscription_id + controller for subscription publishes)
 """
 
 from __future__ import annotations

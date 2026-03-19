@@ -11,8 +11,8 @@ and communicates using three channels:
 
 | Channel | Direction          | Purpose                                        |
 |---------|--------------------|------------------------------------------------|
-| stdin   | Gateway -> Runtime | Configuration, prompts, interrupts, shutdown   |
-| stdout  | Runtime -> Gateway | Events, results, errors (structured protocol)  |
+| stdin   | Gateway -> Runtime | Configuration, prompts, interrupts, shutdown, BCP queries, BCP subscription specs |
+| stdout  | Runtime -> Gateway | Events, results, errors, BCP responses (structured protocol) |
 | stderr  | Runtime -> (logs)  | Diagnostic logging (not part of protocol)      |
 
 **Important:** The agent executes its own tools via the Claude Agent SDK.  The
@@ -33,6 +33,9 @@ Gateway                              Runtime
   |--- {"type":"start",...} --------->|
   |                                    | (configure SDK)
   |<-- {"type":"ready"}  -------------|
+  |                                    |
+  |--- {"type":"bcp_subscriptions_active",...} -->|  (if Reader with subscriptions)
+  |                                    |
   |                                    |
   |--- {"type":"prompt",...} -------->|
   |                                    | (drive SDK session)
@@ -72,7 +75,7 @@ Configures the agent.  Must be the first message sent after spawning.
     "tools": ["Read", "Grep", "Glob"],
     "model": "claude-sonnet-4-20250514",
     "system_prompt": "You are a code reviewer...",
-    "max_turns": 10,
+    "max_turns": 200,
     "cwd": "/workspace"
   }
 }
@@ -84,7 +87,7 @@ Configures the agent.  Must be the first message sent after spawning.
 | `agent.tools`        | string[]   | yes      | `[]`                         | Allowed tools (SDK `allowed_tools`)           |
 | `agent.model`        | string     | no       | `"claude-sonnet-4-20250514"` | LLM model identifier                         |
 | `agent.system_prompt` | string    | no       | `""`                         | System prompt (appended to `claude_code` preset) |
-| `agent.max_turns`    | integer    | no       | `10`                         | Maximum SDK turns per session                 |
+| `agent.max_turns`    | integer    | no       | `200`                        | Maximum SDK turns per session                 |
 | `agent.cwd`          | string     | no       | `"/workspace"`               | Working directory for the agent               |
 | `agent.skills`       | string[]   | no       | `[]`                         | List of skill names to load into the agent's context |
 
@@ -140,6 +143,43 @@ and exit cleanly.
 | Field    | Type   | Required | Description              |
 |----------|--------|----------|--------------------------|
 | `reason` | string | no       | Human-readable reason    |
+
+### `bcp_subscriptions_active`
+
+Delivers active subscription specs to a Reader agent at session start. Sent after the `start` message, before any prompt.
+
+```json
+{
+  "type": "bcp_subscriptions_active",
+  "subscriptions": [
+    {
+      "subscription_id": "research-findings",
+      "controller": "main",
+      "category": 2,
+      "questions": [...]
+    }
+  ]
+}
+```
+
+| Field           | Type  | Required | Description                                  |
+|-----------------|-------|----------|----------------------------------------------|
+| `subscriptions` | array | yes      | Active subscriptions targeting this Reader    |
+
+Each subscription object contains the subscription ID, the Controller agent name, the BCP category, and the query spec (fields/questions/directive matching the category).
+
+### `bcp_response_delivery` (extended)
+
+Validated BCP response delivered to a Controller agent. In addition to query-response deliveries, this message is also used for subscription pushes.
+
+| Field             | Type   | Required | Description                                                        |
+|-------------------|--------|----------|--------------------------------------------------------------------|
+| `query_id`        | string | yes      | Query or subscription correlation ID                               |
+| `category`        | int    | yes      | BCP category (1, 2, or 3)                                         |
+| `from_agent`      | string | yes      | Reader agent that produced the response                            |
+| `response`        | object | yes      | Validated response payload                                         |
+| `bandwidth_bits`  | float  | yes      | Theoretical bandwidth of the response in bits                      |
+| `subscription_id` | string | no       | Present for subscription pushes, absent for query responses        |
 
 ---
 
@@ -270,6 +310,17 @@ may be a standalone protocol error (e.g., malformed input).
 | Field     | Type   | Description               |
 |-----------|--------|---------------------------|
 | `message` | string | Human-readable error text |
+
+### `bcp_response` (extended)
+
+Response from a Reader agent to a BCP query or subscription. When `subscription_id` and `controller` are present (instead of `query_id`), this is a subscription publish via `BCPPublish`.
+
+| Field             | Type   | Required | Description                                           |
+|-------------------|--------|----------|-------------------------------------------------------|
+| `query_id`        | string | cond.    | Present for query responses                           |
+| `subscription_id` | string | cond.    | Present for subscription publishes                    |
+| `controller`      | string | cond.    | Target Controller agent (subscription publishes only) |
+| `response`        | object | yes      | Response payload matching the query/subscription spec |
 
 ---
 

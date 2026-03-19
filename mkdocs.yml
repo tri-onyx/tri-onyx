@@ -65,6 +65,7 @@ nav:
       - Protocol: protocol.md
       - FUSE Driver: fuse-driver-spec.md
       - BCP: bcp.md
+      - BCP Subscriptions: bcp-subscriptions.md
       - Web Dashboard: web-dashboard.md
       - API Reference: api-reference.md
   - Guides:
