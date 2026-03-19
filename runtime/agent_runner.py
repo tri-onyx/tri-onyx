@@ -52,6 +52,7 @@ from protocol import (
     SendMessageResponse,
     RestartAgentResponse,
     BCPQueryMessage,
+    BCPQueryErrorMessage,
     BCPResponseDeliveryMessage,
     BCPValidationResult,
     BCPSubscriptionsActive,
@@ -76,6 +77,7 @@ from protocol import (
     emit_restart_agent_request,
     emit_bcp_query_request,
     emit_bcp_response,
+    emit_bcp_publish,
     emit_send_email_request,
     emit_move_email_request,
     emit_create_folder_request,
@@ -314,6 +316,10 @@ class InboundDispatcher:
             elif msg_type == "bcp_query":
                 # Route to control queue so the main loop can present
                 # the query to the LLM as a prompt
+                await self.control_queue.put(data)
+            elif msg_type == "bcp_query_error":
+                # Route to control queue so the main loop can inform
+                # the LLM that the query could not be routed
                 await self.control_queue.put(data)
             elif msg_type == "bcp_response_delivery":
                 # Route to control queue so the main loop can present
@@ -597,6 +603,42 @@ class BCPHandler:
             await self._dispatcher.bcp_validation_results.put(result)
             await asyncio.sleep(0.01)
 
+    async def publish(self, subscription_id: str, controller: str, response: dict) -> str:
+        """Publish data against a BCP subscription. Returns success/failure message."""
+        log.info("BCPPublish for subscription_id=%s -> %s", subscription_id, controller)
+        emit_bcp_publish(subscription_id, controller, response)
+
+        # Wait for validation result matching this subscription_id
+        result = await self._wait_for_subscription_validation(subscription_id)
+        if result is None:
+            return "Publish timed out waiting for gateway validation."
+        if result.success:
+            return f"Published successfully to {controller} via subscription '{subscription_id}'. {result.detail}"
+        else:
+            return f"Publish failed: {result.detail}"
+
+    async def _wait_for_subscription_validation(self, subscription_id: str) -> BCPValidationResult | None:
+        """Poll the validation results queue for a matching subscription_id."""
+        deadline = asyncio.get_event_loop().time() + _BCP_RESPONSE_TIMEOUT_S
+        unmatched: list[BCPValidationResult] = []
+        try:
+            while True:
+                remaining = deadline - asyncio.get_event_loop().time()
+                if remaining <= 0:
+                    return None
+                try:
+                    result = await asyncio.wait_for(
+                        self._dispatcher.bcp_validation_results.get(), timeout=remaining
+                    )
+                    if result.subscription_id == subscription_id:
+                        return result
+                    unmatched.append(result)
+                except asyncio.TimeoutError:
+                    return None
+        finally:
+            for item in unmatched:
+                await self._dispatcher.bcp_validation_results.put(item)
+
 
 # ---------------------------------------------------------------------------
 # Email tool handler
@@ -831,6 +873,7 @@ class CalendarHandler:
 _SEND_MESSAGE_TOOL = "SendMessage"
 _BCP_QUERY_TOOL = "BCPQuery"
 _BCP_RESPOND_TOOL = "BCPRespond"
+_BCP_PUBLISH_TOOL = "BCPPublish"
 
 # The SDK MCP server that hosts the tools.  The CLI sees them as
 # mcp__interagent__<ToolName>, but we normalize back to the logical name
@@ -840,6 +883,7 @@ _INTERAGENT_SERVER = "interagent"
 _SEND_MESSAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SEND_MESSAGE_TOOL}"
 _BCP_QUERY_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCP_QUERY_TOOL}"
 _BCP_RESPOND_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCP_RESPOND_TOOL}"
+_BCP_PUBLISH_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_BCP_PUBLISH_TOOL}"
 _RESTART_AGENT_TOOL = "RestartAgent"
 _RESTART_AGENT_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_RESTART_AGENT_TOOL}"
 
@@ -874,6 +918,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
     _BCP_QUERY_MCP_NAME: _BCP_QUERY_TOOL,
     _BCP_RESPOND_MCP_NAME: _BCP_RESPOND_TOOL,
+    _BCP_PUBLISH_MCP_NAME: _BCP_PUBLISH_TOOL,
     _RESTART_AGENT_MCP_NAME: _RESTART_AGENT_TOOL,
     _SEND_EMAIL_MCP_NAME: _SEND_EMAIL_TOOL,
     _MOVE_EMAIL_MCP_NAME: _MOVE_EMAIL_TOOL,
@@ -1154,6 +1199,76 @@ def build_bcp_respond_tool(bcp_handler: BCPHandler) -> Any:
         }
 
     return bcp_respond
+
+
+def build_bcp_publish_tool(bcp_handler: BCPHandler) -> Any:
+    """Build the BCPPublish MCP tool for Reader agents.
+
+    Used by Reader agents to publish data against active BCP subscriptions.
+    The gateway validates the response against the subscription spec before
+    delivering it to the subscribing Controller.
+    """
+
+    @tool(
+        _BCP_PUBLISH_TOOL,
+        "Publish data against a BCP subscription. The gateway validates "
+        "the response against the subscription spec before delivery.",
+        {
+            "type": "object",
+            "properties": {
+                "subscription_id": {
+                    "type": "string",
+                    "description": "ID of the subscription to publish against",
+                },
+                "controller": {
+                    "type": "string",
+                    "description": "Name of the subscribing Controller agent",
+                },
+                "response": {
+                    "type": "object",
+                    "description": "Response data matching the subscription's spec (JSON object)",
+                    "additionalProperties": True,
+                },
+            },
+            "required": ["subscription_id", "controller", "response"],
+        },
+    )
+    async def bcp_publish(args: dict[str, Any]) -> dict[str, Any]:
+        subscription_id = args.get("subscription_id", "")
+        controller = args.get("controller", "")
+        response = args.get("response", {})
+
+        # LLMs sometimes pass response as a JSON string — parse it
+        if isinstance(response, str):
+            try:
+                response = json.loads(response)
+            except (json.JSONDecodeError, TypeError):
+                return {
+                    "content": [{"type": "text", "text": "Error: 'response' must be a JSON object."}],
+                    "isError": True,
+                }
+
+        if not subscription_id:
+            return {
+                "content": [{"type": "text", "text": "Error: 'subscription_id' field is required."}],
+                "isError": True,
+            }
+
+        if not controller:
+            return {
+                "content": [{"type": "text", "text": "Error: 'controller' field is required."}],
+                "isError": True,
+            }
+
+        result = await bcp_handler.publish(
+            subscription_id=subscription_id, controller=controller, response=response
+        )
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": False,
+        }
+
+    return bcp_publish
 
 
 # ---------------------------------------------------------------------------
@@ -1621,12 +1736,20 @@ def _format_bcp_response_delivery_prompt(msg: BCPResponseDeliveryMessage) -> str
     """
     response_json = json.dumps(msg.response, indent=2)
 
+    # Check if this is a subscription delivery or query response
+    if msg.subscription_id:
+        header = f"BCP Subscription Delivery (subscription: {msg.subscription_id})"
+        source = f"subscription '{msg.subscription_id}'"
+    else:
+        header = f"BCP Response Delivery (query: {msg.query_id})"
+        source = f"query '{msg.query_id}'"
+
     parts = [
-        "**BCP Response Delivery** — A validated response has arrived.",
+        f"**{header}** — A validated response has arrived.",
         "",
         f"  - **From agent:** {msg.from_agent}",
         f"  - **Category:** {msg.category}",
-        f"  - **Query ID:** {msg.query_id}",
+        f"  - **Source:** {source}",
         f"  - **Bandwidth consumed:** {msg.bandwidth_bits} bits",
         "",
         "**Response data:**",
@@ -1932,6 +2055,7 @@ async def main() -> None:
                     _RESTART_AGENT_TOOL,
                     _BCP_QUERY_TOOL,
                     _BCP_RESPOND_TOOL,
+                    _BCP_PUBLISH_TOOL,
                     _SEND_EMAIL_TOOL,
                     _MOVE_EMAIL_TOOL,
                     _CREATE_FOLDER_TOOL,
@@ -1964,6 +2088,10 @@ async def main() -> None:
                 if _BCP_RESPOND_TOOL in config.tools:
                     interagent_tools.append(build_bcp_respond_tool(bcp_handler))
                     sdk_tools.append(_BCP_RESPOND_MCP_NAME)
+
+                if _BCP_PUBLISH_TOOL in config.tools:
+                    interagent_tools.append(build_bcp_publish_tool(bcp_handler))
+                    sdk_tools.append(_BCP_PUBLISH_MCP_NAME)
 
                 if _SUBMIT_ITEM_TOOL in config.tools:
                     interagent_tools.append(build_submit_item_tool(item_handler))
@@ -2085,6 +2213,18 @@ async def main() -> None:
                     continue
                 prompt = _format_bcp_query_prompt(msg)
                 log.info("BCP query %s -> prompt (%d chars)", msg.query_id, len(prompt))
+                await run_prompt_interruptible(client, prompt, dispatcher)
+
+            elif isinstance(msg, BCPQueryErrorMessage):
+                if client is None or config is None:
+                    emit_error("Received BCP query error before start message")
+                    continue
+                prompt = (
+                    f"**BCP Query Error** — Your query to **{msg.to_agent}** could not be delivered.\n\n"
+                    f"  - **Reason:** {msg.reason}\n\n"
+                    "You may need to use a different approach to accomplish this task."
+                )
+                log.info("BCP query error for %s -> prompt", msg.to_agent)
                 await run_prompt_interruptible(client, prompt, dispatcher)
 
             elif isinstance(msg, BCPResponseDeliveryMessage):

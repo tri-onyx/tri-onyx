@@ -171,6 +171,23 @@ class BCPQueryMessage:
 
 
 @dataclass
+class BCPQueryErrorMessage:
+    """Error sent to a Controller agent when a BCP query could not be routed."""
+
+    request_id: str
+    to_agent: str
+    reason: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BCPQueryErrorMessage:
+        return cls(
+            request_id=data.get("request_id", ""),
+            to_agent=data.get("to_agent", ""),
+            reason=data.get("reason", ""),
+        )
+
+
+@dataclass
 class BCPResponseDeliveryMessage:
     """Validated BCP response delivered to a Controller agent by the gateway."""
 
@@ -179,6 +196,7 @@ class BCPResponseDeliveryMessage:
     from_agent: str
     response: dict[str, Any] = field(default_factory=dict)
     bandwidth_bits: float = 0.0
+    subscription_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BCPResponseDeliveryMessage:
@@ -188,6 +206,7 @@ class BCPResponseDeliveryMessage:
             from_agent=data.get("from_agent", ""),
             response=data.get("response", {}),
             bandwidth_bits=data.get("bandwidth_bits", 0.0),
+            subscription_id=data.get("subscription_id"),
         )
 
 
@@ -198,6 +217,7 @@ class BCPValidationResult:
     query_id: str
     success: bool
     detail: str = ""
+    subscription_id: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> BCPValidationResult:
@@ -205,6 +225,7 @@ class BCPValidationResult:
             query_id=data.get("query_id", ""),
             success=data.get("success", False),
             detail=data.get("detail", ""),
+            subscription_id=data.get("subscription_id"),
         )
 
 
@@ -388,6 +409,7 @@ InboundMessage = (
     | MemorySaveMessage
     | SendMessageResponse
     | BCPQueryMessage
+    | BCPQueryErrorMessage
     | BCPResponseDeliveryMessage
     | BCPSubscriptionsActive
     | SendEmailResponse
@@ -409,6 +431,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "memory_save": MemorySaveMessage,
     "send_message_response": SendMessageResponse,
     "bcp_query": BCPQueryMessage,
+    "bcp_query_error": BCPQueryErrorMessage,
     "bcp_response_delivery": BCPResponseDeliveryMessage,
     "bcp_subscriptions_active": BCPSubscriptionsActive,
     "send_email_response": SendEmailResponse,
@@ -668,6 +691,25 @@ def emit_bcp_response(
     _emit({
         "type": "bcp_response",
         "query_id": query_id,
+        "response": response,
+    })
+
+
+def emit_bcp_publish(
+    subscription_id: str,
+    controller: str,
+    response: dict[str, Any],
+) -> None:
+    """Publish data against a BCP subscription.
+
+    Emitted by a Reader agent's runtime. Sent as a bcp_response with
+    subscription_id instead of query_id. The gateway validates the response
+    against the subscription spec before delivering to the Controller.
+    """
+    _emit({
+        "type": "bcp_response",
+        "subscription_id": subscription_id,
+        "controller": controller,
         "response": response,
     })
 
