@@ -97,7 +97,7 @@ Effective taint is the maximum of the two: `effective_taint = max(base_taint, se
 In multi-agent pipelines, labels propagate across stages:
 
 - **Taint propagates forward** through data flow (as already implemented). Agent B reading Agent A's output inherits A's taint. Sanitization steps taint down one level.
-- **Sensitivity propagates forward** through data flow (as already implemented). Agent B reading Agent A's output inherits A's sensitivity.
+- **Sensitivity decays forward** through data flow. Agent B reading Agent A's output inherits `step_down(A's sensitivity)` — one level lower. An uncompromised agent won't willingly disclose secrets, so sensitivity attenuates per hop.
 - **Capability is not inherited.** Each agent has its own capability level determined by its tool access. A high-capability agent receiving a message from a low-capability agent does not reduce its own capability.
 
 The trifecta check applies per-stage: at each agent in the pipeline, verify that the combination of its accumulated taint, accumulated sensitivity, and its own capability does not reach critical. Pipeline design should ensure that agents with high capability receive only low-taint inputs (through sanitization) or only low-sensitivity data (through redaction), breaking at least one leg of the trifecta.

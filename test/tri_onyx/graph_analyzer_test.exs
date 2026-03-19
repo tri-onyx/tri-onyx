@@ -784,11 +784,11 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
       # step_down(:high) = :medium for taint via BCP
       assert result["ctrl"].taint == :medium
-      # sensitivity passes through unchanged
-      assert result["ctrl"].sensitivity == :medium
+      # step_down(:medium) = :low for sensitivity (decays per hop)
+      assert result["ctrl"].sensitivity == :low
     end
 
-    test "BCP edge does NOT step down sensitivity" do
+    test "BCP edge steps down sensitivity (like all edge types)" do
       ctrl = make_def(%{name: "ctrl"})
       rdr = make_def(%{name: "rdr"})
 
@@ -799,7 +799,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
       }
 
       result = GraphAnalyzer.propagate_levels([ctrl, rdr], edges, base_levels)
-      assert result["ctrl"].sensitivity == :high
+      # step_down(:high) = :medium — sensitivity decays per hop
+      assert result["ctrl"].sensitivity == :medium
     end
 
     test "tracks taint_sources correctly" do
@@ -834,7 +835,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
       result = GraphAnalyzer.propagate_levels([a, b], edges, base_levels)
       assert result["a"].taint == :high
       assert result["b"].taint == :high
-      assert result["a"].sensitivity == :medium
+      # B base sens is :medium; A gets step_down(:medium) = :low, stays at base :low
+      assert result["a"].sensitivity == :low
+      # B keeps its base :medium; step_down(A's :low) = :low, no escalation
       assert result["b"].sensitivity == :medium
     end
   end

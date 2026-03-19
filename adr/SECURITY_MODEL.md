@@ -105,13 +105,15 @@ When effective risk reaches a threshold defined in the agent's policy, the gatew
 
 Risk spreads between agents through two channels. Taint and sensitivity propagate independently — a message from a high-taint, low-sensitivity agent raises the receiver's taint but not its sensitivity.
 
+**Sensitivity decays per hop.** Unlike taint, sensitivity is always reduced by one level when propagating from one agent to the next (via `step_down`). The rationale: unless an agent is already compromised, it will not willingly disclose secrets. An agent receiving high-sensitivity data produces medium-sensitivity output; medium decays to low. This means sensitivity attenuates over multi-hop chains, reflecting the decreasing likelihood of verbatim secret disclosure at each stage.
+
 ### File-based propagation
 
-When agent A writes a file and agent B reads it, B inherits A's risk levels. The file is tagged in the risk manifest with the writing agent's taint and sensitivity levels at the time of writing. When B reads the file, B's levels escalate to match.
+When agent A writes a file and agent B reads it, B's taint escalates to match A's taint level. B's sensitivity escalates to `step_down(A's sensitivity)` — one level lower than A's. The file is tagged in the risk manifest with the writing agent's taint and sensitivity levels at the time of writing.
 
 ### Inter-agent messages
 
-When agents send messages to each other, the message carries the sender's taint and sensitivity levels. The receiving agent's levels escalate to match on the respective axes.
+When agents send messages to each other, the message carries the sender's taint level directly. Sensitivity is stepped down by one level — the receiver's sensitivity escalates to at most `step_down(sender's sensitivity)`.
 
 ### Sanitization
 
@@ -175,7 +177,7 @@ These checks use the risk manifest. Even if an agent's glob pattern would allow 
 
 ## Graph Analysis
 
-The graph analyzer computes transitive risk propagation across the full agent topology. Given agent A → B → C (where → means "writes files read by"), it traces how both taint and sensitivity flow through the chain and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently.
+The graph analyzer computes transitive risk propagation across the full agent topology. Given agent A → B → C (where → means "writes files read by"), it traces how taint and sensitivity flow through the chain and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently. Taint propagates at full strength (except across BCP edges, where it is stepped down). Sensitivity is stepped down by one level at every hop, reflecting the decay principle described above.
 
 This powers the visualization in `graph.html`, which renders agents as nodes (colored by taint level, bordered by sensitivity level, sized by effective risk) connected by directed edges showing information flow. The Biba and Bell-LaPadula toggles highlight violations in real time.
 

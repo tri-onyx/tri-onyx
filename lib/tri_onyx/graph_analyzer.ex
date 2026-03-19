@@ -297,7 +297,9 @@ defmodule TriOnyx.GraphAnalyzer do
   Takes agent definitions, pre-built edges map, and base levels (from worst_case_* functions).
   Returns a map of agent_name => %{taint, sensitivity, taint_sources, sensitivity_sources}.
 
-  BCP edges apply `step_down/1` on taint but pass sensitivity through unchanged.
+  All edge types apply `step_down/1` on sensitivity — an uncompromised agent
+  won't willingly disclose secrets, so sensitivity decays by one level per hop.
+  BCP edges additionally apply `step_down/1` on taint.
   Both axes are monotonic (only escalate), guaranteeing convergence.
   """
   @spec propagate_levels([map()], map(), map()) :: map()
@@ -330,7 +332,7 @@ defmodule TriOnyx.GraphAnalyzer do
       sensitivity_sources =
         incoming
         |> Enum.map(fn edge ->
-          src_sens = resolved[edge.from].sensitivity
+          src_sens = InformationClassifier.step_down(resolved[edge.from].sensitivity)
           %{from: edge.from, contributed: src_sens, edge_type: edge.edge_type}
         end)
         |> Enum.filter(fn %{contributed: c} -> c == resolved_s and resolved_s != :low end)
@@ -354,7 +356,7 @@ defmodule TriOnyx.GraphAnalyzer do
           Enum.reduce(incoming, {base.taint, base.sensitivity}, fn edge, {t_acc, s_acc} ->
             src = current[edge.from]
             src_taint = if edge.edge_type == :bcp, do: InformationClassifier.step_down(src.taint), else: src.taint
-            src_sens = src.sensitivity
+            src_sens = InformationClassifier.step_down(src.sensitivity)
             {InformationClassifier.higher_level(t_acc, src_taint),
              InformationClassifier.higher_level(s_acc, src_sens)}
           end)
@@ -625,7 +627,9 @@ defmodule TriOnyx.GraphAnalyzer do
       |> Enum.map(fn ch ->
         case Map.get(all_definitions, ch.peer) do
           nil -> %{source: "bcp:#{ch.peer}", level: :low, kind: :input}
-          peer_def -> %{source: "bcp:#{ch.peer}", level: worst_case_sensitivity(peer_def), kind: :input}
+          peer_def ->
+            peer_sens = worst_case_sensitivity(peer_def)
+            %{source: "bcp:#{ch.peer}", level: InformationClassifier.step_down(peer_sens), kind: :input}
         end
       end)
       |> Enum.filter(fn %{level: l} -> l != :low end)
