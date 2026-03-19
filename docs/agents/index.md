@@ -2,26 +2,6 @@
 
 TriOnyx ships with the following agent definitions. Each agent runs in its own Docker container with isolated filesystem, network, and tool access.
 
-## Risk Overview
-
-| Agent | Risk | Taint | Sensitivity | Capability |
-|-------|:----:|:-----:|:-----------:|:----------:|
-| [finn](finn.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [linkedin](linkedin.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [news](news.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [twitter](twitter.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [webhook-handler](webhook-handler.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [youtube](youtube.md) | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [researcher](researcher.md) | <span class="tx-badge tx-badge--risk-moderate">moderate</span> | <span class="tx-badge tx-badge--risk-high">high</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> |
-| [bookmarks](bookmarks.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> |
-| [cheerleader](cheerleader.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> |
-| [concierge](concierge.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> |
-| [diary](diary.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> |
-| [email](email.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> | <span class="tx-badge tx-badge--risk-high">high</span> |
-| [introspector](introspector.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> |
-| [knowledgebase](knowledgebase.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> |
-| [main](main.md) | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-low">low</span> | <span class="tx-badge tx-badge--risk-moderate">medium</span> |
-
 ## Agent roster
 
 <div class="tx-agent-grid">

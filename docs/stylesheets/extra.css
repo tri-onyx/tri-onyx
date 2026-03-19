@@ -384,24 +384,122 @@
   border: 1px solid #da3633;
 }
 
-/* ── Risk profile summary ── */
+/* ── Risk profile card (floats top-right on agent pages) ── */
 
-.tx-risk-summary {
+.tx-risk-card {
+  float: right;
+  width: 200px;
+  margin: 0 0 1rem 1.5rem;
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.tx-risk-card__header {
+  padding: 0.8rem 1rem;
+  text-align: center;
+  border-bottom: 1px solid #21262d;
+}
+
+.tx-risk-card__header--low {
+  background: linear-gradient(135deg, #0d1f0d 0%, #162b16 100%);
+  border-bottom-color: #238636;
+}
+
+.tx-risk-card__header--moderate {
+  background: linear-gradient(135deg, #1a1800 0%, #2a2400 100%);
+  border-bottom-color: #9e6a03;
+}
+
+.tx-risk-card__header--high {
+  background: linear-gradient(135deg, #1f1008 0%, #2a1a0e 100%);
+  border-bottom-color: #9e6a03;
+}
+
+.tx-risk-card__header--critical {
+  background: linear-gradient(135deg, #1f0808 0%, #2d1214 100%);
+  border-bottom-color: #da3633;
+}
+
+.tx-risk-card__level {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: "JetBrains Mono", monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.tx-risk-card__header--low .tx-risk-card__level { color: #3fb950; }
+.tx-risk-card__header--moderate .tx-risk-card__level { color: #d29922; }
+.tx-risk-card__header--high .tx-risk-card__level { color: #f0883e; }
+.tx-risk-card__header--critical .tx-risk-card__level { color: #f85149; }
+
+.tx-risk-card__subtitle {
+  font-size: 0.65rem;
+  color: #8b949e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-top: 0.15rem;
+}
+
+.tx-risk-card__axes {
+  padding: 0.6rem 1rem;
+}
+
+.tx-risk-card__axis {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 0.8rem;
-  margin-bottom: 1rem;
+  padding: 0.3rem 0;
 }
 
-.tx-risk-label {
-  font-size: 0.9rem;
+.tx-risk-card__axis + .tx-risk-card__axis {
+  border-top: 1px solid #21262d;
+}
+
+.tx-risk-card__axis-name {
+  font-size: 0.72rem;
+  color: #8b949e;
+}
+
+.tx-risk-card__axis-level {
+  font-size: 0.72rem;
   font-weight: 600;
-  color: #e6edf3;
+  font-family: "JetBrains Mono", monospace;
 }
 
-.tx-risk-summary .tx-badge {
-  font-size: 0.8rem;
-  padding: 0.2rem 0.7rem;
+.tx-risk-card__axis-level--low { color: #3fb950; }
+.tx-risk-card__axis-level--medium { color: #d29922; }
+.tx-risk-card__axis-level--high { color: #f0883e; }
+.tx-risk-card__axis-level--critical { color: #f85149; }
+
+.tx-risk-card__drivers {
+  padding: 0 1rem 0.6rem;
+  border-top: 1px solid #21262d;
+}
+
+.tx-risk-card__drivers-label {
+  font-size: 0.6rem;
+  color: #6e7681;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 0.5rem 0 0.3rem;
+}
+
+.tx-risk-card__drivers-list {
+  font-size: 0.68rem;
+  color: #8b949e;
+  font-family: "JetBrains Mono", monospace;
+  line-height: 1.6;
+}
+
+@media screen and (max-width: 600px) {
+  .tx-risk-card {
+    float: none;
+    width: 100%;
+    margin: 0 0 1.5rem 0;
+  }
 }
 
 /* ── Admonition customization ── */

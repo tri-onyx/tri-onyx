@@ -60,37 +60,40 @@ RISK_BADGE_CSS = {
 }
 
 
-def format_risk_badge(level: str) -> str:
-    """Return an HTML badge span for a risk level."""
-    css = RISK_BADGE_CSS.get(level, "tx-badge--risk-low")
-    return f'<span class="tx-badge {css}">{level}</span>'
-
-
-def format_risk_section(risk: dict) -> str:
-    """Generate the Risk Profile markdown section for an agent page."""
-    lines = ["## Risk Profile\n"]
-
-    # Overall badge
+def format_risk_card(risk: dict) -> str:
+    """Generate a floating risk profile card for an agent page."""
     effective = risk["effective_risk"]
-    lines.append(f'<div class="tx-risk-summary">')
-    lines.append(f'  <span class="tx-risk-label">Effective Risk</span>')
-    lines.append(f"  {format_risk_badge(effective)}")
-    lines.append(f"</div>\n")
-
-    # Three-axis breakdown table
-    lines.append("| Axis | Level | Drivers |")
-    lines.append("|------|:-----:|---------|")
+    lines = [
+        f'<div class="tx-risk-card">',
+        f'  <div class="tx-risk-card__header tx-risk-card__header--{effective}">',
+        f'    <div class="tx-risk-card__level">{effective}</div>',
+        f'    <div class="tx-risk-card__subtitle">effective risk</div>',
+        f'  </div>',
+        f'  <div class="tx-risk-card__axes">',
+    ]
 
     for axis in ("taint", "sensitivity", "capability"):
         level = risk[axis]
-        drivers = risk.get(f"{axis}_drivers", [])
-        drivers_str = ", ".join(f"`{d}`" for d in drivers) if drivers else "—"
-        lines.append(f"| {axis.title()} | {format_risk_badge(level)} | {drivers_str} |")
+        lines.append(f'    <div class="tx-risk-card__axis">')
+        lines.append(f'      <span class="tx-risk-card__axis-name">{axis.title()}</span>')
+        lines.append(f'      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--{level}">{level}</span>')
+        lines.append(f'    </div>')
 
-    lines.append(
-        f"| **Effective Risk** | {format_risk_badge(effective)} | |"
-    )
-    lines.append("")
+    lines.append(f'  </div>')
+
+    # Collect all unique drivers
+    all_drivers = []
+    for axis in ("taint", "sensitivity", "capability"):
+        all_drivers.extend(risk.get(f"{axis}_drivers", []))
+    unique_drivers = list(dict.fromkeys(all_drivers))  # preserve order, dedup
+
+    if unique_drivers:
+        lines.append(f'  <div class="tx-risk-card__drivers">')
+        lines.append(f'    <div class="tx-risk-card__drivers-label">Drivers</div>')
+        lines.append(f'    <div class="tx-risk-card__drivers-list">{", ".join(unique_drivers)}</div>')
+        lines.append(f'  </div>')
+
+    lines.append(f'</div>\n')
     return "\n".join(lines)
 
 
@@ -179,8 +182,10 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
 
     sections = []
 
-    # Title and description
+    # Title and risk card (floats right beside content)
     sections.append(f"# {name}\n")
+    if risk:
+        sections.append(format_risk_card(risk))
     if description:
         sections.append(f"*{description}*\n")
 
@@ -209,10 +214,6 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
     for label, value in rows:
         sections.append(f"| {label} | {value} |")
     sections.append("")
-
-    # Risk profile (from Elixir export)
-    if risk:
-        sections.append(format_risk_section(risk))
 
     # Filesystem access
     if fs_read or fs_write:
@@ -265,47 +266,12 @@ def generate_index(agents: list[dict], risk_data: dict | None = None) -> str:
     """Generate the agents index page."""
     risk_data = risk_data or {}
 
-    # Sort by risk level (descending) then name
-    risk_order = {"critical": 0, "high": 1, "moderate": 2, "low": 3}
-
-    def agent_sort_key(a):
-        name = a["name"]
-        risk = risk_data.get(name, {})
-        effective = risk.get("effective_risk", "low")
-        return (risk_order.get(effective, 3), name)
-
-    sorted_agents = sorted(agents, key=agent_sort_key)
-
     lines = [
         "# Agents\n",
         "TriOnyx ships with the following agent definitions. Each agent runs in its own "
         "Docker container with isolated filesystem, network, and tool access.\n",
+        "## Agent roster\n",
     ]
-
-    # Risk summary table (if risk data available)
-    if risk_data:
-        lines.append("## Risk Overview\n")
-        lines.append("| Agent | Risk | Taint | Sensitivity | Capability |")
-        lines.append("|-------|:----:|:-----:|:-----------:|:----------:|")
-
-        for a in sorted_agents:
-            name = a["name"]
-            risk = risk_data.get(name)
-            if risk:
-                lines.append(
-                    f"| [{name}]({name}.md) "
-                    f"| {format_risk_badge(risk['effective_risk'])} "
-                    f"| {format_risk_badge(risk['taint'])} "
-                    f"| {format_risk_badge(risk['sensitivity'])} "
-                    f"| {format_risk_badge(risk['capability'])} |"
-                )
-            else:
-                lines.append(f"| [{name}]({name}.md) | — | — | — | — |")
-
-        lines.append("")
-
-    # Agent cards grid
-    lines.append("## Agent roster\n")
     lines.append('<div class="tx-agent-grid">')
     for a in sorted(agents, key=lambda x: x["name"]):
         name = a["name"]

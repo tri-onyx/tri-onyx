@@ -1,5 +1,30 @@
 # linkedin
 
+<div class="tx-risk-card">
+  <div class="tx-risk-card__header tx-risk-card__header--high">
+    <div class="tx-risk-card__level">high</div>
+    <div class="tx-risk-card__subtitle">effective risk</div>
+  </div>
+  <div class="tx-risk-card__axes">
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Taint</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--high">high</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Sensitivity</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--low">low</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Capability</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--high">high</span>
+    </div>
+  </div>
+  <div class="tx-risk-card__drivers">
+    <div class="tx-risk-card__drivers-label">Drivers</div>
+    <div class="tx-risk-card__drivers-list">Bash</div>
+  </div>
+</div>
+
 *Browses LinkedIn via headless Chromium to read feeds, post, and interact*
 
 ## Configuration
@@ -13,20 +38,6 @@
 | Idle Timeout | `30m` |
 | Browser | yes |
 | Heartbeat | `30m` |
-
-## Risk Profile
-
-<div class="tx-risk-summary">
-  <span class="tx-risk-label">Effective Risk</span>
-  <span class="tx-badge tx-badge--risk-high">high</span>
-</div>
-
-| Axis | Level | Drivers |
-|------|:-----:|---------|
-| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
-| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
-| Capability | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
-| **Effective Risk** | <span class="tx-badge tx-badge--risk-high">high</span> | |
 
 ## Filesystem Access
 

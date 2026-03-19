@@ -1,5 +1,30 @@
 # researcher
 
+<div class="tx-risk-card">
+  <div class="tx-risk-card__header tx-risk-card__header--moderate">
+    <div class="tx-risk-card__level">moderate</div>
+    <div class="tx-risk-card__subtitle">effective risk</div>
+  </div>
+  <div class="tx-risk-card__axes">
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Taint</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--high">high</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Sensitivity</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--low">low</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Capability</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--medium">medium</span>
+    </div>
+  </div>
+  <div class="tx-risk-card__drivers">
+    <div class="tx-risk-card__drivers-label">Drivers</div>
+    <div class="tx-risk-card__drivers-list">WebFetch, WebSearch</div>
+  </div>
+</div>
+
 *Searches the web and summarizes findings for other agents*
 
 ## Configuration
@@ -11,20 +36,6 @@
 | Network | `outbound` |
 | Base Taint | `low` |
 | Idle Timeout | `30m` |
-
-## Risk Profile
-
-<div class="tx-risk-summary">
-  <span class="tx-risk-label">Effective Risk</span>
-  <span class="tx-badge tx-badge--risk-moderate">moderate</span>
-</div>
-
-| Axis | Level | Drivers |
-|------|:-----:|---------|
-| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `WebFetch`, `WebSearch` |
-| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
-| Capability | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `WebFetch`, `WebSearch` |
-| **Effective Risk** | <span class="tx-badge tx-badge--risk-moderate">moderate</span> | |
 
 ## Filesystem Access
 

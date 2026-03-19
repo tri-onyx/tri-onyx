@@ -1,5 +1,30 @@
 # introspector
 
+<div class="tx-risk-card">
+  <div class="tx-risk-card__header tx-risk-card__header--low">
+    <div class="tx-risk-card__level">low</div>
+    <div class="tx-risk-card__subtitle">effective risk</div>
+  </div>
+  <div class="tx-risk-card__axes">
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Taint</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--low">low</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Sensitivity</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--medium">medium</span>
+    </div>
+    <div class="tx-risk-card__axis">
+      <span class="tx-risk-card__axis-name">Capability</span>
+      <span class="tx-risk-card__axis-level tx-risk-card__axis-level--medium">medium</span>
+    </div>
+  </div>
+  <div class="tx-risk-card__drivers">
+    <div class="tx-risk-card__drivers-label">Drivers</div>
+    <div class="tx-risk-card__drivers-list">docker_socket, trionyx_repo, Bash</div>
+  </div>
+</div>
+
 *System introspection agent that can inspect containers, read source code, and diagnose issues*
 
 ## Configuration
@@ -13,20 +38,6 @@
 | Idle Timeout | `30m` |
 | Docker Socket | yes |
 | TriOnyx Repo Access | yes |
-
-## Risk Profile
-
-<div class="tx-risk-summary">
-  <span class="tx-risk-label">Effective Risk</span>
-  <span class="tx-badge tx-badge--risk-low">low</span>
-</div>
-
-| Axis | Level | Drivers |
-|------|:-----:|---------|
-| Taint | <span class="tx-badge tx-badge--risk-low">low</span> | — |
-| Sensitivity | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `docker_socket`, `trionyx_repo` |
-| Capability | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `Bash` |
-| **Effective Risk** | <span class="tx-badge tx-badge--risk-low">low</span> | |
 
 ## Filesystem Access
 
