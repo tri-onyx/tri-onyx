@@ -10,9 +10,23 @@
 | Tools | `Read`, `Write`, `Bash`, `Grep`, `Glob`, `BCPRespond` |
 | Network | `outbound` |
 | Base Taint | `low` |
-| Idle Timeout | `30m` |
+| Idle Timeout | `15m` |
 | Browser | yes |
 | Heartbeat | `30m` |
+
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-high">high</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-high">high</span> | |
 
 ## Filesystem Access
 

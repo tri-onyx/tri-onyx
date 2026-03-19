@@ -12,6 +12,20 @@
 | Base Taint | `low` |
 | Idle Timeout | `30m` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-moderate">moderate</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `WebFetch`, `WebSearch` |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `WebFetch`, `WebSearch` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-moderate">moderate</span> | |
+
 ## Filesystem Access
 
 **Read:** `/AGENTS.md`

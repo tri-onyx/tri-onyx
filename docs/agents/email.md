@@ -12,6 +12,20 @@
 | Base Taint | `low` |
 | Idle Timeout | `30m` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-low">low</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Sensitivity | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `SendEmail` |
+| Capability | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash`, `SendEmail` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-low">low</span> | |
+
 ## Filesystem Access
 
 **Read:** `/AGENTS.md`, `/agents/email/**`

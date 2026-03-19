@@ -13,6 +13,20 @@
 | Idle Timeout | `30m` |
 | Input Sources | `webhook` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-high">high</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `webhook`, `Bash`, `WebFetch` |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash`, `WebFetch` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-high">high</span> | |
+
 ## Filesystem Access
 
 **Read:** `/repo/config/**/*`, `/repo/src/**/*`

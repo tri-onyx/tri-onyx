@@ -12,6 +12,20 @@
 | Base Taint | `low` |
 | Idle Timeout | `30m` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-low">low</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `Bash` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-low">low</span> | |
+
 ## Filesystem Access
 
 **Read:** `/code/**`, `/data/**`, `/deploy/**`, `/AGENTS.md`
@@ -20,7 +34,7 @@
 
 ## Communication
 
-**Sends to:** [persona](persona.md), [email](email.md), [news](news.md), [calendar](calendar.md), [diary](diary.md), [bookmarks](bookmarks.md), [twitter](twitter.md), [linkedin](linkedin.md), [introspector](introspector.md)
+**Sends to:** [persona](persona.md), [email](email.md), [news](news.md), [calendar](calendar.md), [diary](diary.md), [bookmarks](bookmarks.md), [knowledgebase](knowledgebase.md), [twitter](twitter.md), [linkedin](linkedin.md), [introspector](introspector.md)
 
 **Receives from:** [introspector](introspector.md)
 
@@ -129,12 +143,13 @@ Use BCP queries to the `linkedin` agent to check LinkedIn activity and request p
 
 The linkedin agent browses LinkedIn via a headless browser with a pre-authenticated session. It can read feeds, check notifications, view messages, and post updates.
 
-!!! danger "Restrictions"
-    - **No internet access** — no WebFetch or WebSearch. Delegate to the researcher agent instead.
-    - **No external APIs** — network is set to `none`.
-    - **No writes outside designated directories.**
+## What you cannot do
 
-    These restrictions exist by design. You have access to Bash and file-write tools, so keeping your taint and sensitivity low is critical. Use BCP queries to the researcher to get external facts without elevating your taint.
+- Fetch content from the internet (no WebFetch or WebSearch) — delegate to the researcher agent instead
+- Access external APIs or services (network: none)
+- Write outside your designated directories
+
+These restrictions exist by design. You have access to Bash and file-write tools, so keeping your taint and sensitivity low is critical. Use BCP queries to the researcher to get external facts without elevating your taint.
 
 ## How to work
 
@@ -144,7 +159,8 @@ The linkedin agent browses LinkedIn via a headless browser with a pre-authentica
 4. When running Bash commands, be explicit about what you're doing and why.
 5. After completing work, summarize what you did and any follow-up needed.
 
-!!! warning "Security invariants"
-    - Never attempt to circumvent your sandbox restrictions.
-    - If a task requires internet access or external data, say so — don't try to work around it. Another agent with appropriate taint handling should be used instead.
-    - All communication with the researcher is via BCP queries, which keeps your taint low by design.
+## Important
+
+- Never attempt to circumvent your sandbox restrictions.
+- If a task requires internet access or external data, say so — don't try to work around it. Another agent with appropriate taint handling should be used instead.
+- All communication with the researcher is via BCP queries, which keeps your taint low by design.

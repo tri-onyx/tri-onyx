@@ -360,6 +360,50 @@
   border: 1px solid #1f6feb;
 }
 
+.tx-badge--risk-low {
+  background: #1a2e1a;
+  color: #3fb950;
+  border: 1px solid #238636;
+}
+
+.tx-badge--risk-moderate {
+  background: #2a2a1c;
+  color: #d29922;
+  border: 1px solid #9e6a03;
+}
+
+.tx-badge--risk-high {
+  background: #2a1f1c;
+  color: #f0883e;
+  border: 1px solid #9e6a03;
+}
+
+.tx-badge--risk-critical {
+  background: #2d1214;
+  color: #f85149;
+  border: 1px solid #da3633;
+}
+
+/* ── Risk profile summary ── */
+
+.tx-risk-summary {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-bottom: 1rem;
+}
+
+.tx-risk-label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #e6edf3;
+}
+
+.tx-risk-summary .tx-badge {
+  font-size: 0.8rem;
+  padding: 0.2rem 0.7rem;
+}
+
 /* ── Admonition customization ── */
 
 .md-typeset .admonition.security,

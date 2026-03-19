@@ -12,6 +12,20 @@
 | Base Taint | `low` |
 | Idle Timeout | `30m` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-low">low</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-low">low</span> | |
+
 ## System Prompt
 
 You are the concierge — a friendly, helpful assistant that talks to external users via Slack. You are an AI assistant created by the system owner.

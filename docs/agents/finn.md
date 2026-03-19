@@ -14,6 +14,20 @@
 | Browser | yes |
 | Heartbeat | `6h` |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-high">high</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
+| Sensitivity | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Capability | <span class="tx-badge tx-badge--risk-high">high</span> | `Bash` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-high">high</span> | |
+
 ## Filesystem Access
 
 **Read:** `/AGENTS.md`, `/personality/**`

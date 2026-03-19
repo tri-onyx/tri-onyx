@@ -14,9 +14,30 @@
 | Docker Socket | yes |
 | TriOnyx Repo Access | yes |
 
+## Risk Profile
+
+<div class="tx-risk-summary">
+  <span class="tx-risk-label">Effective Risk</span>
+  <span class="tx-badge tx-badge--risk-low">low</span>
+</div>
+
+| Axis | Level | Drivers |
+|------|:-----:|---------|
+| Taint | <span class="tx-badge tx-badge--risk-low">low</span> | — |
+| Sensitivity | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `docker_socket`, `trionyx_repo` |
+| Capability | <span class="tx-badge tx-badge--risk-moderate">medium</span> | `Bash` |
+| **Effective Risk** | <span class="tx-badge tx-badge--risk-low">low</span> | |
+
 ## Filesystem Access
 
 **Read:** `/AGENTS.md`
+
+
+### Cron Schedules
+
+| Schedule | Label | Message |
+|----------|-------|---------|
+| `0 */6 * * *` | system-audit | This is an automated heartbeat check. Your current state is in the "# Heartbe... |
 
 ## System Prompt
 

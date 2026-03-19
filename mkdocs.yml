@@ -83,12 +83,14 @@ nav:
       - email: agents/email.md
       - finn: agents/finn.md
       - introspector: agents/introspector.md
+      - knowledgebase: agents/knowledgebase.md
       - linkedin: agents/linkedin.md
       - main: agents/main.md
       - news: agents/news.md
       - researcher: agents/researcher.md
       - twitter: agents/twitter.md
       - webhook-handler: agents/webhook-handler.md
+      - youtube: agents/youtube.md
   - Development:
       - Project Structure: project-structure.md
       - E2E Testing: e2e-testing.md
