@@ -543,12 +543,21 @@ defmodule TriOnyx.AgentSession do
       # Respond immediately — the item will be delivered asynchronously via EventBus
       AgentPort.send_submit_item_response(state.port, req_id, true, "")
 
-      broadcast_event(state, Map.merge(%{
+      item_event = Map.merge(%{
         "type" => item_type,
         "agent_name" => state.definition.name,
         "title" => title,
         "url" => url
-      }, metadata))
+      }, metadata)
+
+      broadcast_event(state, item_event)
+
+      # For non-interactive sessions (heartbeat, cron, etc.) no connector is
+      # subscribed to this session's EventBus, so also push via
+      # broadcast_to_connectors so the item reaches Matrix/Slack.
+      if state.trigger_type not in [:verified_input, :unverified_input] do
+        TriOnyx.ConnectorHandler.broadcast_to_connectors(Jason.encode!(item_event))
+      end
     end
 
     {:noreply, state}
