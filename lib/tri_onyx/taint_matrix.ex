@@ -63,6 +63,7 @@ defmodule TriOnyx.TaintMatrix do
     "SendMessage" => :low,
     "BCPQuery" => :low,
     "BCPRespond" => :low,
+    "BCPPublish" => :low,
     "RestartAgent" => :low,
     "Bash" => :low,
     "WebFetch" => :high,

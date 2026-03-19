@@ -276,8 +276,9 @@ defmodule TriOnyx.BCP.Channel do
   end
 
   @spec deliver_to_controller(Query.t(), map(), keyword()) :: :ok
-  defp deliver_to_controller(query, validated_response, _opts) do
+  defp deliver_to_controller(query, validated_response, opts) do
     bandwidth = Query.compute_bandwidth(query)
+    subscription_id = Keyword.get(opts, :subscription_id)
 
     session_pid =
       case AgentSupervisor.find_session(query.from) do
@@ -310,13 +311,16 @@ defmodule TriOnyx.BCP.Channel do
       end
 
     if session_pid do
+      delivery_opts = if subscription_id, do: [subscription_id: subscription_id], else: []
+
       case AgentSession.deliver_bcp_response(
              session_pid,
              query.id,
              query.category,
              query.to,
              validated_response,
-             bandwidth
+             bandwidth,
+             delivery_opts
            ) do
         :ok ->
           Logger.info(

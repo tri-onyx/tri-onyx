@@ -111,10 +111,10 @@ defmodule TriOnyx.AgentSession do
   The response is delivered with `channel_mode: :bcp` metadata so the session
   knows to skip taint elevation.
   """
-  @spec deliver_bcp_response(GenServer.server(), String.t(), integer(), String.t(), map(), float()) ::
+  @spec deliver_bcp_response(GenServer.server(), String.t(), integer(), String.t(), map(), float(), keyword()) ::
           :ok | {:error, :not_ready}
-  def deliver_bcp_response(server, query_id, category, from_agent, response, bandwidth_bits) do
-    GenServer.call(server, {:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits})
+  def deliver_bcp_response(server, query_id, category, from_agent, response, bandwidth_bits, opts \\ []) do
+    GenServer.call(server, {:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts})
   end
 
   @doc """
@@ -283,21 +283,21 @@ defmodule TriOnyx.AgentSession do
   end
 
   # BCP response delivery — send to port when ready (controller is always running)
-  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits}, _from,
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts}, _from,
                   %{status: status, port: port} = state)
       when status in [:ready, :running] and port != nil do
-    AgentPort.send_bcp_response_delivery(port, query_id, category, from_agent, response, bandwidth_bits)
+    AgentPort.send_bcp_response_delivery(port, query_id, category, from_agent, response, bandwidth_bits, opts)
     {:reply, :ok, state}
   end
 
-  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits}, _from,
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts}, _from,
                   %{status: :starting} = state) do
     Logger.info("AgentSession #{state.id}: queuing BCP response delivery #{query_id} (starting)")
     pending = Map.get(state, :pending_bcp_deliveries, [])
-    {:reply, :ok, Map.put(state, :pending_bcp_deliveries, pending ++ [{query_id, category, from_agent, response, bandwidth_bits}])}
+    {:reply, :ok, Map.put(state, :pending_bcp_deliveries, pending ++ [{query_id, category, from_agent, response, bandwidth_bits, opts}])}
   end
 
-  def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits}, _from, state) do
+  def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits, _opts}, _from, state) do
     {:reply, {:error, :not_ready}, state}
   end
 
@@ -407,9 +407,9 @@ defmodule TriOnyx.AgentSession do
       case Map.get(state, :pending_bcp_deliveries, []) do
         [] -> {state, false}
         deliveries ->
-          Enum.each(deliveries, fn {query_id, category, from_agent, response, bandwidth_bits} ->
+          Enum.each(deliveries, fn {query_id, category, from_agent, response, bandwidth_bits, opts} ->
             Logger.info("AgentSession #{state.id}: flushing queued BCP response delivery #{query_id}")
-            AgentPort.send_bcp_response_delivery(state.port, query_id, category, from_agent, response, bandwidth_bits)
+            AgentPort.send_bcp_response_delivery(state.port, query_id, category, from_agent, response, bandwidth_bits, opts)
           end)
           {Map.delete(state, :pending_bcp_deliveries), true}
       end
@@ -595,6 +595,8 @@ defmodule TriOnyx.AgentSession do
     # Route asynchronously to avoid GenServer deadlock (same pattern as :send_message_request)
     from_name = state.definition.name
 
+    port = state.port
+
     Task.start(fn ->
       # Pass the runtime's request_id as the query id so the response delivery
       # matches what the controller's runtime is waiting for
@@ -606,6 +608,7 @@ defmodule TriOnyx.AgentSession do
 
         {:error, reason} ->
           Logger.warning("AgentSession: BCP query to #{to} failed: #{inspect(reason)}")
+          AgentPort.send_bcp_query_error(port, req_id, to, format_bcp_error(reason))
       end
     end)
 
@@ -652,6 +655,91 @@ defmodule TriOnyx.AgentSession do
     broadcast_event(state, %{
       "type" => "bcp_response",
       "query_id" => query_id,
+      "status" => "validating"
+    })
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:bcp_subscription_publish, subscription_id, controller, response}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: bcp_subscription_publish sub=#{subscription_id} controller=#{controller}"
+    )
+
+    reader_name = state.definition.name
+    port = state.port
+
+    Task.start(fn ->
+      case BCP.Subscription.lookup(reader_name, subscription_id) do
+        {:ok, sub} ->
+          if sub.controller != controller do
+            Logger.warning(
+              "BCP subscription publish: controller mismatch for #{subscription_id}, " <>
+                "expected #{sub.controller}, got #{controller}"
+            )
+
+            AgentPort.send_bcp_validation_result(
+              port,
+              nil,
+              false,
+              "Controller mismatch: expected #{sub.controller}, got #{controller}",
+              subscription_id
+            )
+          else
+            case BCP.Subscription.to_query(sub) do
+              {:ok, query} ->
+                case BCP.Channel.receive_response(query, response,
+                       subscription_id: sub.id
+                     ) do
+                  {:ok, _validated} ->
+                    AgentPort.send_bcp_validation_result(
+                      port,
+                      nil,
+                      true,
+                      "Published to controller #{controller}",
+                      subscription_id
+                    )
+
+                  {:error, reason} ->
+                    AgentPort.send_bcp_validation_result(
+                      port,
+                      nil,
+                      false,
+                      "Validation failed: #{inspect(reason)}",
+                      subscription_id
+                    )
+                end
+
+              {:error, reason} ->
+                AgentPort.send_bcp_validation_result(
+                  port,
+                  nil,
+                  false,
+                  "Invalid subscription spec: #{inspect(reason)}",
+                  subscription_id
+                )
+            end
+          end
+
+        :error ->
+          Logger.warning(
+            "BCP subscription publish: unknown subscription #{subscription_id} for reader #{reader_name}"
+          )
+
+          AgentPort.send_bcp_validation_result(
+            port,
+            nil,
+            false,
+            "No active subscription '#{subscription_id}' from controller '#{controller}'",
+            subscription_id
+          )
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "bcp_subscription_publish",
+      "subscription_id" => subscription_id,
+      "controller" => controller,
       "status" => "validating"
     })
 
@@ -1452,4 +1540,18 @@ defmodule TriOnyx.AgentSession do
     basename = Path.basename(path)
     Regex.match?(~r/\.tmp\.\d+\.\d+$/, basename)
   end
+
+  defp format_bcp_error({:agent_not_found, name}),
+    do: "Agent '#{name}' not found. It may not be configured."
+
+  defp format_bcp_error({:no_bcp_channel, from, to, _role}),
+    do: "No BCP channel configured between '#{from}' and '#{to}'."
+
+  defp format_bcp_error({:category_exceeds_max, cat, max}),
+    do: "Category #{cat} exceeds max allowed category #{max} for this channel."
+
+  defp format_bcp_error({:reader_dispatch_failed, agent, msg}),
+    do: "Failed to start reader agent '#{agent}': #{msg}"
+
+  defp format_bcp_error(reason), do: inspect(reason)
 end

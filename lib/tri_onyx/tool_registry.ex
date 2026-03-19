@@ -13,7 +13,7 @@ defmodule TriOnyx.ToolRegistry do
 
   @known_tools ~w(
     Read Grep Glob Write Edit NotebookEdit SendMessage
-    BCPQuery BCPRespond RestartAgent Bash WebFetch WebSearch
+    BCPQuery BCPRespond BCPPublish RestartAgent Bash WebFetch WebSearch
     SendEmail MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
     SubmitItem
@@ -38,6 +38,7 @@ defmodule TriOnyx.ToolRegistry do
     "SendMessage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "BCPQuery" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "BCPRespond" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "BCPPublish" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "RestartAgent" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "Bash" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
     "WebFetch" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
@@ -65,6 +66,7 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "SendMessage",     display: "SendMessage", variant: nil, group: "Messaging",         note: nil},
     %{key: "BCPQuery",       display: "BCPQuery",   variant: nil, group: "Messaging",         note: nil},
     %{key: "BCPRespond",     display: "BCPRespond", variant: nil, group: "Messaging",         note: nil},
+    %{key: "BCPPublish",     display: "BCPPublish", variant: nil, group: "Messaging",         note: nil},
     %{key: "Bash/isolated",   display: "Bash",        variant: "no network",    group: "Execution / Web",   note: "shell execution, container-local only"},
     %{key: "Bash/network",    display: "Bash",        variant: "with network",  group: "Execution / Web",   note: "shell + network = can exfiltrate/act externally"},
     %{key: "WebFetch",        display: "WebFetch",    variant: nil, group: "Execution / Web",   note: "fetches arbitrary external web content"},

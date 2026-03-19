@@ -48,6 +48,7 @@ defmodule TriOnyx.AgentPort do
           | {:send_message_request, String.t(), String.t(), String.t(), map()}
           | {:bcp_query_request, String.t(), String.t(), integer(), map()}
           | {:bcp_response, String.t(), map()}
+          | {:bcp_subscription_publish, String.t(), String.t(), map()}
           | {:send_email_request, String.t(), String.t()}
           | {:move_email_request, String.t(), String.t(), String.t(), String.t()}
           | {:create_folder_request, String.t(), String.t()}
@@ -185,21 +186,44 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
-  Sends a `bcp_validation_result` message to the runtime, informing the Reader
-  agent whether its BCP response passed validation.
+  Sends a `bcp_query_error` message to the runtime, informing the Controller
+  agent that its BCP query could not be routed.
   """
-  @spec send_bcp_validation_result(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
-  def send_bcp_validation_result(server, query_id, success, detail \\ "") do
+  @spec send_bcp_query_error(GenServer.server(), String.t(), String.t(), String.t()) :: :ok
+  def send_bcp_query_error(server, request_id, to_agent, reason) do
     GenServer.cast(
       server,
       {:send,
        %{
-         "type" => "bcp_validation_result",
-         "query_id" => query_id,
-         "success" => success,
-         "detail" => detail
+         "type" => "bcp_query_error",
+         "request_id" => request_id,
+         "to_agent" => to_agent,
+         "reason" => reason
        }}
     )
+  end
+
+  @doc """
+  Sends a `bcp_validation_result` message to the runtime, informing the Reader
+  agent whether its BCP response passed validation.
+  """
+  @spec send_bcp_validation_result(
+          GenServer.server(),
+          String.t() | nil,
+          boolean(),
+          String.t(),
+          String.t() | nil
+        ) :: :ok
+  def send_bcp_validation_result(server, query_id, success, detail \\ "", subscription_id \\ nil) do
+    msg = %{
+      "type" => "bcp_validation_result",
+      "success" => success,
+      "detail" => detail
+    }
+
+    msg = if query_id, do: Map.put(msg, "query_id", query_id), else: msg
+    msg = if subscription_id, do: Map.put(msg, "subscription_id", subscription_id), else: msg
+    GenServer.cast(server, {:send, msg})
   end
 
   @doc """
@@ -208,25 +232,27 @@ defmodule TriOnyx.AgentPort do
   """
   @spec send_bcp_response_delivery(
           GenServer.server(),
-          String.t(),
+          String.t() | nil,
           integer(),
           String.t(),
           map(),
-          float()
+          float(),
+          keyword()
         ) :: :ok
-  def send_bcp_response_delivery(server, query_id, category, from_agent, response, bandwidth_bits) do
-    GenServer.cast(
-      server,
-      {:send,
-       %{
-         "type" => "bcp_response_delivery",
-         "query_id" => query_id,
-         "category" => category,
-         "from_agent" => from_agent,
-         "response" => response,
-         "bandwidth_bits" => bandwidth_bits
-       }}
-    )
+  def send_bcp_response_delivery(server, query_id, category, from_agent, response, bandwidth_bits, opts \\ []) do
+    subscription_id = Keyword.get(opts, :subscription_id)
+
+    msg = %{
+      "type" => "bcp_response_delivery",
+      "category" => category,
+      "from_agent" => from_agent,
+      "response" => response,
+      "bandwidth_bits" => bandwidth_bits
+    }
+
+    msg = if query_id, do: Map.put(msg, "query_id", query_id), else: msg
+    msg = if subscription_id, do: Map.put(msg, "subscription_id", subscription_id), else: msg
+    GenServer.cast(server, {:send, msg})
   end
 
   @doc """
@@ -651,6 +677,16 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(to) and is_integer(category) and is_map(spec) ->
         {:ok, {:bcp_query_request, req_id, to, category, spec}}
+
+      {:ok,
+       %{
+         "type" => "bcp_response",
+         "subscription_id" => sub_id,
+         "controller" => controller,
+         "response" => response
+       }}
+      when is_binary(sub_id) and is_binary(controller) and is_map(response) ->
+        {:ok, {:bcp_subscription_publish, sub_id, controller, response}}
 
       {:ok,
        %{
