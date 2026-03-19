@@ -49,7 +49,21 @@ def redact_env_file(src: Path) -> str:
     lines = []
     for line in src.read_text().splitlines():
         stripped = line.strip()
-        if not stripped or stripped.startswith("#"):
+        if not stripped:
+            lines.append(line)
+            continue
+        # Commented-out KEY=VALUE lines — strip the value but keep as comment
+        if stripped.startswith("#") and "=" in stripped:
+            comment_body = stripped.lstrip("# ")
+            key = comment_body.split("=", 1)[0]
+            value = comment_body.split("=", 1)[1] if "=" in comment_body else ""
+            if value and SECRET_VALUE_PATTERNS.search(value):
+                lines.append(f"# {key}=")
+                continue
+            if value and SECRET_KEY_PATTERNS.search(key):
+                lines.append(f"# {key}=")
+                continue
+        if stripped.startswith("#"):
             lines.append(line)
             continue
         if "=" in line:
