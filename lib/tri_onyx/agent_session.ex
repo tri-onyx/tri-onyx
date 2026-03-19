@@ -290,6 +290,13 @@ defmodule TriOnyx.AgentSession do
     {:reply, :ok, state}
   end
 
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits}, _from,
+                  %{status: :starting} = state) do
+    Logger.info("AgentSession #{state.id}: queuing BCP response delivery #{query_id} (starting)")
+    pending = Map.get(state, :pending_bcp_deliveries, [])
+    {:reply, :ok, Map.put(state, :pending_bcp_deliveries, pending ++ [{query_id, category, from_agent, response, bandwidth_bits}])}
+  end
+
   def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits}, _from, state) do
     {:reply, {:error, :not_ready}, state}
   end
@@ -395,20 +402,34 @@ defmodule TriOnyx.AgentSession do
           {Map.delete(state, :pending_bcp_queries), true}
       end
 
+    # Flush any BCP response deliveries that arrived while the runtime was starting
+    {state, had_bcp_deliveries} =
+      case Map.get(state, :pending_bcp_deliveries, []) do
+        [] -> {state, false}
+        deliveries ->
+          Enum.each(deliveries, fn {query_id, category, from_agent, response, bandwidth_bits} ->
+            Logger.info("AgentSession #{state.id}: flushing queued BCP response delivery #{query_id}")
+            AgentPort.send_bcp_response_delivery(state.port, query_id, category, from_agent, response, bandwidth_bits)
+          end)
+          {Map.delete(state, :pending_bcp_deliveries), true}
+      end
+
+    had_bcp = had_bcp_queries or had_bcp_deliveries
+
     # Flush any prompt that arrived while the runtime was starting.
-    # If BCP queries were flushed, discard the trigger prompt — the BCP
-    # query message already contains the full spec and the runtime formats
+    # If BCP queries/deliveries were flushed, discard the trigger prompt — the BCP
+    # message already contains the full spec and the runtime formats
     # it into a proper prompt.  Sending the trigger payload too would
-    # override the structured query with a useless summary string.
+    # override the structured content with a useless summary string.
     case state.pending_prompt do
-      {content, metadata} when had_bcp_queries == false ->
+      {content, metadata} when had_bcp == false ->
         Logger.info("AgentSession #{state.id}: flushing queued prompt (#{byte_size(content)} bytes)")
         broadcast_event(state, %{"type" => "user_prompt", "content" => content})
         AgentPort.send_prompt(state.port, content, metadata)
         {:noreply, %{state | status: :running, pending_prompt: nil}}
 
       {_content, _metadata} ->
-        Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP queries already flushed)")
+        Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP messages already flushed)")
         {:noreply, %{state | status: :running, pending_prompt: nil}}
 
       nil ->

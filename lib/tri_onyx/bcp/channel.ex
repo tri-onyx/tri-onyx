@@ -279,30 +279,56 @@ defmodule TriOnyx.BCP.Channel do
   defp deliver_to_controller(query, validated_response, _opts) do
     bandwidth = Query.compute_bandwidth(query)
 
-    case AgentSupervisor.find_session(query.from) do
-      {:ok, session_pid} ->
-        case AgentSession.deliver_bcp_response(
-               session_pid,
-               query.id,
-               query.category,
-               query.to,
-               validated_response,
-               bandwidth
-             ) do
-          :ok ->
-            Logger.info(
-              "BCP.Channel: delivered validated response for query #{query.id} " <>
-                "to controller #{query.from} (channel_mode: :bcp)"
-            )
+    session_pid =
+      case AgentSupervisor.find_session(query.from) do
+        {:ok, pid} ->
+          pid
 
-          {:error, reason} ->
-            Logger.warning(
-              "BCP.Channel: controller #{query.from} rejected delivery: #{inspect(reason)}"
-            )
-        end
+        :error ->
+          # Controller not running — start it via trigger so the delivery
+          # can be queued while the session is still starting.
+          Logger.info("BCP.Channel: controller #{query.from} not running, starting via trigger")
 
-      :error ->
-        Logger.warning("BCP.Channel: controller #{query.from} not running, cannot deliver")
+          bcp_trigger = %{
+            type: :bcp,
+            agent_name: query.from,
+            payload: "BCP response delivery for query #{query.id} from #{query.to}",
+            metadata: %{channel_mode: :bcp, bcp_response: true}
+          }
+
+          case TriggerRouter.dispatch(bcp_trigger) do
+            {:ok, pid} ->
+              pid
+
+            {:error, reason} ->
+              Logger.warning(
+                "BCP.Channel: failed to start controller #{query.from}: #{inspect(reason)}"
+              )
+
+              nil
+          end
+      end
+
+    if session_pid do
+      case AgentSession.deliver_bcp_response(
+             session_pid,
+             query.id,
+             query.category,
+             query.to,
+             validated_response,
+             bandwidth
+           ) do
+        :ok ->
+          Logger.info(
+            "BCP.Channel: delivered validated response for query #{query.id} " <>
+              "to controller #{query.from} (channel_mode: :bcp)"
+          )
+
+        {:error, reason} ->
+          Logger.warning(
+            "BCP.Channel: controller #{query.from} rejected delivery: #{inspect(reason)}"
+          )
+      end
     end
 
     :ok
