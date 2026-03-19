@@ -67,11 +67,8 @@ defmodule TriOnyx.Application do
       # 9. Connector registry — tracks active WebSocket connectors
       {Registry, keys: :unique, name: TriOnyx.ConnectorRegistry},
 
-      # 9. BCP approval queue — human approval for Cat-3 queries/escalations
+      # 9. Unified approval queue — human approval for BCP and action tools
       TriOnyx.BCP.ApprovalQueue,
-
-      # 10. Action approval queue — human approval for sensitive tool actions
-      TriOnyx.ActionApprovalQueue,
 
       # 10. HTTP server
       {Bandit, plug: TriOnyx.Router, port: port}

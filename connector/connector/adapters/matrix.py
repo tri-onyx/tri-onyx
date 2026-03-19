@@ -1371,8 +1371,9 @@ class MatrixAdapter(BaseAdapter):
         response_content: str,
         anomalies: list[dict[str, Any]],
         channel: dict[str, Any] | None = None,
+        kind: str = "bcp",
     ) -> None:
-        """Send a BCP Cat-3 approval request to Matrix with attachment."""
+        """Send an approval request to Matrix with attachment."""
         assert self._client is not None
 
         # Determine target room: use channel if provided, otherwise look up
@@ -1380,7 +1381,6 @@ class MatrixAdapter(BaseAdapter):
         if channel:
             room_id = channel.get("room_id", "")
         else:
-            # Check approval_rooms config for either agent
             room_id = (
                 self._config.approval_rooms.get(from_agent)
                 or self._config.approval_rooms.get(to_agent)
@@ -1389,48 +1389,55 @@ class MatrixAdapter(BaseAdapter):
 
         if not room_id:
             logger.warning(
-                "No approval room configured for agents %s/%s — skipping",
+                "No approval room configured for agent %s — skipping",
                 from_agent,
-                to_agent,
             )
             return
 
-        # Build the review file content
-        anomaly_text = ""
-        if anomalies:
-            anomaly_lines = []
-            for a in anomalies:
-                msg_text = a.get("message", str(a))
-                anomaly_lines.append(f"  - {msg_text}")
-            anomaly_text = "\nAnomalies:\n" + "\n".join(anomaly_lines) + "\n"
+        if kind == "action":
+            body = (
+                f"**Action Approval Required**\n"
+                f"Agent: {from_agent}\n"
+                f"{query_summary}\n\n"
+                f"{response_content}\n\n"
+                f"React with 👍 to approve or 👎 to reject."
+            )
+        else:
+            # BCP Cat-N approval — upload review file first
+            anomaly_text = ""
+            if anomalies:
+                anomaly_lines = []
+                for a in anomalies:
+                    msg_text = a.get("message", str(a))
+                    anomaly_lines.append(f"  - {msg_text}")
+                anomaly_text = "\nAnomalies:\n" + "\n".join(anomaly_lines) + "\n"
 
-        file_content = (
-            f"BCP Cat-{category} Review\n"
-            f"{'=' * 40}\n"
-            f"From: {from_agent}\n"
-            f"To: {to_agent}\n"
-            f"Approval ID: {approval_id}\n"
-            f"\nQuery Directive:\n{query_summary}\n"
-            f"\nResponse Content:\n{response_content}\n"
-            f"{anomaly_text}"
-        )
+            file_content = (
+                f"BCP Cat-{category} Review\n"
+                f"{'=' * 40}\n"
+                f"From: {from_agent}\n"
+                f"To: {to_agent}\n"
+                f"Approval ID: {approval_id}\n"
+                f"\nQuery Directive:\n{query_summary}\n"
+                f"\nResponse Content:\n{response_content}\n"
+                f"{anomaly_text}"
+            )
 
-        # Upload as text file attachment
-        filename = f"bcp-review-{approval_id[:8]}.txt"
-        target_channel = {"platform": "matrix", "room_id": room_id}
-        await self.send_file(
-            target_channel,
-            file_content.encode("utf-8"),
-            filename,
-            "text/plain",
-        )
+            filename = f"bcp-review-{approval_id[:8]}.txt"
+            target_channel = {"platform": "matrix", "room_id": room_id}
+            await self.send_file(
+                target_channel,
+                file_content.encode("utf-8"),
+                filename,
+                "text/plain",
+            )
 
-        # Send the short approval message that users react to
-        body = (
-            f"**BCP Cat-{category} Approval Required**\n"
-            f"From: {from_agent} → To: {to_agent}\n"
-            f"React with 👍 to approve or 👎 to reject."
-        )
+            body = (
+                f"**BCP Cat-{category} Approval Required**\n"
+                f"From: {from_agent} → To: {to_agent}\n"
+                f"React with 👍 to approve or 👎 to reject."
+            )
+
         html = markdown_to_matrix_html(body)
         msg_content: dict[str, Any] = {
             "msgtype": "m.text",
@@ -1443,7 +1450,8 @@ class MatrixAdapter(BaseAdapter):
         if resp:
             self._approval_events[resp.event_id] = approval_id
             logger.info(
-                "Sent approval request %s to room %s (event %s)",
+                "Sent %s approval request %s to room %s (event %s)",
+                kind,
                 approval_id,
                 room_id,
                 resp.event_id,

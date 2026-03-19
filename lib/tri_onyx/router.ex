@@ -629,21 +629,22 @@ defmodule TriOnyx.Router do
     end
   end
 
-  # --- Action Approval Queue ---
+  # --- Action Approval Queue (delegates to unified ApprovalQueue) ---
 
   get "/actions/approvals" do
-    alias TriOnyx.ActionApprovalQueue
-
-    items = ActionApprovalQueue.list_pending()
+    items =
+      ApprovalQueue.list_pending()
+      |> Enum.filter(fn item -> Map.get(item, :kind) == "action" end)
 
     serialized =
       Enum.map(items, fn item ->
         %{
           "id" => item.id,
-          "agent_name" => item.agent_name,
-          "session_id" => item.session_id,
-          "tool_name" => item.tool_name,
-          "tool_input" => item.tool_input,
+          "kind" => "action",
+          "agent_name" => Map.get(item, :agent_name, ""),
+          "session_id" => Map.get(item, :session_id, ""),
+          "tool_name" => Map.get(item, :tool_name, ""),
+          "tool_input" => Map.get(item, :tool_input, %{}),
           "submitted_at" => DateTime.to_iso8601(item.submitted_at)
         }
       end)
@@ -654,9 +655,7 @@ defmodule TriOnyx.Router do
   end
 
   post "/actions/approvals/:id/approve" do
-    alias TriOnyx.ActionApprovalQueue
-
-    case ActionApprovalQueue.approve(id) do
+    case ApprovalQueue.approve(id) do
       {:ok, item} ->
         conn
         |> put_resp_content_type("application/json")
@@ -665,8 +664,8 @@ defmodule TriOnyx.Router do
           Jason.encode!(%{
             "status" => "approved",
             "id" => item.id,
-            "agent_name" => item.agent_name,
-            "tool_name" => item.tool_name
+            "agent_name" => Map.get(item, :agent_name, ""),
+            "tool_name" => Map.get(item, :tool_name, "")
           })
         )
 
@@ -678,8 +677,6 @@ defmodule TriOnyx.Router do
   end
 
   post "/actions/approvals/:id/reject" do
-    alias TriOnyx.ActionApprovalQueue
-
     body = conn.assigns[:raw_body] || ""
 
     reason =
@@ -688,7 +685,7 @@ defmodule TriOnyx.Router do
         _ -> "no reason provided"
       end
 
-    case ActionApprovalQueue.reject(id, reason) do
+    case ApprovalQueue.reject(id, reason) do
       {:ok, item} ->
         conn
         |> put_resp_content_type("application/json")
@@ -698,8 +695,8 @@ defmodule TriOnyx.Router do
             "status" => "rejected",
             "id" => item.id,
             "reason" => reason,
-            "agent_name" => item.agent_name,
-            "tool_name" => item.tool_name
+            "agent_name" => Map.get(item, :agent_name, ""),
+            "tool_name" => Map.get(item, :tool_name, "")
           })
         )
 

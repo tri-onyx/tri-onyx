@@ -229,6 +229,7 @@ async def _route_approval_request(
                 response_content=msg.response_content,
                 anomalies=msg.anomalies,
                 channel=channel,
+                kind=msg.kind,
             )
             routed = True
 

@@ -140,8 +140,9 @@ class BaseAdapter(ABC):
         response_content: str,
         anomalies: list[dict[str, Any]],
         channel: dict[str, Any] | None = None,
+        kind: str = "bcp",
     ) -> None:
-        """Send a BCP approval request to the platform for human review.
+        """Send an approval request to the platform for human review.
 
         The default implementation is a no-op.  Adapters that support approval
         workflows should override this method.

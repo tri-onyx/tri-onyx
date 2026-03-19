@@ -1,14 +1,13 @@
 defmodule TriOnyx.BCP.ApprovalQueue do
   @moduledoc """
-  GenServer for Cat-3 human approval queue.
+  Unified human-approval queue for actions that need sign-off.
 
-  Holds pending approval items submitted by the gateway when a query or
-  escalation requires human sign-off. Operators interact with the queue
-  through the HTTP API (GET /bcp/approvals, POST approve/reject).
+  Handles two kinds of approval:
+  - **BCP (Cat-3)**: inter-agent responses with anomalies
+  - **Action**: gateway-mediated tool calls (e.g. SendEmail)
 
-  The `await_decision/3` function allows a caller to block (with timeout)
-  until a decision is made, implementing the BCP principle that latency
-  is a security feature — agents cannot bypass the approval step.
+  Operators interact via the HTTP API or chat reactions (👍/👎).
+  `await_decision/3` blocks the caller until a human decides.
   """
 
   use GenServer
@@ -106,17 +105,15 @@ defmodule TriOnyx.BCP.ApprovalQueue do
   @impl true
   def handle_call({:submit, attrs}, _from, state) do
     id = generate_id()
+    kind = Map.get(attrs, :kind, "bcp")
 
-    item = %{
-      id: id,
-      query: Map.get(attrs, :query, %{}),
-      from_agent: Map.get(attrs, :from_agent, ""),
-      to_agent: Map.get(attrs, :to_agent, ""),
-      justification: Map.get(attrs, :justification, ""),
-      submitted_at: DateTime.utc_now()
-    }
+    item =
+      attrs
+      |> Map.put(:id, id)
+      |> Map.put(:kind, kind)
+      |> Map.put_new(:submitted_at, DateTime.utc_now())
 
-    Logger.info("BCP approval submitted: #{id} from=#{item.from_agent} to=#{item.to_agent}")
+    Logger.info("Approval submitted: #{id} kind=#{kind} #{summary(item)}")
 
     new_state = put_in(state, [:pending, id], item)
     {:reply, {:ok, id}, new_state}
@@ -135,7 +132,7 @@ defmodule TriOnyx.BCP.ApprovalQueue do
           decided_at: DateTime.utc_now()
         }
 
-        Logger.info("BCP approval approved: #{approval_id}")
+        Logger.info("Approval approved: #{approval_id}")
 
         state = %{state | pending: remaining_pending}
         state = put_in(state, [:decided, approval_id], decided)
@@ -158,7 +155,7 @@ defmodule TriOnyx.BCP.ApprovalQueue do
           decided_at: DateTime.utc_now()
         }
 
-        Logger.info("BCP approval rejected: #{approval_id} reason=#{reason}")
+        Logger.info("Approval rejected: #{approval_id} reason=#{reason}")
 
         state = %{state | pending: remaining_pending}
         state = put_in(state, [:decided, approval_id], decided)
@@ -222,6 +219,12 @@ defmodule TriOnyx.BCP.ApprovalQueue do
         %{state | waiters: remaining}
     end
   end
+
+  defp summary(%{kind: "action"} = item),
+    do: "agent=#{Map.get(item, :agent_name, "")} tool=#{Map.get(item, :tool_name, "")}"
+
+  defp summary(item),
+    do: "from=#{Map.get(item, :from_agent, "")} to=#{Map.get(item, :to_agent, "")}"
 
   defp generate_id do
     <<a::32, b::16, c::16, d::16, e::48>> = :crypto.strong_rand_bytes(16)

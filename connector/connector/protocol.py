@@ -142,7 +142,7 @@ class ActionResult:
 
 @dataclass(slots=True)
 class ApprovalRequestMessage:
-    """Gateway requests human approval for a Cat-3 BCP response."""
+    """Gateway requests human approval (BCP Cat-3 or action tool)."""
 
     approval_id: str
     from_agent: str
@@ -151,6 +151,7 @@ class ApprovalRequestMessage:
     query_summary: str
     response_content: str
     anomalies: list[dict[str, Any]] = field(default_factory=list)
+    kind: str = "bcp"
 
 
 @dataclass(slots=True)
@@ -256,6 +257,7 @@ def decode(raw: str | bytes) -> object:
             query_summary=data.get("query_summary", ""),
             response_content=data.get("response_content", ""),
             anomalies=data.get("anomalies", []),
+            kind=data.get("kind", "bcp"),
         )
 
     if msg_type in _OUTBOUND_TYPE_MAP:
