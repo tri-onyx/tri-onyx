@@ -33,13 +33,23 @@ defmodule TriOnyx.AgentDefinition do
 
   @type network_policy :: :none | :outbound | [String.t()]
 
+  @type bcp_subscription :: %{
+          id: String.t(),
+          category: 1..3,
+          fields: [map()] | nil,
+          questions: [map()] | nil,
+          directive: String.t() | nil,
+          max_words: pos_integer() | nil
+        }
+
   @type bcp_channel :: %{
           peer: String.t(),
           role: :controller | :reader,
           max_category: 1..3,
           budget_bits: pos_integer(),
           max_cat2_queries: non_neg_integer(),
-          max_cat3_queries: non_neg_integer()
+          max_cat3_queries: non_neg_integer(),
+          subscriptions: [bcp_subscription()]
         }
 
   @type cron_schedule :: %{
@@ -395,7 +405,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, max_cat2} <- get_bcp_field(channel, "max_cat2_queries", idx, &is_integer/1, :integer, 0),
          :ok <- validate_non_negative(max_cat2, "max_cat2_queries", idx),
          {:ok, max_cat3} <- get_bcp_field(channel, "max_cat3_queries", idx, &is_integer/1, :integer, 0),
-         :ok <- validate_non_negative(max_cat3, "max_cat3_queries", idx) do
+         :ok <- validate_non_negative(max_cat3, "max_cat3_queries", idx),
+         {:ok, subscriptions} <- parse_bcp_subscriptions(channel, role, max_cat, idx) do
       {:ok,
        %{
          peer: peer,
@@ -403,7 +414,8 @@ defmodule TriOnyx.AgentDefinition do
          max_category: max_cat,
          budget_bits: budget_bits,
          max_cat2_queries: max_cat2,
-         max_cat3_queries: max_cat3
+         max_cat3_queries: max_cat3,
+         subscriptions: subscriptions
        }}
     end
   end
@@ -444,6 +456,186 @@ defmodule TriOnyx.AgentDefinition do
 
   defp validate_non_negative(val, _field, _idx) when is_integer(val) and val >= 0, do: :ok
   defp validate_non_negative(_val, field, idx), do: {:error, {:invalid_bcp_channel_field, idx, field, :must_be_non_negative}}
+
+  @subscription_id_pattern ~r/\A[a-z0-9][a-z0-9-]*\z/
+
+  defp parse_bcp_subscriptions(channel, role, max_category, channel_idx) do
+    case Map.get(channel, "subscriptions") do
+      nil ->
+        {:ok, []}
+
+      _ when role != :controller ->
+        {:error, {:subscriptions_on_reader_channel, channel_idx}}
+
+      subs when is_list(subs) ->
+        subs
+        |> Enum.with_index()
+        |> Enum.reduce_while({:ok, []}, fn {sub, sub_idx}, {:ok, acc} ->
+          case parse_single_subscription(sub, channel_idx, sub_idx, max_category) do
+            {:ok, parsed} -> {:cont, {:ok, [parsed | acc]}}
+            {:error, _} = err -> {:halt, err}
+          end
+        end)
+        |> case do
+          {:ok, parsed} ->
+            parsed = Enum.reverse(parsed)
+            validate_subscription_id_uniqueness(parsed, channel_idx)
+
+          error ->
+            error
+        end
+
+      _other ->
+        {:error, {:invalid_field_type, "subscriptions", :expected_list}}
+    end
+  end
+
+  defp parse_single_subscription(sub, channel_idx, sub_idx, max_category) when is_map(sub) do
+    with {:ok, id} <- parse_subscription_id(sub, channel_idx, sub_idx),
+         {:ok, category} <- parse_subscription_category(sub, channel_idx, sub_idx, max_category),
+         {:ok, fields, questions, directive, max_words} <-
+           parse_subscription_spec(sub, channel_idx, sub_idx, category) do
+      {:ok,
+       %{
+         id: id,
+         category: category,
+         fields: fields,
+         questions: questions,
+         directive: directive,
+         max_words: max_words
+       }}
+    end
+  end
+
+  defp parse_single_subscription(_sub, channel_idx, sub_idx, _max_category) do
+    {:error, {:invalid_subscription, channel_idx, sub_idx, :expected_map}}
+  end
+
+  defp parse_subscription_id(sub, channel_idx, sub_idx) do
+    case Map.get(sub, "id") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "id"}}
+
+      id when is_binary(id) ->
+        if Regex.match?(@subscription_id_pattern, id) do
+          {:ok, id}
+        else
+          {:error, {:invalid_subscription_id, channel_idx, sub_idx, id}}
+        end
+
+      _other ->
+        {:error, {:invalid_subscription_field, channel_idx, sub_idx, "id", :expected_string}}
+    end
+  end
+
+  defp parse_subscription_category(sub, channel_idx, sub_idx, max_category) do
+    case Map.get(sub, "category") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "category"}}
+
+      cat when is_integer(cat) and cat in @valid_max_categories ->
+        if cat > max_category do
+          {:error, {:subscription_category_exceeds_max, channel_idx, sub_idx, cat, max_category}}
+        else
+          {:ok, cat}
+        end
+
+      other ->
+        {:error, {:invalid_subscription_category, channel_idx, sub_idx, other, @valid_max_categories}}
+    end
+  end
+
+  defp parse_subscription_spec(sub, channel_idx, sub_idx, 1) do
+    case Map.get(sub, "fields") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "fields"}}
+
+      fields when is_list(fields) ->
+        if Enum.all?(fields, &is_map/1) do
+          {:ok, fields, nil, nil, nil}
+        else
+          {:error, {:invalid_subscription_field, channel_idx, sub_idx, "fields", :expected_list_of_maps}}
+        end
+
+      _other ->
+        {:error, {:invalid_subscription_field, channel_idx, sub_idx, "fields", :expected_list}}
+    end
+  end
+
+  defp parse_subscription_spec(sub, channel_idx, sub_idx, 2) do
+    case Map.get(sub, "questions") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "questions"}}
+
+      questions when is_list(questions) ->
+        if Enum.all?(questions, &is_map/1) do
+          max_words = parse_optional_max_words(sub)
+
+          case max_words do
+            {:error, _} = err -> err
+            mw -> {:ok, nil, questions, nil, mw}
+          end
+        else
+          {:error, {:invalid_subscription_field, channel_idx, sub_idx, "questions", :expected_list_of_maps}}
+        end
+
+      _other ->
+        {:error, {:invalid_subscription_field, channel_idx, sub_idx, "questions", :expected_list}}
+    end
+  end
+
+  defp parse_subscription_spec(sub, channel_idx, sub_idx, 3) do
+    with {:ok, directive} <- parse_subscription_directive(sub, channel_idx, sub_idx),
+         {:ok, max_words} <- parse_required_max_words(sub, channel_idx, sub_idx) do
+      {:ok, nil, nil, directive, max_words}
+    end
+  end
+
+  defp parse_subscription_directive(sub, channel_idx, sub_idx) do
+    case Map.get(sub, "directive") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "directive"}}
+
+      directive when is_binary(directive) ->
+        {:ok, directive}
+
+      _other ->
+        {:error, {:invalid_subscription_field, channel_idx, sub_idx, "directive", :expected_string}}
+    end
+  end
+
+  defp parse_optional_max_words(sub) do
+    case Map.get(sub, "max_words") do
+      nil -> nil
+      mw when is_integer(mw) and mw > 0 -> mw
+      _other -> {:error, {:invalid_subscription_max_words, :must_be_positive_integer}}
+    end
+  end
+
+  defp parse_required_max_words(sub, channel_idx, sub_idx) do
+    case Map.get(sub, "max_words") do
+      nil ->
+        {:error, {:missing_subscription_field, channel_idx, sub_idx, "max_words"}}
+
+      mw when is_integer(mw) and mw > 0 ->
+        {:ok, mw}
+
+      _other ->
+        {:error, {:invalid_subscription_field, channel_idx, sub_idx, "max_words", :must_be_positive_integer}}
+    end
+  end
+
+  defp validate_subscription_id_uniqueness(subscriptions, channel_idx) do
+    ids = Enum.map(subscriptions, & &1.id)
+    unique_ids = Enum.uniq(ids)
+
+    if length(ids) == length(unique_ids) do
+      {:ok, subscriptions}
+    else
+      duplicate = ids -- unique_ids |> List.first()
+      {:error, {:duplicate_subscription_id, channel_idx, duplicate}}
+    end
+  end
 
   @spec parse_cron_schedules(map()) :: {:ok, [cron_schedule()]} | {:error, term()}
   defp parse_cron_schedules(yaml) do
