@@ -165,7 +165,6 @@ class InboundDispatcher:
         self.interrupt_event: asyncio.Event = asyncio.Event()
         self.send_message_responses: asyncio.Queue[SendMessageResponse] = asyncio.Queue()
         self.bcp_query_queue: asyncio.Queue[BCPQueryMessage] = asyncio.Queue()
-        self.bcp_response_delivery_queue: asyncio.Queue[BCPResponseDeliveryMessage] = asyncio.Queue()
         self.bcp_validation_results: asyncio.Queue[BCPValidationResult] = asyncio.Queue()
         self.send_email_responses: asyncio.Queue[SendEmailResponse] = asyncio.Queue()
         self.move_email_responses: asyncio.Queue[MoveEmailResponse] = asyncio.Queue()
@@ -195,7 +194,6 @@ class InboundDispatcher:
         """Empty all response queues after an interrupt to avoid stale tool responses."""
         queues = [
             self.send_message_responses,
-            self.bcp_response_delivery_queue,
             self.bcp_validation_results,
             self.send_email_responses,
             self.move_email_responses,
@@ -316,11 +314,9 @@ class InboundDispatcher:
                 # the query to the LLM as a prompt
                 await self.control_queue.put(data)
             elif msg_type == "bcp_response_delivery":
-                try:
-                    delivery = BCPResponseDeliveryMessage.from_dict(data)
-                    await self.bcp_response_delivery_queue.put(delivery)
-                except Exception as exc:
-                    log.error("Failed to parse bcp_response_delivery: %s", exc)
+                # Route to control queue so the main loop can present
+                # the delivery to the LLM as a prompt
+                await self.control_queue.put(data)
             elif msg_type == "bcp_validation_result":
                 try:
                     result = BCPValidationResult.from_dict(data)
@@ -538,7 +534,12 @@ class BCPHandler:
     async def send_query(
         self, to: str, category: int, spec: dict[str, Any]
     ) -> str:
-        """Send a BCP query and wait for the validated response delivery."""
+        """Send a BCP query and return immediately.
+
+        The validated response will be delivered asynchronously as a
+        ``bcp_response_delivery`` message routed to the control queue,
+        which the main loop presents to the LLM as a follow-up prompt.
+        """
         request_id = uuid.uuid4().hex
 
         log.info(
@@ -551,34 +552,10 @@ class BCPHandler:
             spec=spec,
         )
 
-        try:
-            delivery = await asyncio.wait_for(
-                self._wait_for_delivery(request_id),
-                timeout=_BCP_RESPONSE_TIMEOUT_S,
-            )
-        except asyncio.TimeoutError:
-            log.error("BCPQuery timed out (request_id=%s)", request_id)
-            return f"Error: BCP query timed out after {_BCP_RESPONSE_TIMEOUT_S}s"
-
-        return json.dumps({
-            "query_id": delivery.query_id,
-            "category": delivery.category,
-            "from_agent": delivery.from_agent,
-            "response": delivery.response,
-            "bandwidth_bits": delivery.bandwidth_bits,
-        })
-
-    async def _wait_for_delivery(
-        self, request_id: str
-    ) -> BCPResponseDeliveryMessage:
-        """Poll the delivery queue until we get our matching response."""
-        while True:
-            delivery = await self._dispatcher.bcp_response_delivery_queue.get()
-            if delivery.query_id == request_id:
-                return delivery
-            # Not ours -- put it back
-            await self._dispatcher.bcp_response_delivery_queue.put(delivery)
-            await asyncio.sleep(0.01)
+        return (
+            f"BCP query sent to {to} (category {category}, request_id: {request_id}). "
+            f"The validated response will be delivered as a prompt when ready."
+        )
 
     async def respond_to_query(
         self, query_id: str, response: dict[str, Any]
@@ -1624,6 +1601,36 @@ def _format_bcp_query_prompt(query: BCPQueryMessage) -> str:
 
 
 # ---------------------------------------------------------------------------
+# BCP response delivery → prompt formatting
+# ---------------------------------------------------------------------------
+
+
+def _format_bcp_response_delivery_prompt(msg: BCPResponseDeliveryMessage) -> str:
+    """Format a validated BCP response delivery as a prompt for the LLM.
+
+    The prompt presents the delivered data so the Controller agent can act
+    on the response from the Reader agent.
+    """
+    response_json = json.dumps(msg.response, indent=2)
+
+    parts = [
+        "**BCP Response Delivery** — A validated response has arrived.",
+        "",
+        f"  - **From agent:** {msg.from_agent}",
+        f"  - **Category:** {msg.category}",
+        f"  - **Query ID:** {msg.query_id}",
+        f"  - **Bandwidth consumed:** {msg.bandwidth_bits} bits",
+        "",
+        "**Response data:**",
+        f"```json\n{response_json}\n```",
+        "",
+        "This data has been structurally validated by the gateway and is safe to act on.",
+    ]
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
 # SDK session driver
 # ---------------------------------------------------------------------------
 
@@ -2070,6 +2077,17 @@ async def main() -> None:
                     continue
                 prompt = _format_bcp_query_prompt(msg)
                 log.info("BCP query %s -> prompt (%d chars)", msg.query_id, len(prompt))
+                await run_prompt_interruptible(client, prompt, dispatcher)
+
+            elif isinstance(msg, BCPResponseDeliveryMessage):
+                if client is None or config is None:
+                    emit_error("Received BCP response delivery before start message")
+                    continue
+                prompt = _format_bcp_response_delivery_prompt(msg)
+                log.info(
+                    "BCP response delivery %s -> prompt (%d chars)",
+                    msg.query_id, len(prompt),
+                )
                 await run_prompt_interruptible(client, prompt, dispatcher)
 
             elif isinstance(msg, MemorySaveMessage):
