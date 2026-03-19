@@ -58,7 +58,7 @@ class OutboundMessage:
     """Base for all gateway-originated messages routed to an adapter."""
 
     type: str
-    channel: dict[str, Any]
+    channel: dict[str, Any] = field(default_factory=dict)
     agent_name: str = ""
     session_id: str = ""
 
