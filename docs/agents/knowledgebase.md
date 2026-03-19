@@ -19,9 +19,9 @@
       <span class="tx-risk-card__axis-level tx-risk-card__axis-level--medium">medium</span>
     </div>
   </div>
-  <div class="tx-risk-card__drivers">
-    <div class="tx-risk-card__drivers-label">Drivers</div>
-    <div class="tx-risk-card__drivers-list">Bash</div>
+  <div class="tx-risk-card__section">
+    <div class="tx-risk-card__section-label">Drivers</div>
+    <div class="tx-risk-card__section-value">Bash</div>
   </div>
 </div>
 

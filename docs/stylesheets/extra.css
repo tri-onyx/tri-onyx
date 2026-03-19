@@ -474,20 +474,24 @@
 .tx-risk-card__axis-level--high { color: #f0883e; }
 .tx-risk-card__axis-level--critical { color: #f85149; }
 
-.tx-risk-card__drivers {
-  padding: 0 1rem 0.6rem;
+.tx-risk-card__section {
+  padding: 0.4rem 1rem;
   border-top: 1px solid #21262d;
 }
 
-.tx-risk-card__drivers-label {
+.tx-risk-card__section:last-child {
+  padding-bottom: 0.6rem;
+}
+
+.tx-risk-card__section-label {
   font-size: 0.6rem;
   color: #6e7681;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  margin: 0.5rem 0 0.3rem;
+  margin-bottom: 0.2rem;
 }
 
-.tx-risk-card__drivers-list {
+.tx-risk-card__section-value {
   font-size: 0.68rem;
   color: #8b949e;
   font-family: "JetBrains Mono", monospace;

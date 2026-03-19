@@ -19,9 +19,9 @@
       <span class="tx-risk-card__axis-level tx-risk-card__axis-level--high">high</span>
     </div>
   </div>
-  <div class="tx-risk-card__drivers">
-    <div class="tx-risk-card__drivers-label">Drivers</div>
-    <div class="tx-risk-card__drivers-list">SendEmail, Bash</div>
+  <div class="tx-risk-card__section">
+    <div class="tx-risk-card__section-label">Drivers</div>
+    <div class="tx-risk-card__section-value">SendEmail, Bash</div>
   </div>
 </div>
 

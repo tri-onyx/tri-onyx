@@ -81,16 +81,26 @@ def format_risk_card(risk: dict) -> str:
 
     lines.append(f'  </div>')
 
+    # Input sources
+    input_sources = risk.get("input_sources", [])
+    if input_sources:
+        lines.append(f'  <div class="tx-risk-card__section">')
+        lines.append(f'    <div class="tx-risk-card__section-label">Input Sources</div>')
+        lines.append(f'    <div class="tx-risk-card__section-value">{", ".join(input_sources)}</div>')
+        lines.append(f'  </div>')
+
     # Collect all unique drivers
     all_drivers = []
     for axis in ("taint", "sensitivity", "capability"):
         all_drivers.extend(risk.get(f"{axis}_drivers", []))
-    unique_drivers = list(dict.fromkeys(all_drivers))  # preserve order, dedup
+    # Exclude input sources from drivers (shown separately above)
+    input_set = set(input_sources)
+    unique_drivers = list(dict.fromkeys(d for d in all_drivers if d not in input_set))
 
     if unique_drivers:
-        lines.append(f'  <div class="tx-risk-card__drivers">')
-        lines.append(f'    <div class="tx-risk-card__drivers-label">Drivers</div>')
-        lines.append(f'    <div class="tx-risk-card__drivers-list">{", ".join(unique_drivers)}</div>')
+        lines.append(f'  <div class="tx-risk-card__section">')
+        lines.append(f'    <div class="tx-risk-card__section-label">Drivers</div>')
+        lines.append(f'    <div class="tx-risk-card__section-value">{", ".join(unique_drivers)}</div>')
         lines.append(f'  </div>')
 
     lines.append(f'</div>\n')

@@ -19,9 +19,13 @@
       <span class="tx-risk-card__axis-level tx-risk-card__axis-level--medium">medium</span>
     </div>
   </div>
-  <div class="tx-risk-card__drivers">
-    <div class="tx-risk-card__drivers-label">Drivers</div>
-    <div class="tx-risk-card__drivers-list">docker_socket, trionyx_repo, Bash</div>
+  <div class="tx-risk-card__section">
+    <div class="tx-risk-card__section-label">Input Sources</div>
+    <div class="tx-risk-card__section-value">cron</div>
+  </div>
+  <div class="tx-risk-card__section">
+    <div class="tx-risk-card__section-label">Drivers</div>
+    <div class="tx-risk-card__section-value">docker_socket, trionyx_repo, Bash</div>
   </div>
 </div>
 
