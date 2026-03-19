@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # introspector
 
 <div class="tx-risk-card">

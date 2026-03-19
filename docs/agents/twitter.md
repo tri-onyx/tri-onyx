@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # twitter
 
 <div class="tx-risk-card">

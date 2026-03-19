@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # email
 
 <div class="tx-risk-card">

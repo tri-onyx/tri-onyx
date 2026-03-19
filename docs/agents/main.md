@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # main
 
 <div class="tx-risk-card">

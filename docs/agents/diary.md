@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # diary
 
 <div class="tx-risk-card">

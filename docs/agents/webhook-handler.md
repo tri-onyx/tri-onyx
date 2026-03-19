@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # webhook-handler
 
 <div class="tx-risk-card">

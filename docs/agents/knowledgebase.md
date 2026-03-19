@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # knowledgebase
 
 <div class="tx-risk-card">

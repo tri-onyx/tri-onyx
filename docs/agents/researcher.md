@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # researcher
 
 <div class="tx-risk-card">

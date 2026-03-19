@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # concierge
 
 <div class="tx-risk-card">

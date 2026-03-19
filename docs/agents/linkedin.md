@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # linkedin
 
 <div class="tx-risk-card">

@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # bookmarks
 
 <div class="tx-risk-card">

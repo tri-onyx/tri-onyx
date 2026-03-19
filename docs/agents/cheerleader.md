@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # cheerleader
 
 <div class="tx-risk-card">

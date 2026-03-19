@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # finn
 
 <div class="tx-risk-card">

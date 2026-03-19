@@ -192,6 +192,12 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
 
     sections = []
 
+    # Hide table of contents on agent pages
+    sections.append("---")
+    sections.append("hide:")
+    sections.append("  - toc")
+    sections.append("---\n")
+
     # Title and risk card (floats right beside content)
     sections.append(f"# {name}\n")
     if risk:

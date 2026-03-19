@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # news
 
 <div class="tx-risk-card">

@@ -1,3 +1,8 @@
+---
+hide:
+  - toc
+---
+
 # youtube
 
 <div class="tx-risk-card">
