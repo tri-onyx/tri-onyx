@@ -209,6 +209,17 @@ class BCPValidationResult:
 
 
 @dataclass
+class BCPSubscriptionsActive:
+    """Active subscriptions targeting this Reader, sent at session start."""
+
+    subscriptions: list[dict[str, Any]] = field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> BCPSubscriptionsActive:
+        return cls(subscriptions=data.get("subscriptions", []))
+
+
+@dataclass
 class SendEmailResponse:
     """Response from the gateway after sending an email."""
 
@@ -378,6 +389,7 @@ InboundMessage = (
     | SendMessageResponse
     | BCPQueryMessage
     | BCPResponseDeliveryMessage
+    | BCPSubscriptionsActive
     | SendEmailResponse
     | MoveEmailResponse
     | CreateFolderResponse
@@ -398,6 +410,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "send_message_response": SendMessageResponse,
     "bcp_query": BCPQueryMessage,
     "bcp_response_delivery": BCPResponseDeliveryMessage,
+    "bcp_subscriptions_active": BCPSubscriptionsActive,
     "send_email_response": SendEmailResponse,
     "move_email_response": MoveEmailResponse,
     "create_folder_response": CreateFolderResponse,

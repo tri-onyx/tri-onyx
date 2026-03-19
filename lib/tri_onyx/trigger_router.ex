@@ -234,6 +234,8 @@ defmodule TriOnyx.TriggerRouter do
           end
         end)
 
+        register_bcp_subscriptions(new_defs)
+
         Logger.info("TriggerRouter: loaded #{length(definitions)} agent(s) from disk")
         {:reply, {:ok, length(definitions)}, %{state | definitions: new_defs}}
 
@@ -249,6 +251,35 @@ defmodule TriOnyx.TriggerRouter do
   end
 
   # --- Private ---
+
+  defp register_bcp_subscriptions(agents) do
+    subscriptions =
+      agents
+      |> Enum.flat_map(fn {_name, definition} ->
+        definition.bcp_channels
+        |> Enum.filter(fn ch -> ch.role == :controller end)
+        |> Enum.flat_map(fn ch ->
+          Enum.map(ch.subscriptions, fn sub ->
+            %TriOnyx.BCP.Subscription{
+              id: sub.id,
+              controller: definition.name,
+              reader: ch.peer,
+              category: sub.category,
+              fields: sub.fields,
+              questions: sub.questions,
+              directive: sub.directive,
+              max_words: sub.max_words
+            }
+          end)
+        end)
+      end)
+
+    TriOnyx.BCP.Subscription.register_all(subscriptions)
+
+    if subscriptions != [] do
+      Logger.info("TriggerRouter: registered #{length(subscriptions)} BCP subscription(s)")
+    end
+  end
 
   @spec ensure_session_and_prompt(
           GenServer.server(),

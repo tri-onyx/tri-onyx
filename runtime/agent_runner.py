@@ -54,6 +54,7 @@ from protocol import (
     BCPQueryMessage,
     BCPResponseDeliveryMessage,
     BCPValidationResult,
+    BCPSubscriptionsActive,
     SendEmailResponse,
     MoveEmailResponse,
     CreateFolderResponse,
@@ -175,6 +176,7 @@ class InboundDispatcher:
         self.calendar_update_responses: asyncio.Queue[CalendarUpdateResponse] = asyncio.Queue()
         self.calendar_delete_responses: asyncio.Queue[CalendarDeleteResponse] = asyncio.Queue()
         self.submit_item_responses: asyncio.Queue[SubmitItemResponse] = asyncio.Queue()
+        self.active_subscriptions: list[dict[str, Any]] = []
         self._task: asyncio.Task[None] | None = None
 
     def start(self) -> None:
@@ -323,6 +325,12 @@ class InboundDispatcher:
                     await self.bcp_validation_results.put(result)
                 except Exception as exc:
                     log.error("Failed to parse bcp_validation_result: %s", exc)
+            elif msg_type == "bcp_subscriptions_active":
+                try:
+                    msg = BCPSubscriptionsActive.from_dict(data)
+                    self.active_subscriptions = msg.subscriptions
+                except Exception as exc:
+                    log.error("Failed to parse bcp_subscriptions_active: %s", exc)
             else:
                 # Only route recognised control types; skip unknown types
                 # (e.g. rate_limit_event from the API) to avoid noisy errors.

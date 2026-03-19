@@ -416,6 +416,9 @@ defmodule TriOnyx.AgentSession do
 
     had_bcp = had_bcp_queries or had_bcp_deliveries
 
+    # Notify Reader agents of any active BCP subscriptions targeting them
+    send_subscriptions_active(state)
+
     # Flush any prompt that arrived while the runtime was starting.
     # If BCP queries/deliveries were flushed, discard the trigger prompt — the BCP
     # message already contains the full spec and the runtime formats
@@ -1343,6 +1346,14 @@ defmodule TriOnyx.AgentSession do
       level = SensitivityMatrix.mount_sensitivity(mount)
       "mount:#{mount} (sensitivity: #{level})"
     end)
+  end
+
+  defp send_subscriptions_active(%{port: port, definition: definition}) do
+    subs = TriOnyx.BCP.Subscription.for_reader(definition.name)
+
+    if subs != [] do
+      AgentPort.send_bcp_subscriptions_active(port, subs)
+    end
   end
 
   @spec broadcast_event(t(), map()) :: :ok

@@ -230,6 +230,33 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
+  Sends a `bcp_subscriptions_active` message to the runtime, informing the Reader
+  agent of all active BCP subscriptions targeting it.
+  """
+  @spec send_bcp_subscriptions_active(GenServer.server(), [TriOnyx.BCP.Subscription.t()]) :: :ok
+  def send_bcp_subscriptions_active(server, subscriptions) do
+    subs_json =
+      Enum.map(subscriptions, fn sub ->
+        base = %{
+          "subscription_id" => sub.id,
+          "controller" => sub.controller,
+          "category" => sub.category
+        }
+
+        base = if sub.fields, do: Map.put(base, "fields", sub.fields), else: base
+        base = if sub.questions, do: Map.put(base, "questions", sub.questions), else: base
+        base = if sub.directive, do: Map.put(base, "directive", sub.directive), else: base
+        base = if sub.max_words, do: Map.put(base, "max_words", sub.max_words), else: base
+        base
+      end)
+
+    GenServer.cast(
+      server,
+      {:send, %{"type" => "bcp_subscriptions_active", "subscriptions" => subs_json}}
+    )
+  end
+
+  @doc """
   Sends a `send_email_response` back to the runtime.
   """
   @spec send_send_email_response(GenServer.server(), String.t(), boolean(), String.t(), String.t()) ::
