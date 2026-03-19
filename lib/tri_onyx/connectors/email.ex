@@ -27,8 +27,31 @@ defmodule TriOnyx.Connectors.Email do
     with {:ok, contents} <- read_draft(host_draft_path),
          {:ok, draft} <- parse_draft(contents),
          {:ok, config} <- get_smtp_config(),
-         {:ok, message_id} <- deliver_smtp(draft, config) do
+         {:ok, message_id, raw_message} <- deliver_smtp(draft, config) do
+      # Best-effort copy to IMAP Sent folder
+      imap_append(raw_message, "Sent")
       {:ok, message_id}
+    end
+  end
+
+  @doc """
+  Saves a draft JSON file to the IMAP Drafts folder.
+
+  Reads the draft, builds an RFC 2822 message, and APPENDs it to
+  the IMAP Drafts folder so it appears in the user's email client.
+
+  Returns `{:ok, :saved}` on success.
+  """
+  @spec save_draft(String.t()) :: {:ok, :saved} | {:error, String.t()}
+  def save_draft(host_draft_path) do
+    with {:ok, contents} <- read_draft(host_draft_path),
+         {:ok, draft} <- parse_draft(contents) do
+      raw_message = build_raw_message(draft)
+
+      case imap_append(raw_message, "Drafts") do
+        :ok -> {:ok, :saved}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 
@@ -244,38 +267,52 @@ defmodule TriOnyx.Connectors.Email do
     end
   end
 
-  @spec deliver_smtp(map(), map()) :: {:ok, String.t()} | {:error, String.t()}
-  defp deliver_smtp(draft, smtp_config) do
-    to = draft["to"]
-    subject = draft["subject"]
-    body = draft["body"]
-    cc = draft["cc"]
-    in_reply_to = draft["in_reply_to"]
-
-    from = smtp_config.username
+  # Builds an RFC 2822 message from a draft map. Used for both sending and IMAP APPEND.
+  @spec build_raw_message(map()) :: String.t()
+  defp build_raw_message(draft) do
+    from = get_from_address()
     message_id = "<#{:crypto.strong_rand_bytes(16) |> Base.encode16(case: :lower)}@tri_onyx>"
 
     headers =
       [
         {"From", from},
-        {"To", to},
-        {"Subject", subject},
+        {"To", draft["to"]},
+        {"Subject", draft["subject"]},
         {"Message-ID", message_id},
         {"Date", Calendar.strftime(DateTime.utc_now(), "%a, %d %b %Y %H:%M:%S +0000")},
         {"MIME-Version", "1.0"},
         {"Content-Type", "text/plain; charset=utf-8"}
       ]
-      |> maybe_add_header("Cc", cc)
-      |> maybe_add_header("In-Reply-To", in_reply_to)
+      |> maybe_add_header("Cc", draft["cc"])
+      |> maybe_add_header("In-Reply-To", draft["in_reply_to"])
 
     header_str = Enum.map_join(headers, "\r\n", fn {k, v} -> "#{k}: #{v}" end)
-    email_body = header_str <> "\r\n\r\n" <> body
+    header_str <> "\r\n\r\n" <> draft["body"]
+  end
+
+  defp get_from_address do
+    case get_smtp_config() do
+      {:ok, config} -> config.username
+      _ -> "unknown@tri_onyx"
+    end
+  end
+
+  @spec deliver_smtp(map(), map()) :: {:ok, String.t(), String.t()} | {:error, String.t()}
+  defp deliver_smtp(draft, smtp_config) do
+    to = draft["to"]
+    cc = draft["cc"]
+    from = smtp_config.username
+    raw_message = build_raw_message(draft)
+
+    # Extract message_id from the raw message we just built
+    message_id =
+      case Regex.run(~r/Message-ID: (.+)\r\n/, raw_message) do
+        [_, mid] -> mid
+        _ -> "<unknown@tri_onyx>"
+      end
 
     relay = String.to_charlist(smtp_config.host)
     port = smtp_config.port
-    username = smtp_config.username
-    password = smtp_config.password
-
     recipients = [to | if(cc, do: [cc], else: [])]
 
     ssl? = Map.get(smtp_config, :ssl, true)
@@ -312,17 +349,13 @@ defmodule TriOnyx.Connectors.Email do
       [
         relay: relay,
         port: port,
-        username: username,
-        password: password
+        username: smtp_config.username,
+        password: smtp_config.password
       ] ++
         cond do
-          # Port 465 = implicit SSL (entire connection wrapped in TLS)
-          # gen_smtp uses `sockopts` for the initial SSL socket options
           ssl? and port == 465 ->
             [ssl: true, tls: :never, sockopts: ssl_opts]
 
-          # Port 587/25 = STARTTLS (upgrade plaintext to TLS)
-          # gen_smtp uses `tls_options` for the STARTTLS upgrade
           ssl? ->
             [tls: :always, tls_options: ssl_opts]
 
@@ -330,10 +363,10 @@ defmodule TriOnyx.Connectors.Email do
             [tls: :never]
         end
 
-    case :gen_smtp_client.send_blocking({from, recipients, email_body}, options) do
+    case :gen_smtp_client.send_blocking({from, recipients, raw_message}, options) do
       receipt when is_binary(receipt) ->
         Logger.info("Email sent to #{to} (message_id=#{message_id})")
-        {:ok, message_id}
+        {:ok, message_id, raw_message}
 
       {:error, reason} ->
         {:error, "SMTP send failed: #{inspect(reason)}"}
@@ -559,6 +592,52 @@ defmodule TriOnyx.Connectors.Email do
 
   defp normalize_imap_folder(folder) do
     if String.downcase(folder) == "inbox", do: "INBOX", else: folder
+  end
+
+  # Appends a raw RFC 2822 message to an IMAP folder (e.g. "Sent", "Drafts").
+  # Creates the folder if it doesn't exist. Best-effort — logs warnings on failure.
+  @spec imap_append(String.t(), String.t()) :: :ok | {:error, String.t()}
+  defp imap_append(raw_message, folder_name) do
+    case get_imap_config() do
+      :not_configured ->
+        Logger.warning("IMAP not configured — skipping APPEND to #{folder_name}")
+        {:error, "IMAP not configured"}
+
+      {:ok, imap} ->
+        # Ensure folder exists first
+        imap_create_folder(folder_name)
+
+        with_imap_connection(imap, fn socket, transport ->
+          imap_folder = normalize_imap_folder(folder_name)
+          size = byte_size(raw_message)
+
+          # IMAP APPEND with literal size
+          imap_send(socket, transport, "AP01 APPEND #{imap_folder} (\\Seen) {#{size}}")
+          # Server responds with "+" continuation
+          {:ok, cont_resp} = imap_recv_line(socket, transport)
+
+          if String.contains?(cont_resp, "+") do
+            # Send the raw message followed by CRLF
+            case transport do
+              :ssl -> :ssl.send(socket, raw_message <> "\r\n")
+              :gen_tcp -> :gen_tcp.send(socket, raw_message <> "\r\n")
+            end
+
+            {:ok, append_resp} = imap_recv_until_tagged(socket, transport, "AP01")
+
+            if String.contains?(append_resp, "AP01 OK") do
+              Logger.info("Email appended to IMAP #{folder_name}")
+              :ok
+            else
+              Logger.warning("IMAP APPEND to #{folder_name} failed: #{String.trim(append_resp)}")
+              {:error, "IMAP APPEND failed: #{String.trim(append_resp)}"}
+            end
+          else
+            Logger.warning("IMAP APPEND continuation rejected: #{String.trim(cont_resp)}")
+            {:error, "IMAP APPEND continuation rejected"}
+          end
+        end)
+    end
   end
 
   @spec imap_create_folder(String.t()) :: :ok | {:error, String.t()}

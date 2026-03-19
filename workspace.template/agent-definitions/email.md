@@ -2,7 +2,7 @@
 name: email
 description: Processes email from a personal email account
 model: claude-sonnet-4-6
-tools: Read, Write, Edit, Bash, Grep, Glob, SendEmail, MoveEmail, CreateFolder, SendMessage
+tools: Read, Write, Edit, Bash, Grep, Glob, SendEmail, SaveDraft, MoveEmail, CreateFolder, SendMessage
 network: none
 fs_read:
   - "/AGENTS.md"

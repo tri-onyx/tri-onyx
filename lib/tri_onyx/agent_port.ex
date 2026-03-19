@@ -50,6 +50,7 @@ defmodule TriOnyx.AgentPort do
           | {:bcp_response, String.t(), map()}
           | {:bcp_subscription_publish, String.t(), String.t(), map()}
           | {:send_email_request, String.t(), String.t()}
+          | {:save_draft_request, String.t(), String.t()}
           | {:move_email_request, String.t(), String.t(), String.t(), String.t()}
           | {:create_folder_request, String.t(), String.t()}
           | {:restart_agent_request, String.t(), String.t(), boolean()}
@@ -297,6 +298,23 @@ defmodule TriOnyx.AgentPort do
          "success" => success,
          "detail" => detail,
          "message_id" => message_id
+       }}
+    )
+  end
+
+  @doc """
+  Sends a `save_draft_response` back to the runtime.
+  """
+  @spec send_save_draft_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_save_draft_response(server, request_id, success, detail \\ "") do
+    GenServer.cast(
+      server,
+      {:send,
+       %{
+         "type" => "save_draft_response",
+         "request_id" => request_id,
+         "success" => success,
+         "detail" => detail
        }}
     )
   end
@@ -705,6 +723,15 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(draft_path) ->
         {:ok, {:send_email_request, req_id, draft_path}}
+
+      {:ok,
+       %{
+         "type" => "save_draft_request",
+         "request_id" => req_id,
+         "draft_path" => draft_path
+       }}
+      when is_binary(req_id) and is_binary(draft_path) ->
+        {:ok, {:save_draft_request, req_id, draft_path}}
 
       {:ok,
        %{

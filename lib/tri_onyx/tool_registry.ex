@@ -14,7 +14,7 @@ defmodule TriOnyx.ToolRegistry do
   @known_tools ~w(
     Read Grep Glob Write Edit NotebookEdit SendMessage
     BCPQuery BCPRespond BCPPublish RestartAgent Bash WebFetch WebSearch
-    SendEmail MoveEmail CreateFolder
+    SendEmail SaveDraft MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
     SubmitItem
   )
@@ -44,6 +44,7 @@ defmodule TriOnyx.ToolRegistry do
     "WebFetch" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
     "WebSearch" => %{requires_auth: false, capability_level: :medium, requires_approval: false},
     "SendEmail" => %{requires_auth: true, capability_level: :high, requires_approval: true},
+    "SaveDraft" => %{requires_auth: true, capability_level: :low, requires_approval: false},
     "MoveEmail" => %{requires_auth: true, capability_level: :low, requires_approval: false},
     "CreateFolder" => %{requires_auth: true, capability_level: :low, requires_approval: false},
     "CalendarQuery" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
@@ -72,6 +73,7 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "WebFetch",        display: "WebFetch",    variant: nil, group: "Execution / Web",   note: "fetches arbitrary external web content"},
     %{key: "WebSearch",       display: "WebSearch",   variant: nil, group: "Execution / Web",   note: "returns internet search results"},
     %{key: "SendEmail",       display: "SendEmail",   variant: nil, group: "Email (IMAP/SMTP)",  note: nil},
+    %{key: "SaveDraft",       display: "SaveDraft",   variant: nil, group: "Email (IMAP/SMTP)",  note: "uploads draft to IMAP Drafts folder"},
     %{key: "MoveEmail",       display: "MoveEmail",   variant: nil, group: "Email (IMAP/SMTP)",  note: nil},
     %{key: "CreateFolder",    display: "CreateFolder",variant: nil, group: "Email (IMAP/SMTP)",  note: nil},
     %{key: "RestartAgent",    display: "RestartAgent",variant: nil, group: "Control",            note: nil},

@@ -833,6 +833,39 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
+    Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
+
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+
+      Task.start(fn ->
+        case TriOnyx.Connectors.Email.save_draft(host_path) do
+          {:ok, :saved} ->
+            AgentPort.send_save_draft_response(port, req_id, true, "draft saved to IMAP Drafts")
+
+          {:error, reason} ->
+            AgentPort.send_save_draft_response(port, req_id, false, reason)
+        end
+      end)
+    else
+      AgentPort.send_save_draft_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:move_email_request, req_id, uid, source_folder, dest_folder}, state) do
     Logger.info(
       "AgentSession #{state.id}: move_email_request uid=#{uid} " <>

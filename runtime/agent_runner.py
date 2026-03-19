@@ -57,6 +57,7 @@ from protocol import (
     BCPValidationResult,
     BCPSubscriptionsActive,
     SendEmailResponse,
+    SaveDraftResponse,
     MoveEmailResponse,
     CreateFolderResponse,
     CalendarQueryResponse,
@@ -79,6 +80,7 @@ from protocol import (
     emit_bcp_response,
     emit_bcp_publish,
     emit_send_email_request,
+    emit_save_draft_request,
     emit_move_email_request,
     emit_create_folder_request,
     emit_calendar_query_request,
@@ -170,6 +172,7 @@ class InboundDispatcher:
         self.bcp_query_queue: asyncio.Queue[BCPQueryMessage] = asyncio.Queue()
         self.bcp_validation_results: asyncio.Queue[BCPValidationResult] = asyncio.Queue()
         self.send_email_responses: asyncio.Queue[SendEmailResponse] = asyncio.Queue()
+        self.save_draft_responses: asyncio.Queue[SaveDraftResponse] = asyncio.Queue()
         self.move_email_responses: asyncio.Queue[MoveEmailResponse] = asyncio.Queue()
         self.create_folder_responses: asyncio.Queue[CreateFolderResponse] = asyncio.Queue()
         self.restart_agent_responses: asyncio.Queue[RestartAgentResponse] = asyncio.Queue()
@@ -200,6 +203,7 @@ class InboundDispatcher:
             self.send_message_responses,
             self.bcp_validation_results,
             self.send_email_responses,
+            self.save_draft_responses,
             self.move_email_responses,
             self.create_folder_responses,
             self.restart_agent_responses,
@@ -260,6 +264,12 @@ class InboundDispatcher:
                     await self.send_email_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse send_email_response: %s", exc)
+            elif msg_type == "save_draft_response":
+                try:
+                    response = SaveDraftResponse.from_dict(data)
+                    await self.save_draft_responses.put(response)
+                except Exception as exc:
+                    log.error("Failed to parse save_draft_response: %s", exc)
             elif msg_type == "move_email_response":
                 try:
                     response = MoveEmailResponse.from_dict(data)
@@ -677,6 +687,25 @@ class EmailHandler:
             return f"Email sent successfully. Message-ID: {response.message_id}"
         return f"Error: {response.detail}"
 
+    async def save_draft(self, draft_path: str) -> str:
+        """Save a draft to the IMAP Drafts folder via the gateway."""
+        request_id = uuid.uuid4().hex
+        log.info("SaveDraft draft=%s (request_id=%s)", draft_path, request_id)
+        emit_save_draft_request(request_id=request_id, draft_path=draft_path)
+
+        try:
+            response = await asyncio.wait_for(
+                self._wait_for_save_draft(request_id),
+                timeout=_EMAIL_OP_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("SaveDraft timed out (request_id=%s)", request_id)
+            return f"Error: SaveDraft timed out after {_EMAIL_OP_TIMEOUT_S}s"
+
+        if response.success:
+            return "Draft saved to IMAP Drafts folder."
+        return f"Error: {response.detail}"
+
     async def move_email(
         self, uid: str, source_folder: str, dest_folder: str
     ) -> str:
@@ -735,6 +764,16 @@ class EmailHandler:
             if response.request_id == request_id:
                 return response
             await self._dispatcher.send_email_responses.put(response)
+            await asyncio.sleep(0.01)
+
+    async def _wait_for_save_draft(
+        self, request_id: str
+    ) -> SaveDraftResponse:
+        while True:
+            response = await self._dispatcher.save_draft_responses.get()
+            if response.request_id == request_id:
+                return response
+            await self._dispatcher.save_draft_responses.put(response)
             await asyncio.sleep(0.01)
 
     async def _wait_for_move_email(
@@ -889,11 +928,13 @@ _RESTART_AGENT_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_RESTART_AGENT_TOOL}"
 
 # Email tool names
 _SEND_EMAIL_TOOL = "SendEmail"
+_SAVE_DRAFT_TOOL = "SaveDraft"
 _MOVE_EMAIL_TOOL = "MoveEmail"
 _CREATE_FOLDER_TOOL = "CreateFolder"
 
 _EMAIL_SERVER = "email"
 _SEND_EMAIL_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_SEND_EMAIL_TOOL}"
+_SAVE_DRAFT_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_SAVE_DRAFT_TOOL}"
 _MOVE_EMAIL_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_MOVE_EMAIL_TOOL}"
 _CREATE_FOLDER_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_CREATE_FOLDER_TOOL}"
 
@@ -921,6 +962,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _BCP_PUBLISH_MCP_NAME: _BCP_PUBLISH_TOOL,
     _RESTART_AGENT_MCP_NAME: _RESTART_AGENT_TOOL,
     _SEND_EMAIL_MCP_NAME: _SEND_EMAIL_TOOL,
+    _SAVE_DRAFT_MCP_NAME: _SAVE_DRAFT_TOOL,
     _MOVE_EMAIL_MCP_NAME: _MOVE_EMAIL_TOOL,
     _CREATE_FOLDER_MCP_NAME: _CREATE_FOLDER_TOOL,
     _CALENDAR_QUERY_MCP_NAME: _CALENDAR_QUERY_TOOL,
@@ -1310,6 +1352,42 @@ def build_send_email_tool(email_handler: EmailHandler) -> Any:
         }
 
     return send_email
+
+
+def build_save_draft_tool(email_handler: EmailHandler) -> Any:
+    """Create SaveDraft as an in-process SDK MCP tool."""
+
+    @tool(
+        _SAVE_DRAFT_TOOL,
+        "Save a draft email to the IMAP Drafts folder so it appears in the "
+        "user's email client for review. The draft JSON file must already "
+        "exist in the agent workspace.",
+        {
+            "type": "object",
+            "properties": {
+                "draft_path": {
+                    "type": "string",
+                    "description": "Path to draft JSON file in the agent workspace",
+                },
+            },
+            "required": ["draft_path"],
+        },
+    )
+    async def save_draft(args: dict[str, Any]) -> dict[str, Any]:
+        draft_path = args.get("draft_path", "")
+        if not draft_path:
+            return {
+                "content": [{"type": "text", "text": "Error: 'draft_path' is required."}],
+                "isError": True,
+            }
+        result = await email_handler.save_draft(draft_path)
+        is_error = result.startswith("Error:")
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": is_error,
+        }
+
+    return save_draft
 
 
 def build_move_email_tool(email_handler: EmailHandler) -> Any:
@@ -2110,6 +2188,10 @@ async def main() -> None:
                 if _SEND_EMAIL_TOOL in config.tools:
                     email_tools.append(build_send_email_tool(email_handler))
                     sdk_tools.append(_SEND_EMAIL_MCP_NAME)
+
+                if _SAVE_DRAFT_TOOL in config.tools:
+                    email_tools.append(build_save_draft_tool(email_handler))
+                    sdk_tools.append(_SAVE_DRAFT_MCP_NAME)
 
                 if _MOVE_EMAIL_TOOL in config.tools:
                     email_tools.append(build_move_email_tool(email_handler))

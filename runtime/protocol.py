@@ -265,6 +265,23 @@ class SendEmailResponse:
 
 
 @dataclass
+class SaveDraftResponse:
+    """Response from the gateway after saving a draft to IMAP."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SaveDraftResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+        )
+
+
+@dataclass
 class MoveEmailResponse:
     """Response from the gateway after moving an email."""
 
@@ -418,6 +435,7 @@ InboundMessage = (
     | BCPResponseDeliveryMessage
     | BCPSubscriptionsActive
     | SendEmailResponse
+    | SaveDraftResponse
     | MoveEmailResponse
     | CreateFolderResponse
     | RestartAgentResponse
@@ -440,6 +458,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "bcp_response_delivery": BCPResponseDeliveryMessage,
     "bcp_subscriptions_active": BCPSubscriptionsActive,
     "send_email_response": SendEmailResponse,
+    "save_draft_response": SaveDraftResponse,
     "move_email_response": MoveEmailResponse,
     "create_folder_response": CreateFolderResponse,
     "restart_agent_response": RestartAgentResponse,
@@ -586,6 +605,18 @@ def emit_send_email_request(
     """Request the gateway to send an email from a draft file."""
     _emit({
         "type": "send_email_request",
+        "request_id": request_id,
+        "draft_path": draft_path,
+    })
+
+
+def emit_save_draft_request(
+    request_id: str,
+    draft_path: str,
+) -> None:
+    """Request the gateway to save a draft to the IMAP Drafts folder."""
+    _emit({
+        "type": "save_draft_request",
         "request_id": request_id,
         "draft_path": draft_path,
     })
