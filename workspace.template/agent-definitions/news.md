@@ -69,6 +69,14 @@ Before writing to `/incoming/`, check the slug against:
 
 4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`), log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/news/NOTES.md` at the start of each session to recall past corrections (in addition to PREFERENCES.md).
+2. When corrected on behavior, tone, or process, immediately append the lesson to `/agents/news/NOTES.md` under a descriptive heading, then confirm what you wrote. Editorial preferences (topics, sources, filtering) go in PREFERENCES.md as before.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Available sources
 
 Run `uv run /workspace/plugins/newsagg/module/newsagg.py list` to see all configured sources.

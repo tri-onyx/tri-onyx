@@ -129,6 +129,14 @@ LinkedIn sessions expire periodically. Re-authentication requires solving a reCA
 2. Skip the rest of the heartbeat
 3. Do not attempt to log in or solve CAPTCHAs
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/linkedin/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/linkedin/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Guidelines
 
 - Read `/workspace/personality/SOUL.md` before posting to match the voice and tone

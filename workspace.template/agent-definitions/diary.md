@@ -59,6 +59,14 @@ If the message starts with a keyword, handle it specially:
 
 Anything else is treated as a new diary entry to store.
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/diary/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/diary/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Important
 
 - Keep confirmations brief — one line is enough

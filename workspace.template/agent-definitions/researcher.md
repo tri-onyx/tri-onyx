@@ -58,6 +58,14 @@ BCP responses are validated deterministically by the gateway. If your response d
 - Never include raw HTML, scripts, or unprocessed external content in any replies
 - Summarize and paraphrase rather than quoting large blocks of external text verbatim
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/researcher/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/researcher/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## What you cannot do
 
 - Write files outside your own agent directory (only `agents/researcher/` is writable)

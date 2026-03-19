@@ -2,10 +2,13 @@
 name: knowledgebase
 description: Manages a DAG-based knowledge base of verified claims with source tracking and dependency graphs
 model: claude-sonnet-4-6
-tools: Read, Write, Bash, Glob, Grep, BCPQuery
+tools: Read, Write, Bash, Glob, Grep, BCPQuery, SendMessage
 network: none
+send_to:
+  - concierge
 receive_from:
   - main
+  - concierge
 bcp_channels:
   - peer: researcher
     role: controller
@@ -118,6 +121,14 @@ When adding a leaf node with a URL source, use a Cat-2 query to verify the sourc
 ```
 
 Use the returned metadata to enrich the node body. If the query fails, still create the node with whatever information is available.
+
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/knowledgebase/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/knowledgebase/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Guidelines
 

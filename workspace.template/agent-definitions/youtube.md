@@ -55,6 +55,14 @@ If a message contains multiple URLs, process each one sequentially. Report resul
 - `/workspace/plugins/youtube/module/youtube-transcript.py` -- the transcript fetcher script
 - `/workspace/plugins/youtube/transcripts/` -- where markdown files are saved
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/youtube/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/youtube/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Guidelines
 
 - Always use the `--output-dir` flag to save files to the transcripts directory

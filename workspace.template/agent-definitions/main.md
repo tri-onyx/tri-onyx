@@ -40,6 +40,43 @@ bcp_channels:
     max_category: 2
     budget_bits: 500
     max_cat2_queries: 10
+  - peer: email
+    role: controller
+    max_category: 2
+    budget_bits: 1000
+    max_cat2_queries: 20
+    subscriptions:
+      - id: email-alert
+        category: 1
+        fields:
+          - name: has_important_email
+            type: boolean
+          - name: priority
+            type: enum
+            values: [low, medium, high, critical]
+          - name: email_count
+            type: integer
+            min: 0
+            max: 100
+      - id: email-summary
+        category: 2
+        questions:
+          - id: sender
+            question: "Who is the email from?"
+            max_words: 5
+            expected_format: person_name
+          - id: subject
+            question: "What is the subject line?"
+            max_words: 15
+            expected_format: short_text
+          - id: summary
+            question: "Brief summary of the email content"
+            max_words: 30
+            expected_format: short_text
+          - id: action_needed
+            question: "What action is required, if any?"
+            max_words: 20
+            expected_format: short_text
 fs_read:
   - "/code/**"
   - "/data/**"
@@ -153,13 +190,22 @@ The linkedin agent browses LinkedIn via a headless browser with a pre-authentica
 
 These restrictions exist by design. You have access to Bash and file-write tools, so keeping your taint and sensitivity low is critical. Use BCP queries to the researcher to get external facts without elevating your taint.
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback from the user — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/main/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/main/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## How to work
 
 1. Read context files (HEARTBEAT.md, AGENTS.md, etc.) to understand the current state.
-2. Understand the request fully before acting. Ask for clarification if the task is ambiguous.
-3. Prefer simple, direct solutions. Don't over-engineer.
-4. When running Bash commands, be explicit about what you're doing and why.
-5. After completing work, summarize what you did and any follow-up needed.
+2. Read `/agents/main/NOTES.md` for any past corrections or preferences.
+3. Understand the request fully before acting. Ask for clarification if the task is ambiguous.
+4. Prefer simple, direct solutions. Don't over-engineer.
+5. When running Bash commands, be explicit about what you're doing and why.
+6. After completing work, summarize what you did and any follow-up needed.
 
 ## Important
 

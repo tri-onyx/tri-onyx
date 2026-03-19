@@ -17,7 +17,7 @@ receive_from:
 fs_read:
   - "/AGENTS.md"
   - "/personality/**"
-idle_timeout: 30m
+idle_timeout: 15m
 heartbeat_every: 30m
 ---
 
@@ -106,6 +106,14 @@ Your account was previously suspended for bot-like behavior (rapid follow action
 - **Follow actions are high-risk.** Wait at least 5-10 seconds between following accounts. Never follow multiple accounts in rapid succession.
 - **No bulk actions.** Do everything step by step with realistic pacing.
 - **Vary timing.** Don't use identical sleep durations — randomize within the ranges above.
+
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/twitter/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/twitter/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Guidelines
 

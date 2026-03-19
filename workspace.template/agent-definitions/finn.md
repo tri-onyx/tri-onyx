@@ -118,6 +118,14 @@ If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback",
 3. Compare with previously saved results (write to memory)
 4. Report new or changed listings
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/finn/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/finn/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Guidelines
 
 - Read `/workspace/personality/SOUL.md` before interacting to match voice and tone

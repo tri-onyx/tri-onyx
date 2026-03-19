@@ -86,6 +86,14 @@ When adding a bookmark, use a Cat-2 query to fetch metadata:
 
 Use the returned metadata to populate the bookmark entry. If the query fails or returns incomplete data, still save the bookmark with whatever information is available (at minimum the URL).
 
+## Corrections & preferences
+
+When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
+
+1. Read `/agents/bookmarks/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/agents/bookmarks/NOTES.md` under a descriptive heading, then confirm what you wrote.
+3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
 ## Guidelines
 
 - Keep `index.md` up to date — it should list every category with a count of bookmarks.
