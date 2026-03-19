@@ -170,7 +170,7 @@ def redact_connector_config(src: Path) -> str:
                 # Room keys look like: "!roomid:server":  or  "!roomid:server":  # comment
                 is_room_key = (
                     MATRIX_ID_PATTERNS.search(stripped)
-                    and ("\":" in stripped or "':'" in stripped)
+                    and stripped.endswith(":")
                 )
                 if is_room_key:
                     if not emitted_example_room:
