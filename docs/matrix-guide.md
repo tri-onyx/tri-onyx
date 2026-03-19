@@ -63,35 +63,51 @@ developer mode enabled in settings).
 **Store the token securely.** Set it as the `MATRIX_ACCESS_TOKEN` environment
 variable. Never commit it to the repository.
 
-## 4. Create Rooms and Invite the Bot
+## 4. Room Setup
 
-Create one Matrix room per agent (or per agent group) and invite the bot
-account.
+Rooms can be created **automatically** by the connector or **manually** via a
+Matrix client.
 
-```bash
-# Create a room
-curl -s -X POST https://matrix.example.com/_matrix/client/v3/createRoom \
-  -H "Authorization: Bearer $MATRIX_ACCESS_TOKEN" \
-  -H 'Content-Type: application/json' \
-  -d '{
-    "name": "TriOnyx - Code Review",
-    "topic": "Messages here trigger the code-review agent",
-    "visibility": "private",
-    "invite": ["@tri-onyx-bot:example.com"],
-    "initial_state": [
-      {
-        "type": "m.room.encryption",
-        "content": {"algorithm": "m.megolm.v1.aes-sha2"}
-      }
-    ]
-  }'
+### Automatic room creation (recommended)
+
+Use a room alias in the connector config (see section 6) instead of a room ID:
+
+```yaml
+rooms:
+  "#code-review:example.com":
+    agent: code-reviewer
+    mode: mention
 ```
 
-Or create rooms through any Matrix client and invite the bot manually. Enable
-encryption if desired (see section 5).
+On startup, if the alias does not exist, the connector will:
 
-Note the room ID from the response (`!xxxx:example.com`) — you need it for
-the connector configuration.
+1. Create a private, E2E-encrypted room named `<instance_name> <agent>` (e.g. "TriOnyx researcher")
+2. Set the room alias (e.g. `#code-review:example.com`)
+3. Invite all `trusted_users` and grant them admin (power level 100)
+4. Demote the bot to power level 0 (trusted users are the room administrators)
+5. Rewrite the config file, replacing the alias with the resolved room ID
+
+The bot also checks existing rooms on every startup and demotes itself if it
+holds admin privileges.
+
+If the alias already exists and the bot is a member, it is resolved normally.
+If the alias exists but belongs to a room the bot is **not** in (e.g. someone
+else's room on a public homeserver), the connector creates a new room without
+claiming that alias.
+
+### Manual room creation
+
+You can also create rooms yourself through any Matrix client or via the API,
+then reference them by room ID in the config:
+
+```yaml
+rooms:
+  "!abc123:example.com":
+    agent: code-reviewer
+    mode: mention
+```
+
+If you create rooms manually, invite the bot account and enable encryption.
 
 ## 5. E2E Encryption Setup
 
@@ -107,12 +123,14 @@ uses `matrix-nio` with the `libolm` crypto backend.
 ### Persistent Crypto State
 
 The connector stores E2E key material in a directory that must persist across
-restarts. The `docker-compose.yml` bind-mounts `secrets/matrix-store/` at `/data` for this
-purpose. Configure the store path in `secrets/connector-config.yaml`:
+restarts. The `docker-compose.yml` bind-mounts `secrets/connector-data/` at
+`/data` for this purpose. Configure the store path in
+`secrets/connector-config.yaml`:
 
 ```yaml
-matrix:
-  store_path: /data/crypto-store
+adapters:
+  matrix:
+    store_path: "/data/matrix"
 ```
 
 ### Device Verification
@@ -130,44 +148,74 @@ devices only.
 
 ## 6. Configure the Connector
 
-Create `secrets/connector-config.yaml` with room-to-agent mappings:
+Create `secrets/connector-config.yaml`:
 
 ```yaml
+instance_name: "TriOnyx"           # prefix for auto-created room names
+
 gateway:
-  url: "http://gateway:4000"
-  # Token must match TRI_ONYX_CONNECTOR_TOKEN on the gateway
+  url: "ws://gateway:4000/connectors/ws"
+  connector_id: "matrix-home"
   token: "${TRI_ONYX_CONNECTOR_TOKEN}"
 
-matrix:
-  homeserver: "https://matrix.example.com"
-  # Access token is read from MATRIX_ACCESS_TOKEN env var
-  store_path: "/data/crypto-store"
-
-rooms:
-  "!abc123:example.com":
-    agent: code-reviewer
-    mode: mention          # only respond to @mentions
+adapters:
+  matrix:
+    enabled: true
+    homeserver: "https://matrix.example.com"
+    user_id: "@tri-onyx-bot:example.com"
+    access_token: "${MATRIX_ACCESS_TOKEN}"
+    device_id: "TRI-ONYX-01"       # from the login response (step 3)
+    store_path: "/data/matrix"
     trusted_users:
       - "@alice:example.com"
-      - "@bob:example.com"
 
-  "!def456:example.com":
-    agent: general-assistant
-    mode: all              # respond to all messages
-    trusted_users:
-      - "@alice:example.com"
+    rooms:
+      # Use aliases for auto-creation, or room IDs for existing rooms
+      "#code-review:example.com":
+        agent: code-reviewer
+        mode: mention
+        show_steps: true
+        show_result: false
+        step_mode: brief
+
+      "#assistant:example.com":
+        agent: general-assistant
+        mode: all
+        show_steps: false
+        show_result: true
+        step_mode: brief
+
+    heartbeat_rooms:
+      # agent-name: room-id (for proactive heartbeat output)
+      scheduler: "!abc123:example.com"
+
+    approval_rooms:
+      # agent-name: room-id (for BCP Cat-3 approval requests)
+      _default: "!abc123:example.com"
 ```
+
+Room aliases (starting with `#`) are resolved on startup. If the room does not
+exist, it is created automatically (see section 4).
 
 ### Room configuration fields
 
-| Field            | Description                                                |
-|------------------|------------------------------------------------------------|
-| `agent`          | Name of the agent definition to trigger                    |
-| `mode`           | `all` (every message) or `mention` (only @bot mentions)   |
-| `trusted_users`  | Matrix user IDs whose messages are treated as trusted input|
+| Field             | Description                                                |
+|-------------------|------------------------------------------------------------|
+| `agent`           | Name of the agent definition to trigger                    |
+| `mode`            | `mention` (only @bot mentions) or `all` (every message)   |
+| `merge_window_ms` | Batch rapid-fire messages within this window (default 3000)|
+| `show_steps`      | Show intermediate tool-use steps in chat (default false)   |
+| `show_result`     | Show completion summary in chat (default true)             |
+| `step_mode`       | `brief`, `pretty`, or `raw` (default brief)               |
 
-Messages from users not in `trusted_users` are still delivered to the agent
-but marked as untrusted input, which raises the session's taint level.
+### Trusted users
+
+The `trusted_users` list is set at the adapter level (not per-room). Messages
+from trusted users are delivered with `trust: verified`, which keeps the
+session's taint level low. Messages from other users are marked `unverified`,
+raising the taint level. When rooms are auto-created, trusted users are invited
+and granted admin (power level 100). The bot itself is demoted to power level 0
+— trusted users are the room administrators.
 
 ## 7. Configure the Gateway
 

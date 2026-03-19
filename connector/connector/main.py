@@ -69,9 +69,33 @@ def _build_adapters(
         if cls is None:
             logger.warning("Unknown adapter type: %s", name)
             continue
-        adapters[name] = cls(adapter_cfg, transcriber=transcriber)
+        adapters[name] = cls(
+            adapter_cfg,
+            transcriber=transcriber,
+            adapter_name=name,
+            config_path=config.config_path,
+            instance_name=config.instance_name,
+        )
         logger.info("Created adapter: %s", name)
     return adapters
+
+
+def _resolve_agent_room(
+    adapters: dict[str, Any],
+    agent_name: str,
+) -> list[tuple[Any, dict[str, Any]]]:
+    """Find (adapter, channel) pairs for an agent by checking heartbeat_rooms then rooms config."""
+    results: list[tuple[Any, dict[str, Any]]] = []
+    for adapter_name, adapter in adapters.items():
+        room_id = adapter._config.heartbeat_rooms.get(agent_name)
+        if not room_id:
+            for rid, room_cfg in adapter._config.rooms.items():
+                if room_cfg.agent == agent_name:
+                    room_id = rid
+                    break
+        if room_id:
+            results.append((adapter, {"platform": adapter_name, "room_id": room_id}))
+    return results
 
 
 async def _route_outbound(
@@ -81,6 +105,23 @@ async def _route_outbound(
     """Route a gateway outbound message to the appropriate adapter."""
     platform = msg.channel.get("platform", "")
     adapter = adapters.get(platform)
+
+    # Articles/listings from heartbeat sessions arrive without a channel.
+    # Look up the agent's configured room instead.
+    if adapter is None and isinstance(msg, (ArticleMessage, ListingMessage)) and msg.agent_name:
+        for resolved_adapter, channel in _resolve_agent_room(adapters, msg.agent_name):
+            if isinstance(msg, ArticleMessage):
+                await resolved_adapter.send_article(
+                    channel, msg.title, msg.url, msg.source, msg.summary,
+                    agent_name=msg.agent_name,
+                )
+            elif isinstance(msg, ListingMessage):
+                await resolved_adapter.send_listing(
+                    channel, msg.title, msg.url, msg.price, msg.location,
+                    agent_name=msg.agent_name,
+                )
+        return
+
     if adapter is None:
         logger.warning("No adapter for platform %s", platform)
         return

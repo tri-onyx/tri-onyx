@@ -56,9 +56,19 @@ class MatrixAdapter(BaseAdapter):
     trust mapping, rich formatting, and standard Matrix event types.
     """
 
-    def __init__(self, config: AdapterConfig, transcriber: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: AdapterConfig,
+        transcriber: Any | None = None,
+        adapter_name: str = "matrix",
+        config_path: str = "",
+        instance_name: str = "",
+    ) -> None:
         self._config = config
         self._transcriber = transcriber
+        self._adapter_name = adapter_name
+        self._config_path = config_path
+        self._instance_name = instance_name
         self._client: AsyncClient | None = None
         self._on_message: OnMessageCallback | None = None
         self._running = False
@@ -217,6 +227,7 @@ class MatrixAdapter(BaseAdapter):
                     logger.info("Queried device keys for %d user(s)", len(users))
 
                 await self._trust_all_devices()
+                await self._demote_self_in_rooms()
                 self._initial_sync_done = True
                 logger.info(
                     "Matrix adapter initial sync complete — "
@@ -1518,25 +1529,268 @@ class MatrixAdapter(BaseAdapter):
         if trusted_count:
             logger.info("Trusted %d device(s) across configured rooms", trusted_count)
 
+    async def _demote_self_in_rooms(self) -> None:
+        """Demote the bot to power level 0 in any joined room where it is admin,
+        and leave rooms that are not in the config.
+
+        The bot should not hold admin privileges — trusted users are the
+        room administrators.  This runs after initial sync so the room
+        state is available.
+        """
+        assert self._client is not None
+        demoted = 0
+        left = 0
+
+        # Collect all room IDs the bot is currently in (plus heartbeat/approval rooms)
+        configured_room_ids = set(self._rooms.keys())
+        configured_room_ids.update(self._config.heartbeat_rooms.values())
+        configured_room_ids.update(self._config.approval_rooms.values())
+
+        for room_id, room in list(self._client.rooms.items()):
+            my_level = room.power_levels.get_user_level(self._config.user_id)
+
+            if room_id not in configured_room_ids:
+                # Demote first if we have elevated privileges, then leave
+                if my_level > 0:
+                    await self._set_own_power_level(room_id, room, 0)
+                try:
+                    resp = await self._client.room_leave(room_id)
+                    await self._client.room_forget(room_id)
+                    left += 1
+                    logger.info("Left unconfigured room %s", room_id)
+                except Exception:
+                    logger.warning("Could not leave room %s", room_id)
+                continue
+
+            # Configured room — demote if needed
+            if my_level > 0:
+                if await self._set_own_power_level(room_id, room, 0):
+                    demoted += 1
+
+        if demoted:
+            logger.info("Demoted bot in %d room(s)", demoted)
+        if left:
+            logger.info("Left %d unconfigured room(s)", left)
+
+    async def _set_own_power_level(self, room_id: str, room: MatrixRoom, level: int) -> bool:
+        """Set the bot's power level in a room. Returns True on success."""
+        assert self._client is not None
+        pl = room.power_levels
+        old_level = pl.get_user_level(self._config.user_id)
+
+        users = dict(pl.users)
+        users[self._config.user_id] = level
+
+        content: dict[str, Any] = {
+            "users": users,
+            "users_default": pl.defaults.users_default,
+            "events_default": pl.defaults.events_default,
+            "state_default": pl.defaults.state_default,
+            "ban": pl.defaults.ban,
+            "kick": pl.defaults.kick,
+            "redact": pl.defaults.redact,
+            "invite": pl.defaults.invite,
+            "events": dict(pl.events),
+        }
+        if hasattr(pl.defaults, "notifications") and pl.defaults.notifications:
+            content["notifications"] = pl.defaults.notifications
+
+        try:
+            resp = await self._client.room_put_state(
+                room_id, "m.room.power_levels", content,
+            )
+            if hasattr(resp, "event_id"):
+                logger.info(
+                    "Set bot power level from %d to %d in room %s",
+                    old_level, level, room_id,
+                )
+                return True
+            logger.warning("Failed to set power level in room %s: %s", room_id, resp)
+        except Exception:
+            logger.warning("Could not set power level in room %s (may lack permission)", room_id)
+        return False
+
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
 
     async def _resolve_rooms(self) -> None:
-        """Resolve any room aliases in the config to room IDs."""
+        """Resolve room aliases in the config to room IDs, creating rooms that don't exist."""
         assert self._client is not None
         resolved: dict[str, RoomConfig] = {}
+        created_rooms: dict[str, str] = {}  # alias -> room_id for config update
+
         for room_ref, room_cfg in self._rooms.items():
             if room_ref.startswith("#"):
                 resp = await self._client.room_resolve_alias(room_ref)
-                if hasattr(resp, "room_id"):
+                if hasattr(resp, "room_id") and resp.room_id in self._client.rooms:
                     logger.info("Resolved alias %s -> %s", room_ref, resp.room_id)
                     resolved[resp.room_id] = room_cfg
+                    created_rooms[room_ref] = resp.room_id
                 else:
-                    logger.error("Failed to resolve room alias %s: %s", room_ref, resp)
+                    if hasattr(resp, "room_id"):
+                        logger.warning(
+                            "Alias %s resolved to %s but bot is not a member — "
+                            "creating a new room (without alias)",
+                            room_ref,
+                            resp.room_id,
+                        )
+                    else:
+                        logger.info(
+                            "Room alias %s does not exist, creating room for agent '%s'",
+                            room_ref,
+                            room_cfg.agent,
+                        )
+                    alias_taken = hasattr(resp, "room_id")
+                    room_id = await self._create_room(
+                        room_ref, room_cfg, skip_alias=alias_taken,
+                    )
+                    if room_id:
+                        resolved[room_id] = room_cfg
+                        created_rooms[room_ref] = room_id
+                    else:
+                        logger.error("Failed to create room for alias %s", room_ref)
             else:
                 resolved[room_ref] = room_cfg
+
         self._rooms = resolved
+
+        if created_rooms:
+            self._save_created_rooms_to_config(created_rooms)
+
+    async def _create_room(
+        self, alias: str, room_cfg: RoomConfig, *, skip_alias: bool = False,
+    ) -> str | None:
+        """Create an encrypted Matrix room.
+
+        Invites trusted users and grants them admin (power level 100).
+        If *skip_alias* is True, the alias is already taken on the server
+        so the room is created without one.
+        Returns the new room_id or None on failure.
+        """
+        assert self._client is not None
+
+        # Extract localpart from alias (e.g. "#agent-name:server" -> "agent-name")
+        localpart = alias.split(":")[0].lstrip("#")
+
+        # Build the room name: "<Instance> <agent>" or just "<agent>"
+        agent_label = room_cfg.agent or localpart
+        room_name = f"{self._instance_name} {agent_label}" if self._instance_name else agent_label
+
+        # Power level override: trusted users get admin (100), bot starts at 100
+        # (required to apply initial_state) and is demoted to 0 after creation.
+        power_levels = {
+            "users": {self._config.user_id: 100},
+            "users_default": 0,
+            "events_default": 0,
+            "state_default": 50,
+            "ban": 50,
+            "kick": 50,
+            "redact": 50,
+            "invite": 0,
+        }
+        for user_id in self._config.trusted_users:
+            power_levels["users"][user_id] = 100
+
+        initial_state = [
+            # Enable E2E encryption
+            {
+                "type": "m.room.encryption",
+                "state_key": "",
+                "content": {"algorithm": "m.megolm.v1.aes-sha2"},
+            },
+            # Set power levels
+            {
+                "type": "m.room.power_levels",
+                "state_key": "",
+                "content": power_levels,
+            },
+        ]
+
+        try:
+            create_kwargs: dict[str, Any] = {
+                "name": room_name,
+                "topic": f"TriOnyx agent: {room_cfg.agent}",
+                "invite": list(self._config.trusted_users),
+                "initial_state": initial_state,
+            }
+            if not skip_alias:
+                create_kwargs["alias"] = localpart
+
+            resp = await self._client.room_create(**create_kwargs)
+        except Exception:
+            logger.exception("Failed to create room %s", alias)
+            return None
+
+        if hasattr(resp, "room_id"):
+            logger.info(
+                "Created room %s (alias=%s) for agent '%s', invited %d user(s)",
+                resp.room_id,
+                alias,
+                room_cfg.agent,
+                len(self._config.trusted_users),
+            )
+            # Demote bot to power level 0 — trusted users are the admins
+            await self._demote_in_new_room(resp.room_id, power_levels)
+            return resp.room_id
+
+        logger.error("room_create failed for %s: %s", alias, resp)
+        return None
+
+    async def _demote_in_new_room(
+        self, room_id: str, power_levels: dict[str, Any],
+    ) -> None:
+        """Demote the bot to power level 0 in a freshly created room."""
+        assert self._client is not None
+        users = dict(power_levels["users"])
+        users[self._config.user_id] = 0
+        content = dict(power_levels)
+        content["users"] = users
+        try:
+            resp = await self._client.room_put_state(
+                room_id, "m.room.power_levels", content,
+            )
+            if hasattr(resp, "event_id"):
+                logger.info("Demoted bot to power level 0 in new room %s", room_id)
+            else:
+                logger.warning("Failed to demote bot in new room %s: %s", room_id, resp)
+        except Exception:
+            logger.warning("Could not demote bot in new room %s", room_id)
+
+    def _save_created_rooms_to_config(self, created_rooms: dict[str, str]) -> None:
+        """Update the YAML config file, replacing aliases with resolved room IDs."""
+        if not self._config_path:
+            logger.warning("No config_path set — cannot persist created rooms")
+            return
+
+        from pathlib import Path
+
+        import yaml
+
+        config_file = Path(self._config_path)
+        if not config_file.exists():
+            logger.warning("Config file %s not found — cannot persist rooms", self._config_path)
+            return
+
+        try:
+            raw = yaml.safe_load(config_file.read_text())
+        except Exception:
+            logger.exception("Failed to read config file for room persistence")
+            return
+
+        adapter_section = raw.get("adapters", {}).get(self._adapter_name, {})
+        rooms_section = adapter_section.get("rooms", {})
+
+        for alias, room_id in created_rooms.items():
+            if alias in rooms_section:
+                rooms_section[room_id] = rooms_section.pop(alias)
+                logger.info("Config: replaced alias %s with room_id %s", alias, room_id)
+
+        try:
+            config_file.write_text(yaml.safe_dump(raw, default_flow_style=False, sort_keys=False))
+            logger.info("Saved %d created room(s) to config file", len(created_rooms))
+        except Exception:
+            logger.exception("Failed to write updated config file")
 
     async def _room_send(
         self, room_id: str, event_type: str, content: dict[str, Any]

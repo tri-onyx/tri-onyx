@@ -121,7 +121,14 @@ class SlackAdapter(BaseAdapter):
     injection. Only DM conversations are supported.
     """
 
-    def __init__(self, config: AdapterConfig, transcriber: Any | None = None) -> None:
+    def __init__(
+        self,
+        config: AdapterConfig,
+        transcriber: Any | None = None,
+        adapter_name: str = "slack",
+        config_path: str = "",
+        instance_name: str = "",
+    ) -> None:
         self._config = config
         self._on_message: OnMessageCallback | None = None
         self._on_reaction: OnReactionCallback | None = None

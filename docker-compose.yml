@@ -74,7 +74,7 @@ services:
       dockerfile: connector.Dockerfile
     volumes:
       - ./connector/connector:/app/connector
-      - ./secrets/connector-config.yaml:/app/config.yaml:ro
+      - ./secrets/connector-config.yaml:/app/config.yaml
       - ./secrets/connector-data:/data
     env_file:
       - .env

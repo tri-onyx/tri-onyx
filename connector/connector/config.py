@@ -60,8 +60,10 @@ class ConnectorConfig:
     gateway_url: str = "ws://gateway:4000/connectors/ws"
     connector_id: str = ""
     connector_token: str = ""
+    instance_name: str = ""
     adapters: dict[str, AdapterConfig] = field(default_factory=dict)
     voice: VoiceConfig = field(default_factory=VoiceConfig)
+    config_path: str = ""
 
 
 def _interpolate(value: Any) -> Any:
@@ -148,6 +150,8 @@ def load_config(path: str | Path | None = None) -> ConnectorConfig:
         gateway_url=str(gateway.get("url", "ws://gateway:4000/connectors/ws")),
         connector_id=str(gateway.get("connector_id", "")),
         connector_token=str(gateway.get("token", "")),
+        instance_name=str(raw.get("instance_name", "")),
         adapters=adapters,
         voice=voice,
+        config_path=str(path),
     )
