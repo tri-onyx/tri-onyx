@@ -291,15 +291,43 @@ def collect_all_signals() -> list[str]:
     return signals
 
 
+def deduplicate_signals(signals: list[str]) -> list[str]:
+    """Deduplicate signals by normalized text (case-insensitive, stripped)."""
+    seen = set()
+    unique = []
+    for s in signals:
+        key = s.strip().lower()
+        if key not in seen:
+            seen.add(key)
+            unique.append(s)
+    return unique
+
+
 async def phase2(client, signals: list[str]) -> str:
     """Phase 2: aggregate signals into USER.md content."""
     if not signals:
         print("Phase 2: no signals found, skipping aggregation.")
         return ""
 
-    print(f"Phase 2: aggregating {len(signals)} signals...", flush=True)
+    # Deduplicate before sending
+    unique = deduplicate_signals(signals)
+    print(f"Phase 2: {len(signals)} raw signals -> {len(unique)} unique", flush=True)
+
+    # Truncate to fit within context window (~150k chars ≈ ~37k tokens)
+    signal_text = ""
+    included = 0
+    for s in unique:
+        line = f"- {s}\n"
+        if len(signal_text) + len(line) > 150_000:
+            break
+        signal_text += line
+        included += 1
+
+    if included < len(unique):
+        print(f"  Truncated to {included}/{len(unique)} signals to fit context window")
+
+    print(f"  Aggregating...", flush=True)
     t0 = time.monotonic()
-    signal_text = "\n".join(f"- {s}" for s in signals)
 
     response = await client.messages.create(
         model=AGGREGATOR_MODEL,
