@@ -26,7 +26,7 @@ OUTPUT_PATH = ROOT / "workspace" / "personality" / "USER.md"
 DEFINITIONS_DIR = ROOT / "workspace" / "agent-definitions"
 
 SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
-AGGREGATOR_MODEL = "claude-sonnet-4-6-20250514"
+AGGREGATOR_MODEL = "claude-sonnet-4-6"
 MAX_CONCURRENT = 20
 
 EXTRACTION_PROMPT = """\
