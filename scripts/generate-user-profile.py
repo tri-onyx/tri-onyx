@@ -1,18 +1,22 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["anthropic>=0.52", "pyyaml>=6"]
+# dependencies = ["anthropic>=0.52", "claude-agent-sdk==0.1.37", "pyyaml>=6"]
 # ///
 """Generate workspace/personality/USER.md from agent session logs.
 
 Two-phase pipeline:
-  Phase 1: Summarize each session into per-user signals (parallel, cached)
-  Phase 2: Aggregate all signals into a cohesive USER.md
+  Phase 1: Summarize each session into per-user signals (parallel via anthropic SDK, Haiku)
+  Phase 2: Aggregate all signals into a cohesive USER.md (via agent SDK, Sonnet)
+
+Phase 1 uses the anthropic SDK directly for parallel async requests.
+Phase 2 uses the Claude Agent SDK which supports all models via OAuth token.
 """
 
 import argparse
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -26,7 +30,7 @@ OUTPUT_PATH = ROOT / "workspace" / "personality" / "USER.md"
 DEFINITIONS_DIR = ROOT / "workspace" / "agent-definitions"
 
 SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
-AGGREGATOR_MODEL = "claude-sonnet-4-6"
+AGGREGATOR_MODEL = os.environ.get("PROFILE_AGGREGATOR_MODEL", "claude-sonnet-4-6")
 MAX_CONCURRENT = 20
 
 EXTRACTION_PROMPT = """\
@@ -84,8 +88,8 @@ Guidelines:
 - Do NOT include any preamble or explanation — output only the Markdown profile"""
 
 
-def get_client():
-    """Create Anthropic async client, preferring OAuth token."""
+def get_anthropic_client():
+    """Create Anthropic async client for phase 1 (Haiku)."""
     import anthropic
 
     token = os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -106,7 +110,7 @@ def load_excluded_agents() -> set[str]:
         return excluded
     for path in DEFINITIONS_DIR.glob("*.md"):
         text = path.read_text()
-        match = __import__("re").match(r"\A---\s*\n(.*?)\n---", text, __import__("re").DOTALL)
+        match = re.match(r"\A---\s*\n(.*?)\n---", text, re.DOTALL)
         if not match:
             continue
         try:
@@ -198,7 +202,7 @@ async def summarize_session(
     cache_path = CACHE_DIR / agent / f"{session_id}.json"
     cache_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # No user prompts → empty cache
+    # No user prompts -> empty cache
     has_user_prompt = any(
         line.startswith("USER: ") for line in (conversation or "").split("\n")
     )
@@ -306,22 +310,30 @@ def deduplicate_signals(signals: list[str]) -> list[str]:
     return unique
 
 
-async def phase2(client, signals: list[str]) -> str:
-    """Phase 2: aggregate signals into USER.md content."""
+async def phase2(signals: list[str]) -> str:
+    """Phase 2: aggregate signals into USER.md via Claude Agent SDK."""
     if not signals:
         print("Phase 2: no signals found, skipping aggregation.")
         return ""
+
+    from claude_agent_sdk import (
+        ClaudeAgentOptions,
+        ClaudeSDKClient,
+        AssistantMessage,
+        ResultMessage,
+        TextBlock,
+    )
 
     # Deduplicate before sending
     unique = deduplicate_signals(signals)
     print(f"Phase 2: {len(signals)} raw signals -> {len(unique)} unique", flush=True)
 
-    # Truncate to fit within context window (~150k chars ≈ ~37k tokens)
+    # Truncate to fit context window (~400k chars, safe for Sonnet 1M context)
     signal_text = ""
     included = 0
     for s in unique:
         line = f"- {s}\n"
-        if len(signal_text) + len(line) > 150_000:
+        if len(signal_text) + len(line) > 400_000:
             break
         signal_text += line
         included += 1
@@ -329,23 +341,37 @@ async def phase2(client, signals: list[str]) -> str:
     if included < len(unique):
         print(f"  Truncated to {included}/{len(unique)} signals to fit context window")
 
-    print(f"  Aggregating...", flush=True)
+    print(f"  Aggregating with {AGGREGATOR_MODEL}...", flush=True)
     t0 = time.monotonic()
 
-    response = await client.messages.create(
+    options = ClaudeAgentOptions(
+        system_prompt=AGGREGATION_PROMPT,
+        allowed_tools=[],
+        permission_mode="acceptEdits",
+        max_turns=1,
         model=AGGREGATOR_MODEL,
-        max_tokens=2048,
-        messages=[
-            {
-                "role": "user",
-                "content": f"{AGGREGATION_PROMPT}\n\nHere are all extracted signals:\n\n{signal_text}",
-            }
-        ],
     )
+    client = ClaudeSDKClient(options=options)
+    await client.connect()
+
+    try:
+        prompt = f"Here are all extracted signals:\n\n{signal_text}"
+        await client.query(prompt)
+
+        result_text = ""
+        async for msg in client.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock):
+                        result_text += block.text
+            if isinstance(msg, ResultMessage):
+                break
+    finally:
+        await client.disconnect()
 
     elapsed = time.monotonic() - t0
     print(f"  Done in {elapsed:.1f}s")
-    return response.content[0].text.strip()
+    return result_text.strip()
 
 
 async def main():
@@ -380,12 +406,13 @@ async def main():
             print(f"\nExisting cached signals: {len(existing_signals)}")
         return
 
-    client = get_client()
+    # Phase 1: parallel summarization via anthropic SDK (Haiku)
+    anthropic_client = get_anthropic_client()
+    await phase1(anthropic_client, sessions, args.force)
 
-    await phase1(client, sessions, args.force)
-
+    # Phase 2: aggregation via agent SDK (Sonnet)
     signals = collect_all_signals()
-    profile = await phase2(client, signals)
+    profile = await phase2(signals)
 
     if profile:
         OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -396,4 +423,6 @@ async def main():
 
 
 if __name__ == "__main__":
+    # Unset CLAUDECODE to allow agent SDK to spawn Claude Code subprocess
+    os.environ.pop("CLAUDECODE", None)
     asyncio.run(main())
