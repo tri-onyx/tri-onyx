@@ -4,6 +4,7 @@ description: Public-facing assistant for external Slack users
 model: claude-sonnet-4-6
 tools: Read, Write, Glob, Grep, SendMessage
 network: none
+exclude_from_personalization: true
 send_to:
   - knowledgebase
 receive_from:
