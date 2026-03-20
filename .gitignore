@@ -26,6 +26,9 @@ test/tmp/
 # Local temp
 tmp/
 
+# Cache (user profile generation, etc.)
+.cache/
+
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/
 

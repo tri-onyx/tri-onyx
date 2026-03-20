@@ -25,6 +25,7 @@ defmodule TriOnyx.AgentDefinition do
   - `skills` — list of Claude Code skill names to load (from `.claude/skills/<name>/SKILL.md`)
   - `plugins` — list of workspace plugin names (auto-injects FUSE read paths for `/plugins/<name>/**`)
   - `base_taint` — inherent taint floor from model provenance: "low", "medium", or "high" (default: "low")
+  - `exclude_from_personalization` — if true, skip this agent's logs when generating the user profile (default: false)
   """
 
   alias TriOnyx.ToolRegistry
@@ -80,7 +81,8 @@ defmodule TriOnyx.AgentDefinition do
           input_sources: [atom()],
           browser: boolean(),
           docker_socket: boolean(),
-          trionyx_repo: boolean()
+          trionyx_repo: boolean(),
+          exclude_from_personalization: boolean()
         }
 
   @enforce_keys [:name, :tools, :system_prompt]
@@ -106,7 +108,8 @@ defmodule TriOnyx.AgentDefinition do
     input_sources: [],
     browser: false,
     docker_socket: false,
-    trionyx_repo: false
+    trionyx_repo: false,
+    exclude_from_personalization: false
   ]
 
   @doc """
@@ -187,7 +190,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, input_sources} <- parse_input_sources(yaml),
          {:ok, browser} <- parse_optional_boolean(yaml, "browser"),
          {:ok, docker_socket} <- parse_optional_boolean(yaml, "docker_socket"),
-         {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo") do
+         {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo"),
+         {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization") do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -239,7 +243,8 @@ defmodule TriOnyx.AgentDefinition do
          input_sources: auto_include_cron(input_sources, cron_schedules),
          browser: browser,
          docker_socket: docker_socket,
-         trionyx_repo: trionyx_repo
+         trionyx_repo: trionyx_repo,
+         exclude_from_personalization: exclude_from_personalization
        }}
     end
   end
