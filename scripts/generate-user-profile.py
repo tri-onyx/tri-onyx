@@ -163,8 +163,35 @@ def needs_processing(agent: str, session_id: str, force: bool) -> bool:
     return not cache_path.exists()
 
 
+class Progress:
+    """Thread-safe progress counter with terminal output."""
+
+    def __init__(self, total: int):
+        self.total = total
+        self.done = 0
+        self.signals_found = 0
+        self.skipped = 0
+        self._lock = asyncio.Lock()
+
+    async def tick(self, agent: str, session_id: str, signal_count: int, skipped: bool = False):
+        async with self._lock:
+            self.done += 1
+            if skipped:
+                self.skipped += 1
+            self.signals_found += signal_count
+            pct = (self.done * 100) // self.total
+            print(
+                f"\r  [{pct:3d}%] {self.done}/{self.total}  "
+                f"signals: {self.signals_found}  skipped: {self.skipped}  "
+                f"last: {agent}/{session_id}    ",
+                end="",
+                flush=True,
+            )
+
+
 async def summarize_session(
-    client, semaphore: asyncio.Semaphore, agent: str, session_id: str, log_path: Path
+    client, semaphore: asyncio.Semaphore, agent: str, session_id: str, log_path: Path,
+    progress: Progress,
 ) -> dict | None:
     """Summarize a single session and write cache."""
     conversation = extract_conversation(log_path)
@@ -177,6 +204,7 @@ async def summarize_session(
     )
     if not conversation or not has_user_prompt:
         cache_path.write_text(json.dumps({"signals": [], "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}))
+        await progress.tick(agent, session_id, 0, skipped=True)
         return None
 
     # Truncate very long conversations to avoid token limits
@@ -206,6 +234,8 @@ async def summarize_session(
     result["timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     cache_path.write_text(json.dumps(result, indent=2))
 
+    signal_count = len(result.get("signals", []))
+    await progress.tick(agent, session_id, signal_count)
     return result if result.get("signals") else None
 
 
@@ -222,12 +252,16 @@ async def phase1(client, sessions: list[tuple[str, str, Path]], force: bool) -> 
         return 0
 
     print(f"Phase 1: summarizing {len(to_process)} sessions...")
+    t0 = time.monotonic()
     semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+    progress = Progress(len(to_process))
     tasks = [
-        summarize_session(client, semaphore, agent, sid, path)
+        summarize_session(client, semaphore, agent, sid, path, progress)
         for agent, sid, path in to_process
     ]
     results = await asyncio.gather(*tasks, return_exceptions=True)
+    print()  # newline after progress line
+    elapsed = time.monotonic() - t0
 
     errors = sum(1 for r in results if isinstance(r, Exception))
     if errors:
@@ -237,7 +271,7 @@ async def phase1(client, sessions: list[tuple[str, str, Path]], force: bool) -> 
                 print(f"    {r}")
 
     processed = len(to_process) - errors
-    print(f"  Done: {processed} sessions summarized.")
+    print(f"  Done: {processed} sessions summarized in {elapsed:.1f}s")
     return processed
 
 
@@ -263,7 +297,8 @@ async def phase2(client, signals: list[str]) -> str:
         print("Phase 2: no signals found, skipping aggregation.")
         return ""
 
-    print(f"Phase 2: aggregating {len(signals)} signals...")
+    print(f"Phase 2: aggregating {len(signals)} signals...", flush=True)
+    t0 = time.monotonic()
     signal_text = "\n".join(f"- {s}" for s in signals)
 
     response = await client.messages.create(
@@ -277,6 +312,8 @@ async def phase2(client, signals: list[str]) -> str:
         ],
     )
 
+    elapsed = time.monotonic() - t0
+    print(f"  Done in {elapsed:.1f}s")
     return response.content[0].text.strip()
 
 
