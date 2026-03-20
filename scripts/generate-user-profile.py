@@ -276,19 +276,22 @@ async def phase1(client, sessions: list[tuple[str, str, Path]], force: bool) -> 
 
 
 def collect_all_signals() -> list[str]:
-    """Read all cache files and collect signals into a flat list."""
-    signals = []
+    """Read all cache files and collect signals, most recent first."""
+    entries = []
     if not CACHE_DIR.is_dir():
-        return signals
-    for cache_file in sorted(CACHE_DIR.rglob("*.json")):
+        return []
+    for cache_file in CACHE_DIR.rglob("*.json"):
         try:
             data = json.loads(cache_file.read_text())
         except (json.JSONDecodeError, OSError):
             continue
+        ts = data.get("timestamp", "")
         for signal in data.get("signals", []):
             if signal and isinstance(signal, str):
-                signals.append(signal)
-    return signals
+                entries.append((ts, signal))
+    # Sort by timestamp descending so recent signals come first
+    entries.sort(key=lambda e: e[0], reverse=True)
+    return [signal for _, signal in entries]
 
 
 def deduplicate_signals(signals: list[str]) -> list[str]:
