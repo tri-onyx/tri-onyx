@@ -668,7 +668,11 @@ defmodule TriOnyx.AgentPort do
             duration_ms: Map.get(result, "duration_ms", 0),
             num_turns: Map.get(result, "num_turns", 0),
             cost_usd: Map.get(result, "cost_usd", 0.0),
-            is_error: Map.get(result, "is_error", false)
+            is_error: Map.get(result, "is_error", false),
+            input_tokens: Map.get(result, "input_tokens", 0),
+            output_tokens: Map.get(result, "output_tokens", 0),
+            cache_creation_input_tokens: Map.get(result, "cache_creation_input_tokens", 0),
+            cache_read_input_tokens: Map.get(result, "cache_read_input_tokens", 0)
           }}}
 
       {:ok, %{"type" => "error", "message" => message}} ->

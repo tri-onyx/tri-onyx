@@ -1150,7 +1150,11 @@ defmodule TriOnyx.AgentSession do
       "type" => "result",
       "num_turns" => metadata.num_turns,
       "duration_ms" => metadata.duration_ms,
-      "cost_usd" => metadata.cost_usd
+      "cost_usd" => metadata.cost_usd,
+      "input_tokens" => metadata.input_tokens,
+      "output_tokens" => metadata.output_tokens,
+      "cache_creation_input_tokens" => metadata.cache_creation_input_tokens,
+      "cache_read_input_tokens" => metadata.cache_read_input_tokens
     })
 
     # Classify heartbeat result
