@@ -1148,6 +1148,7 @@ defmodule TriOnyx.AgentSession do
 
     broadcast_event(state, %{
       "type" => "result",
+      "model" => state.definition.model,
       "num_turns" => metadata.num_turns,
       "duration_ms" => metadata.duration_ms,
       "cost_usd" => metadata.cost_usd,
