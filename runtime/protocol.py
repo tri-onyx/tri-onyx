@@ -531,15 +531,22 @@ def emit_result(
     num_turns: int,
     cost_usd: float,
     is_error: bool = False,
+    usage: dict | None = None,
 ) -> None:
     """Report session completion with metadata."""
-    _emit({
+    payload = {
         "type": "result",
         "duration_ms": duration_ms,
         "num_turns": num_turns,
         "cost_usd": cost_usd,
         "is_error": is_error,
-    })
+    }
+    if usage:
+        payload["input_tokens"] = usage.get("input_tokens", 0)
+        payload["output_tokens"] = usage.get("output_tokens", 0)
+        payload["cache_creation_input_tokens"] = usage.get("cache_creation_input_tokens", 0)
+        payload["cache_read_input_tokens"] = usage.get("cache_read_input_tokens", 0)
+    _emit(payload)
 
 
 def emit_interrupted(reason: str = "") -> None:

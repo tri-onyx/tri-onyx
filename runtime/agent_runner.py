@@ -1986,6 +1986,7 @@ async def run_prompt(
                         getattr(message, "cost_usd", 0.0),
                     ),
                     is_error=False,
+                    usage=getattr(message, "usage", None),
                 )
                 log.info(
                     "Prompt complete: %d turns, %dms",
