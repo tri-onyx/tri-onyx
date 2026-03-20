@@ -29,6 +29,9 @@ tmp/
 # Cache (user profile generation, etc.)
 .cache/
 
+# Local reference docs
+CLAUDE_API_ACCESS.md
+
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/
 
