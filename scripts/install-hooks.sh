@@ -41,7 +41,21 @@ while IFS= read -r file; do
     fi
 done <<< "$STAGED"
 
-# 2. Scan staged files for embedded secrets
+# 2. Scan staged files for embedded secrets (gitleaks)
+if command -v gitleaks &> /dev/null; then
+    if ! gitleaks git --staged --no-banner; then
+        echo ""
+        echo "ERROR: gitleaks detected secrets in staged files."
+        echo "       Fix the leak or add an allowlist entry to .gitleaks.toml"
+        exit 1
+    fi
+else
+    echo "WARNING: gitleaks not installed — skipping secret scan."
+    echo "         Install: brew install gitleaks"
+    WARNINGS=1
+fi
+
+# 2b. Supplementary regex scan (catches patterns gitleaks might miss)
 if command -v uv &> /dev/null; then
     if ! uv run "$REPO_ROOT/scripts/generate-templates.py" --scan-secrets 2>/dev/null; then
         echo ""

@@ -27,11 +27,14 @@ cd TriOnyx
 
 ### Install git hooks
 
-The pre-commit hook warns about stale templates and blocks accidental secret commits:
+The pre-commit hook runs [gitleaks](https://github.com/gitleaks/gitleaks) to scan for secrets and warns about stale templates:
 
 ```bash
-bash scripts/install-hooks.sh
+brew install gitleaks           # secret scanner
+bash scripts/install-hooks.sh   # install pre-commit hook
 ```
+
+See [Secret Management](secrets.md) for details on how secrets are protected.
 
 ### Copy templates
 

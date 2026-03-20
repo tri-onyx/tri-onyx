@@ -69,6 +69,7 @@ nav:
       - Web Dashboard: web-dashboard.md
       - API Reference: api-reference.md
   - Guides:
+      - Secret Management: secrets.md
       - Matrix Setup: matrix-guide.md
       - Email Setup: email-setup.md
       - Email OAuth2: email-outlook-oauth2.md
