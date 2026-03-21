@@ -98,6 +98,21 @@ if [ -n "${TRI_ONYX_PLUGINS:-}" ]; then
 fi
 
 # -----------------------------------------------------------------------
+# 2.6. Ensure Playwright browsers match the Python playwright package
+# -----------------------------------------------------------------------
+# The Docker image pre-installs Chromium for the Node.js playwright-cli,
+# but plugins may use the Python playwright package which tracks a
+# different browser revision. Install any missing browsers now, while
+# network is still unrestricted. If browsers already match, this is a
+# fast no-op.
+
+if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
+    log "Ensuring Python Playwright browsers are installed"
+    uv run --with playwright playwright install chromium 2>&1 | while read -r line; do log "  $line"; done || true
+    chown -R tri_onyx:tri_onyx /opt/playwright-browsers 2>/dev/null || true
+fi
+
+# -----------------------------------------------------------------------
 # 3. Network policy
 # -----------------------------------------------------------------------
 
