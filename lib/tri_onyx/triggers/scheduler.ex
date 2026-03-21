@@ -251,7 +251,7 @@ defmodule TriOnyx.Triggers.Scheduler do
             end
           end)
 
-        CronScheduler.add_job(job_name, job)
+        CronScheduler.add_job(job)
 
         Logger.info(
           "Scheduler: cron job '#{job_name}' registered for '#{agent_name}' (schedule: #{schedule_str})"
