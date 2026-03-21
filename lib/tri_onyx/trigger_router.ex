@@ -257,9 +257,11 @@ defmodule TriOnyx.TriggerRouter do
       agents
       |> Enum.flat_map(fn {_name, definition} ->
         definition.bcp_channels
-        |> Enum.filter(fn ch -> ch.role == :controller end)
+        |> Enum.filter(fn ch ->
+          ch.role == :controller and Map.get(ch, :subscriptions, []) != []
+        end)
         |> Enum.flat_map(fn ch ->
-          Enum.map(ch.subscriptions, fn sub ->
+          Enum.map(Map.get(ch, :subscriptions, []), fn sub ->
             %TriOnyx.BCP.Subscription{
               id: sub.id,
               controller: definition.name,

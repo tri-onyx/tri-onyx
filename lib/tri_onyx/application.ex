@@ -185,6 +185,36 @@ defmodule TriOnyx.Application do
           end
         end)
 
+        # Register BCP subscriptions from controller agent definitions
+        subs =
+          definitions
+          |> Enum.flat_map(fn definition ->
+            definition.bcp_channels
+            |> Enum.filter(fn ch ->
+              ch.role == :controller and Map.get(ch, :subscriptions, []) != []
+            end)
+            |> Enum.flat_map(fn ch ->
+              Enum.map(Map.get(ch, :subscriptions, []), fn sub ->
+                %TriOnyx.BCP.Subscription{
+                  id: sub.id,
+                  controller: definition.name,
+                  reader: ch.peer,
+                  category: sub.category,
+                  fields: sub.fields,
+                  questions: sub.questions,
+                  directive: sub.directive,
+                  max_words: sub.max_words
+                }
+              end)
+            end)
+          end)
+
+        TriOnyx.BCP.Subscription.register_all(subs)
+
+        if subs != [] do
+          Logger.info("Registered #{length(subs)} BCP subscription(s)")
+        end
+
         Logger.info("Loaded #{length(definitions)} agent definition(s)")
 
       {:error, reason} ->
