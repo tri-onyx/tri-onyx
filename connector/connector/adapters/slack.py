@@ -287,13 +287,17 @@ class SlackAdapter(BaseAdapter):
                 return
 
         # --- Build the message content ---
-        content = text
-        if not is_owner:
-            postamble = self._postamble_template.format(
+        if is_owner:
+            user_context = (
+                f"SYSTEM: This message is from the system owner "
+                f"({display_name}, ID: {user_id})."
+            )
+        else:
+            user_context = self._postamble_template.format(
                 display_name=display_name,
                 user_id=user_id,
             )
-            content = f"{text}\n\n---\n{postamble}"
+        content = f"{text}\n\n---\n{user_context}"
 
         trust_level = "verified" if is_owner else "unverified"
 
