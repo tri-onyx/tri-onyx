@@ -182,7 +182,7 @@ defmodule TriOnyx.BCP.Query do
           %{
             name: Map.get(f, :name),
             type: parse_field_type(Map.get(f, :type)),
-            options: Map.get(f, :options),
+            options: Map.get(f, :options) || Map.get(f, :values),
             min: Map.get(f, :min),
             max: Map.get(f, :max)
           }
