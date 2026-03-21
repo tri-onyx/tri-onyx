@@ -344,6 +344,9 @@ defmodule TriOnyx.ConnectorHandler do
             "Reaction: #{emoji} from #{sender} on your message"
           end
 
+        channel_hash = compute_channel_hash(channel)
+        session_key = "#{agent_name}:#{channel_hash}"
+
         event = %{
           type: trigger_type,
           agent_name: agent_name,
@@ -353,6 +356,7 @@ defmodule TriOnyx.ConnectorHandler do
             "connector_id" => state.connector_id,
             "platform" => state.platform,
             "channel" => channel,
+            "session_key" => session_key,
             "trigger_subtype" => "reaction",
             "emoji" => emoji,
             "sender" => sender
