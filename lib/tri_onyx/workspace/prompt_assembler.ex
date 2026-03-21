@@ -3,7 +3,7 @@ defmodule TriOnyx.Workspace.PromptAssembler do
   Builds enhanced system prompts from workspace context and agent definitions.
 
   Assembles a `<persona>` block from the workspace context files (soul,
-  identity, user, memory, daily memory, heartbeat) and appends the agent
+  identity, user, daily memory, heartbeat) and appends the agent
   definition's system prompt body after a separator.
 
   Sections with nil or empty content are skipped. The daily memory section
@@ -24,8 +24,6 @@ defmodule TriOnyx.Workspace.PromptAssembler do
       # Identity
       ...
       # User
-      ...
-      # Memory
       ...
       # Recent Memory — YYYY-MM-DD
       ...
@@ -66,7 +64,6 @@ defmodule TriOnyx.Workspace.PromptAssembler do
         {"# Soul", Map.get(context, :soul)},
         {"# Identity", Map.get(context, :identity)},
         {"# User", Map.get(context, :user)},
-        {"# Memory", Map.get(context, :memory)},
         {"# Recent Memory \u2014 #{today}", Map.get(context, :daily_memory)},
         {"# Heartbeat", Map.get(context, :heartbeat)}
       ]
@@ -84,7 +81,7 @@ defmodule TriOnyx.Workspace.PromptAssembler do
 
     ## Memory system
 
-    You have a persistent memory system. Previous memories appear in the `<persona>` block above under "# Memory", "# Recent Memory", and "# Heartbeat".
+    You have a persistent memory system. Previous memories appear in the `<persona>` block above under "# Recent Memory" and "# Heartbeat".
 
     To save new memories, write to these files using the Write tool:
 

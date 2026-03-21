@@ -323,7 +323,6 @@ def generate_workspace_template(workspace: Path, template_dir: Path) -> dict[str
     files["personality/SOUL.md"] = "# Soul\n\nDefine your agent personality here.\n"
     files["personality/IDENTITY.md"] = "# Identity\n\nDefine your agent identity here.\n"
     files["personality/USER.md"] = "# User\n\nDescribe the user profile and preferences here.\n"
-    files["personality/MEMORY.md"] = "# Memory\n\nAgent personality memory — populated at runtime.\n"
 
     # Skeleton directories via .gitkeep
     skeleton_dirs = [

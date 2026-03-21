@@ -127,8 +127,7 @@ The `workspace/personality/` directory shapes how your agents communicate. Edit 
 
 - **`SOUL.md`** — Core behavioral principles and communication style
 - **`IDENTITY.md`** — Agent name, role description, and how it introduces itself
-- **`USER.md`** — User profile and preferences (your name, working style)
-- **`MEMORY.md`** — Persistent personality memory, populated over time by agents
+- **`USER.md`** — User profile and preferences (auto-generated from session logs)
 
 These files are read by agents that have `personality` in their `fs_read` paths. You can leave them as-is to start with the defaults.
 

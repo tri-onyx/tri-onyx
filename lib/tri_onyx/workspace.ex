@@ -14,7 +14,6 @@ defmodule TriOnyx.Workspace do
           SOUL.md             — personality, values, tone
           IDENTITY.md         — name, role, capabilities
           USER.md             — user profile and preferences
-          MEMORY.md           — long-term memory
         agents/               — per-agent private spaces
           {name}/
             HEARTBEAT.md      — agent-specific state and ongoing work
@@ -30,7 +29,6 @@ defmodule TriOnyx.Workspace do
     "personality/SOUL.md" => "# Soul\n\n<!-- Define personality, values, and tone here -->\n",
     "personality/IDENTITY.md" => "# Identity\n\n<!-- Define name, role, and capabilities here -->\n",
     "personality/USER.md" => "# User\n\n<!-- User profile and preferences -->\n",
-    "personality/MEMORY.md" => "# Memory\n\n<!-- Long-term memory -->\n",
     "AGENTS.md" => "# Agents\n\n<!-- Agent roster and routing metadata -->\n"
   }
 
@@ -88,7 +86,6 @@ defmodule TriOnyx.Workspace do
   - `:soul` — contents of SOUL.md (or nil)
   - `:identity` — contents of IDENTITY.md (or nil)
   - `:user` — contents of USER.md (or nil)
-  - `:memory` — contents of MEMORY.md (or nil)
   - `:daily_memory` — contents of memory/YYYY-MM-DD.md for today (or nil)
   - `:heartbeat` — contents of HEARTBEAT.md (or nil)
   """
@@ -100,8 +97,7 @@ defmodule TriOnyx.Workspace do
     personality_files = %{
       soul: "personality/SOUL.md",
       identity: "personality/IDENTITY.md",
-      user: "personality/USER.md",
-      memory: "personality/MEMORY.md"
+      user: "personality/USER.md"
     }
 
     context =
