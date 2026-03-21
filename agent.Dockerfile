@@ -96,6 +96,14 @@ RUN chmod +x /opt/playwright-cli/playwright-cli.js \
 RUN node /opt/playwright-cli/node_modules/playwright/cli.js install chromium \
     && chown -R tri_onyx:tri_onyx /opt/playwright-browsers
 
+# Also install Chromium for the Python playwright package used by plugins
+# (e.g. newsagg). The Python and Node.js packages track different browser
+# revisions, so both need their browsers pre-installed. Without this, agents
+# must run `playwright install chromium` on every container start.
+RUN uv run --with playwright python -c "pass" \
+    && uv run --with playwright playwright install chromium \
+    && chown -R tri_onyx:tri_onyx /opt/playwright-browsers
+
 # Create the browser sessions directory for pre-authenticated profiles.
 RUN mkdir -p /home/tri_onyx/.browser-sessions \
     && chown tri_onyx:tri_onyx /home/tri_onyx/.browser-sessions
