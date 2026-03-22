@@ -111,39 +111,58 @@ defmodule TriOnyx.AgentSupervisor do
   (e.g. `"concierge:abc123"`) so that multiple concurrent sessions for
   the same agent can be distinguished by external user/channel.
 
+  Sessions with a `nil` stored key (e.g. started by heartbeat or cron)
+  act as wildcards — they match any incoming `session_key`. This ensures
+  that user messages are routed to an existing heartbeat session rather
+  than spawning a duplicate. Exact key matches are preferred over wildcard
+  matches.
+
   Returns `{:ok, pid}` if found, `:error` if no session exists for that agent.
   """
   @spec find_session(GenServer.server(), String.t(), String.t() | nil) :: {:ok, pid()} | :error
   def find_session(supervisor \\ __MODULE__, agent_name, session_key \\ nil)
       when is_binary(agent_name) do
-    supervisor
-    |> DynamicSupervisor.which_children()
-    |> Enum.find_value(:error, fn
-      {:undefined, pid, :worker, _modules} when is_pid(pid) ->
-        try do
-          status = AgentSession.get_status(pid)
+    children = DynamicSupervisor.which_children(supervisor)
 
-          name_match = status.definition.name == agent_name
+    # Collect all sessions for this agent, categorized by key match type
+    {exact_match, wildcard_match} =
+      Enum.reduce(children, {nil, nil}, fn
+        {:undefined, pid, :worker, _modules}, {exact, wild} when is_pid(pid) ->
+          try do
+            status = AgentSession.get_status(pid)
 
-          key_match =
-            if session_key do
-              Map.get(status, :session_key) == session_key
+            if status.definition.name == agent_name do
+              stored_key = Map.get(status, :session_key)
+
+              cond do
+                # Exact key match — highest priority
+                session_key != nil and stored_key == session_key ->
+                  {{:ok, pid}, wild}
+
+                # Session has no key (heartbeat/cron) — wildcard match
+                stored_key == nil ->
+                  {exact, wild || {:ok, pid}}
+
+                # No session_key requested — match any session
+                session_key == nil ->
+                  {exact, wild || {:ok, pid}}
+
+                true ->
+                  {exact, wild}
+              end
             else
-              true
+              {exact, wild}
             end
-
-          if name_match and key_match do
-            {:ok, pid}
-          else
-            nil
+          catch
+            :exit, _ -> {exact, wild}
           end
-        catch
-          :exit, _ -> nil
-        end
 
-      _ ->
-        nil
-    end)
+        _, acc ->
+          acc
+      end)
+
+    # Prefer exact key match, fall back to wildcard (nil-key) session
+    exact_match || wildcard_match || :error
   end
 
   @doc """
