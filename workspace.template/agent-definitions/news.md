@@ -4,7 +4,8 @@ description: Fetches and formats news headlines from configured sources on deman
 model: claude-sonnet-4-6
 tools: Read, Write, Bash, Grep, Glob, SubmitItem
 network: outbound
-heartbeat_every: 60m
+browser: true
+heartbeat_every: 180m
 receive_from:
   - main
 plugins:
