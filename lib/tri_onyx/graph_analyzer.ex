@@ -54,6 +54,10 @@ defmodule TriOnyx.GraphAnalyzer do
     bcp_edges = build_bcp_edges(definitions)
     edges = merge_edges(fs_edges, msg_edges) |> merge_edges(bcp_edges)
 
+    # Pre-compute stripped manifest dirs once (avoids repeated regex in lookups)
+    stripped_manifest =
+      Enum.map(risk_manifest, fn {path, entry} -> {strip_glob(path), entry} end)
+
     # Compute transitive propagation if base levels provided
     propagated =
       if base_levels != %{} do
@@ -70,8 +74,8 @@ defmodule TriOnyx.GraphAnalyzer do
       {max_taint, max_sensitivity} =
         incoming
         |> Enum.reduce({:low, :low}, fn edge, {t_acc, s_acc} ->
-          edge_taint = lookup_edge_taint(edge, risk_manifest)
-          edge_sensitivity = lookup_edge_sensitivity(edge, risk_manifest)
+          edge_taint = lookup_edge_taint(edge, stripped_manifest)
+          edge_sensitivity = lookup_edge_sensitivity(edge, stripped_manifest)
           {InformationClassifier.higher_level(t_acc, edge_taint),
            InformationClassifier.higher_level(s_acc, edge_sensitivity)}
         end)
@@ -390,18 +394,18 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
-  # Look up taint level from an edge's paths in the manifest
-  @spec lookup_edge_taint(map(), map()) :: InformationClassifier.information_level()
-  defp lookup_edge_taint(%{paths: paths}, risk_manifest) do
+  # Look up taint level from an edge's paths in the pre-stripped manifest
+  @spec lookup_edge_taint(map(), [{String.t(), map()}]) :: InformationClassifier.information_level()
+  defp lookup_edge_taint(%{paths: paths}, stripped_manifest) do
     paths
-    |> Enum.map(fn path -> lookup_manifest_taint(path, risk_manifest) end)
+    |> Enum.map(fn path -> lookup_manifest_taint(path, stripped_manifest) end)
     |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
   end
 
-  @spec lookup_edge_sensitivity(map(), map()) :: InformationClassifier.sensitivity_level()
-  defp lookup_edge_sensitivity(%{paths: paths}, risk_manifest) do
+  @spec lookup_edge_sensitivity(map(), [{String.t(), map()}]) :: InformationClassifier.sensitivity_level()
+  defp lookup_edge_sensitivity(%{paths: paths}, stripped_manifest) do
     paths
-    |> Enum.map(fn path -> lookup_manifest_sensitivity(path, risk_manifest) end)
+    |> Enum.map(fn path -> lookup_manifest_sensitivity(path, stripped_manifest) end)
     |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
   end
 
@@ -410,11 +414,12 @@ defmodule TriOnyx.GraphAnalyzer do
     for writer <- definitions,
         reader <- definitions,
         writer.name != reader.name,
-        writer.fs_write != [],
+        effective_writes = effective_write_paths(writer),
+        effective_writes != [],
         reader.fs_read != [],
         reduce: %{} do
       acc ->
-        overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read)
+        overlapping = find_overlapping_paths(effective_writes, reader.fs_read)
 
         if overlapping != [] do
           edge = %{
@@ -710,6 +715,14 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
+  # Returns the effective write paths for an agent, including the implicit
+  # /agents/{name}/** path injected by the sandbox (see Sandbox.build_fuse_policy/1).
+  @spec effective_write_paths(map()) :: [String.t()]
+  defp effective_write_paths(definition) do
+    implicit = "/agents/#{definition.name}/**"
+    Enum.uniq([implicit | definition.fs_write])
+  end
+
   @spec merge_edges(map(), map()) :: map()
   defp merge_edges(edges_a, edges_b) do
     Map.merge(edges_a, edges_b, fn _key, list_a, list_b -> list_a ++ list_b end)
@@ -826,29 +839,41 @@ defmodule TriOnyx.GraphAnalyzer do
     if String.length(a) <= String.length(b), do: a, else: b
   end
 
-  @spec lookup_manifest_taint(String.t(), map()) :: InformationClassifier.information_level()
-  defp lookup_manifest_taint(path, risk_manifest) do
-    case Map.get(risk_manifest, path) do
-      %{"taint_level" => level} -> safe_to_level(level)
-      %{"risk_level" => level} -> safe_to_level(level)
-      nil -> lookup_prefix_level(path, risk_manifest, "taint_level")
-    end
+  # Accepts a pre-stripped manifest: list of {stripped_dir, entry} tuples.
+  @spec lookup_manifest_taint(String.t(), [{String.t(), map()}]) :: InformationClassifier.information_level()
+  defp lookup_manifest_taint(path, stripped_manifest) do
+    lookup_prefix_level(path, stripped_manifest, "taint_level", "risk_level")
   end
 
-  @spec lookup_manifest_sensitivity(String.t(), map()) :: InformationClassifier.sensitivity_level()
-  defp lookup_manifest_sensitivity(path, risk_manifest) do
-    case Map.get(risk_manifest, path) do
-      %{"sensitivity_level" => level} -> safe_to_level(level)
-      _ -> lookup_prefix_level(path, risk_manifest, "sensitivity_level")
-    end
+  @spec lookup_manifest_sensitivity(String.t(), [{String.t(), map()}]) :: InformationClassifier.sensitivity_level()
+  defp lookup_manifest_sensitivity(path, stripped_manifest) do
+    lookup_prefix_level(path, stripped_manifest, "sensitivity_level", nil)
   end
 
-  @spec lookup_prefix_level(String.t(), map(), String.t()) :: InformationClassifier.information_level()
-  defp lookup_prefix_level(path, risk_manifest, field) do
-    risk_manifest
-    |> Enum.filter(fn {manifest_path, _} -> paths_overlap?(path, manifest_path) end)
-    |> Enum.map(fn {_, entry} -> safe_to_level(Map.get(entry, field, "low")) end)
-    |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
+  # Scans the pre-stripped manifest for prefix-overlapping entries.
+  # The manifest is a list of {stripped_dir, entry} tuples where strip_glob
+  # has already been applied to each path (done once in analyze/3).
+  @spec lookup_prefix_level(String.t(), [{String.t(), map()}], String.t(), String.t() | nil) ::
+          InformationClassifier.information_level()
+  defp lookup_prefix_level(path, stripped_manifest, field, fallback_field) do
+    query_dir = strip_glob(path)
+
+    stripped_manifest
+    |> Enum.reduce(:low, fn {manifest_dir, entry}, acc ->
+      if String.starts_with?(query_dir, manifest_dir) or
+           String.starts_with?(manifest_dir, query_dir) do
+        level =
+          case Map.get(entry, field) do
+            nil when fallback_field != nil -> safe_to_level(Map.get(entry, fallback_field, "low"))
+            nil -> :low
+            v -> safe_to_level(v)
+          end
+
+        InformationClassifier.higher_level(acc, level)
+      else
+        acc
+      end
+    end)
   end
 
   @spec safe_to_level(String.t() | atom()) :: InformationClassifier.information_level()
