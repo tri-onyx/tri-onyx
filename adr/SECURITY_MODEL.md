@@ -2,6 +2,8 @@
 
 TriOnyx uses a graduated risk model to track and contain the spread of risk across autonomous AI agents. The model rests on three dimensions: **how trustworthy the data is** (taint), **how sensitive the data is** (sensitivity), and **what the agent can do** (capability). This is the "lethal trifecta" — critical risk arises only when all three converge at elevated levels ([ADR-010](010-lethal-trifecta.md)).
 
+The concept originates from Simon Willison's ["The Lethal Trifecta"](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), which identifies the combination of private data access, untrusted content exposure, and external communication as the critical threat model for AI agents. TriOnyx operationalizes this insight into a formal, enforceable security model.
+
 ## Design Principles
 
 1. **Agents never hold credentials.** The gateway is the sole secret holder. Agents request tool calls; the gateway attaches credentials before dispatching and strips them from responses. An agent cannot leak a token it never had.

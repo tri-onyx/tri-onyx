@@ -28,6 +28,8 @@ built on Elixir/OTP for a single operator running their own agents.
 
 ## The lethal trifecta
 
+The term comes from [Simon Willison's "The Lethal Trifecta"](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) &mdash; the observation that AI agents become critically dangerous when they combine access to private data, exposure to untrusted content, and the ability to communicate externally. TriOnyx was built to address this directly.
+
 Other agent runtimes sandbox **capability** &mdash; restrict filesystem, disable shell, limit network.
 This misses the point. The real danger isn't any single property of an agent. It's the combination of three.
 

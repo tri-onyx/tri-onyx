@@ -7,6 +7,8 @@
 
 ## Context
 
+This ADR is inspired by Simon Willison's ["The Lethal Trifecta"](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), which identifies the convergence of private data access, untrusted content exposure, and external communication ability as the critical threat model for AI agents. TriOnyx generalizes this into three trackable axes — taint, sensitivity, and capability — and enforces containment at the architectural level.
+
 [ADR-001](001-information-is-the-threat.md) established that information is the threat and defined effective risk as `taint × sensitivity`, explicitly excluding capability from the runtime risk formula. This was a deliberate overcorrection against the industry's capability-only security models, and it served its purpose: it shifted design attention from sandboxing to information flow.
 
 However, experience with real agent topologies reveals that the two-axis model is incomplete. A high-taint, high-sensitivity agent with only low capability — writes limited to its own directory, no network access, no external tool calls — cannot cause a critical security failure. It has been poisoned and it knows secrets, but its blast radius is confined to internal effects. The session is compromised in principle but contained in practice.

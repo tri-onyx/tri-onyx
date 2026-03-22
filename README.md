@@ -18,6 +18,8 @@ A security-first agent runtime that tracks **information flow** between isolated
 
 ## The lethal trifecta
 
+The term comes from [Simon Willison's "The Lethal Trifecta"](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/) — the observation that AI agents become critically dangerous when they combine access to private data, exposure to untrusted content, and the ability to communicate externally. TriOnyx was built to address this directly.
+
 Other agent runtimes sandbox **capability** — restrict filesystem, disable shell, limit network. This misses the point. The real danger isn't any single property. It's the combination of three:
 
 > **Untrusted content** — Web pages, emails, API responses — any of which can carry prompt injections.
