@@ -37,6 +37,7 @@ import signal
 import sys
 import time
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -493,10 +494,15 @@ class SubmitItemHandler:
       1. Emits a ``submit_item_request`` to stdout (picked up by the gateway)
       2. Awaits a ``submit_item_response`` on the dispatcher's response queue
       3. Returns an acknowledgment string to the SDK so the LLM sees the result
+      4. Persists the submission to ``submissions.json`` for feedback enrichment
     """
 
-    def __init__(self, dispatcher: InboundDispatcher) -> None:
+    _MAX_SUBMISSIONS = 200
+
+    def __init__(self, dispatcher: InboundDispatcher, agent_name: str) -> None:
         self._dispatcher = dispatcher
+        self._agent_name = agent_name
+        self._submissions_path = Path(f"/workspace/agents/{agent_name}/submissions.json")
 
     async def handle(self, item_type: str, title: str, url: str, metadata: dict[str, str]) -> str:
         """Submit an item and wait for the gateway acknowledgment."""
@@ -521,8 +527,32 @@ class SubmitItemHandler:
             return f"Error: SubmitItem timed out after {_SUBMIT_ITEM_TIMEOUT_S}s"
 
         if response.success:
+            self._persist_submission(item_type, title, url, metadata)
             return f"Item submitted: {title}"
         return f"Error: {response.detail}"
+
+    def _persist_submission(
+        self, item_type: str, title: str, url: str, metadata: dict[str, str]
+    ) -> None:
+        """Append submission to the JSON log so feedback can be enriched later."""
+        entry = {
+            "url": url,
+            "type": item_type,
+            "title": title,
+            "metadata": metadata,
+            "submitted_at": datetime.now(timezone.utc).isoformat(),
+        }
+        try:
+            submissions: list[dict[str, Any]] = []
+            if self._submissions_path.exists():
+                submissions = json.loads(self._submissions_path.read_text())
+            submissions.append(entry)
+            if len(submissions) > self._MAX_SUBMISSIONS:
+                submissions = submissions[-self._MAX_SUBMISSIONS :]
+            self._submissions_path.parent.mkdir(parents=True, exist_ok=True)
+            self._submissions_path.write_text(json.dumps(submissions, indent=2))
+        except Exception:
+            log.warning("Failed to persist submission to %s", self._submissions_path, exc_info=True)
 
     async def _wait_for_response(self, request_id: str) -> SubmitItemResponse:
         """Poll the response queue until we get our matching response."""
@@ -532,6 +562,67 @@ class SubmitItemHandler:
                 return response
             await self._dispatcher.submit_item_responses.put(response)
             await asyncio.sleep(0.01)
+
+
+# ---------------------------------------------------------------------------
+# Feedback enrichment
+# ---------------------------------------------------------------------------
+
+
+_VOTE_EMOJI = {"up": "\U0001f44d", "down": "\U0001f44e"}
+
+
+def _enrich_item_feedback(content: str, agent_name: str) -> str:
+    """If *content* is an ``item_feedback`` JSON payload, enrich it with the
+    original submission context from ``submissions.json``.  Returns the
+    original *content* unchanged on any error or miss."""
+    try:
+        data = json.loads(content)
+    except (json.JSONDecodeError, TypeError):
+        return content
+
+    if not isinstance(data, dict) or data.get("type") != "item_feedback":
+        return content
+
+    url = data.get("url", "")
+    if not url:
+        return content
+
+    vote = data.get("vote", "unknown")
+    emoji = _VOTE_EMOJI.get(vote, vote)
+
+    # Look up original submission
+    submissions_path = Path(f"/workspace/agents/{agent_name}/submissions.json")
+    entry: dict[str, Any] | None = None
+    try:
+        if submissions_path.exists():
+            submissions = json.loads(submissions_path.read_text())
+            for item in reversed(submissions):
+                if item.get("url") == url:
+                    entry = item
+                    break
+    except Exception:
+        log.warning("Failed to read submissions for feedback enrichment", exc_info=True)
+
+    if entry is None:
+        return content
+
+    # Build enriched prompt
+    lines = [
+        f"**Item Feedback**: A user voted {emoji} on an item you submitted.",
+        "",
+        f"- **Title**: {entry.get('title', 'unknown')}",
+        f"- **URL**: {url}",
+        f"- **Type**: {entry.get('type', 'unknown')}",
+    ]
+    for key, value in entry.get("metadata", {}).items():
+        lines.append(f"- **{key.title()}**: {value}")
+    if entry.get("submitted_at"):
+        lines.append(f"- **Submitted**: {entry['submitted_at']}")
+    lines.append("")
+    lines.append("Use this feedback to improve future recommendations.")
+
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
@@ -2115,7 +2206,7 @@ async def main() -> None:
                 restart_handler = RestartAgentHandler(dispatcher)
                 bcp_handler = BCPHandler(dispatcher)
                 email_handler = EmailHandler(dispatcher)
-                item_handler = SubmitItemHandler(dispatcher)
+                item_handler = SubmitItemHandler(dispatcher, config.name)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
                     config.name,
@@ -2281,12 +2372,13 @@ async def main() -> None:
                 if not msg.content and not msg.images:
                     emit_error("Empty prompt content")
                     continue
+                prompt_content = _enrich_item_feedback(msg.content, config.name)
                 log.info(
                     "Received prompt (%d chars, %d images), dispatching to SDK",
-                    len(msg.content), len(msg.images),
+                    len(prompt_content), len(msg.images),
                 )
                 await run_prompt_interruptible(
-                    client, msg.content, dispatcher,
+                    client, prompt_content, dispatcher,
                     images=msg.images if msg.images else None,
                 )
 
