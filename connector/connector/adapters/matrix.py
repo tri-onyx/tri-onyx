@@ -854,7 +854,6 @@ class MatrixAdapter(BaseAdapter):
         channel = {
             "platform": "matrix",
             "room_id": room_id,
-            "thread_id": thread_id,
         }
 
         msg = InboundMessage(
