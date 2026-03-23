@@ -32,6 +32,7 @@ from nio import (
     RoomMessageText,
     RoomSendResponse,
     ReactionEvent,
+    RoomGetEventResponse,
     SyncResponse,
     UnknownEvent,
     UnknownToDeviceEvent,
@@ -93,12 +94,6 @@ class MatrixAdapter(BaseAdapter):
 
         # Approval tracking: matrix_event_id -> approval_id
         self._approval_events: dict[str, str] = {}
-
-        # Agent message tracking: matrix_event_id -> (agent_name, channel)
-        self._sent_event_agents: dict[str, tuple[str, dict[str, Any]]] = {}
-
-        # Item tracking: matrix_event_id -> item URL (for reaction feedback)
-        self._item_event_urls: dict[str, str] = {}
 
         # Reaction callback
         self._on_reaction: OnReactionCallback | None = None
@@ -923,11 +918,7 @@ class MatrixAdapter(BaseAdapter):
                     "event_id": thread_id,
                 }
 
-            resp = await self._room_send(room_id, "m.room.message", msg_content)
-
-            # Track sent event for general reaction forwarding
-            if resp and agent_name:
-                self._sent_event_agents[resp.event_id] = (agent_name, channel)
+            await self._room_send(room_id, "m.room.message", msg_content)
 
     async def send_article(
         self,
@@ -955,10 +946,7 @@ class MatrixAdapter(BaseAdapter):
             "formatted_body": html,
         }
 
-        resp = await self._room_send(room_id, "m.room.message", msg_content)
-        if resp and agent_name:
-            self._sent_event_agents[resp.event_id] = (agent_name, channel)
-            self._item_event_urls[resp.event_id] = url
+        await self._room_send(room_id, "m.room.message", msg_content)
 
     async def send_listing(
         self,
@@ -992,10 +980,7 @@ class MatrixAdapter(BaseAdapter):
             "formatted_body": html,
         }
 
-        resp = await self._room_send(room_id, "m.room.message", msg_content)
-        if resp and agent_name:
-            self._sent_event_agents[resp.event_id] = (agent_name, channel)
-            self._item_event_urls[resp.event_id] = url
+        await self._room_send(room_id, "m.room.message", msg_content)
 
     async def send_typing(self, channel: dict[str, Any], is_typing: bool) -> None:
         """Set the typing indicator."""
@@ -1337,29 +1322,49 @@ class MatrixAdapter(BaseAdapter):
                 await self._on_reaction(msg)
             return
 
-        # Check if this is a reaction on an agent's message
-        agent_info = self._sent_event_agents.get(target_event_id)
-        if agent_info:
-            agent_name, channel = agent_info
-            item_url = self._item_event_urls.get(target_event_id)
-            msg = ReactionMessage(
-                emoji=emoji,
-                sender=sender,
-                channel=channel,
-                agent_name=agent_name,
-                event_id=target_event_id,
-                item_url=item_url,
-                trust=trust,
-            )
-            if self._on_reaction:
-                await self._on_reaction(msg)
+        # Determine agent from room config
+        room_cfg = self._rooms.get(room_id)
+        if not room_cfg:
+            logger.debug("Reaction in unconfigured room %s — ignoring", room_id)
             return
 
-        # Unknown target — log and ignore
-        logger.debug(
-            "Reaction on untracked event %s — ignoring",
-            target_event_id,
+        agent_name = room_cfg.agent
+
+        # Fetch the original event to verify sender and extract URL
+        assert self._client is not None
+        resp = await self._client.room_get_event(room_id, target_event_id)
+        if not isinstance(resp, RoomGetEventResponse):
+            logger.warning(
+                "Failed to fetch event %s for reaction: %s", target_event_id, resp
+            )
+            return
+
+        event = resp.event
+        if getattr(event, "sender", None) != self._config.user_id:
+            logger.debug("Reaction on non-bot event %s — ignoring", target_event_id)
+            return
+
+        # Extract item URL: last line of the message body (convention for
+        # submitted items — send_article and send_listing always end with URL)
+        item_url: str | None = None
+        body = getattr(event, "body", "") or ""
+        if body:
+            last_line = body.strip().rsplit("\n", 1)[-1].strip()
+            if last_line.startswith("http"):
+                item_url = last_line
+
+        channel = {"platform": "matrix", "room_id": room_id}
+        msg = ReactionMessage(
+            emoji=emoji,
+            sender=sender,
+            channel=channel,
+            agent_name=agent_name,
+            event_id=target_event_id,
+            item_url=item_url,
+            trust=trust,
         )
+        if self._on_reaction:
+            await self._on_reaction(msg)
 
     async def send_approval_request(
         self,
