@@ -181,6 +181,9 @@
   .matrix-panel td.violation { background: rgba(248,81,73,0.15); }
   .matrix-panel td.self { background: var(--bg); color: var(--border); }
 
+  /* Faded (dimmed) nodes */
+  .node.faded { opacity: 0.45; pointer-events: all; }
+
   /* Edge label */
   .edge-label {
     font-size: 9px; fill: var(--muted); pointer-events: none;
@@ -319,6 +322,7 @@ let agents = [];
 let analysisData = null;
 let graphData = { nodes: [], links: [] };
 let simulation = null;
+const fadedNodes = new Set();
 
 const POSITIONS_KEY = 'trionyx-graph-positions';
 
@@ -723,6 +727,38 @@ function linkMidpoint(d) {
   };
 }
 
+function toggleFadeNode(id) {
+  if (fadedNodes.has(id)) fadedNodes.delete(id);
+  else fadedNodes.add(id);
+  applyFade();
+}
+
+function applyFade() {
+  if (!window._graphRefs) return;
+  const { node, link, linkHitArea, edgeLabels } = window._graphRefs;
+
+  node.classed('faded', d => fadedNodes.has(d.id));
+
+  // Hide edges where either endpoint is faded
+  const isEdgeFaded = d => {
+    const src = typeof d.source === 'object' ? d.source.id : d.source;
+    const tgt = typeof d.target === 'object' ? d.target.id : d.target;
+    return fadedNodes.has(src) || fadedNodes.has(tgt);
+  };
+  // Apply base toggles first, then overlay fade on top
+  applyToggles();
+
+  link.each(function(d) {
+    if (isEdgeFaded(d)) d3.select(this).attr('visibility', 'hidden');
+  });
+  linkHitArea.each(function(d) {
+    if (isEdgeFaded(d)) d3.select(this).attr('visibility', 'hidden');
+  });
+  edgeLabels.each(function(d) {
+    if (isEdgeFaded(d)) d3.select(this).attr('visibility', 'hidden');
+  });
+}
+
 function renderGraph() {
   const container = document.getElementById('graph-container');
   const width = container.clientWidth;
@@ -999,6 +1035,11 @@ function renderGraph() {
   })
   .on('mouseleave', () => {
     tooltip.classList.remove('visible');
+  })
+  .on('contextmenu', (event, d) => {
+    event.preventDefault();
+    tooltip.classList.remove('visible');
+    toggleFadeNode(d.id);
   });
 
   // Simulation
@@ -1048,11 +1089,11 @@ function renderGraph() {
   // Save positions periodically as simulation settles
   simulation.on('end', savePositions);
 
-  // Apply toggles
-  applyToggles();
-
-  // Store refs
+  // Store refs (before applyToggles/applyFade which need them)
   window._graphRefs = { link, linkHitArea, edgeLabels, node, labels, svg, g, zoom };
+
+  // Apply toggles and fade state
+  applyFade();
 }
 
 function applyToggles() {
@@ -1210,13 +1251,13 @@ function escapeHtml(s) {
 }
 
 // Toggle listeners
-document.getElementById('toggle-fs').addEventListener('change', applyToggles);
-document.getElementById('toggle-msg').addEventListener('change', applyToggles);
-document.getElementById('toggle-bcp').addEventListener('change', applyToggles);
-document.getElementById('toggle-labels').addEventListener('change', applyToggles);
-document.getElementById('toggle-matrix').addEventListener('change', () => { applyToggles(); updateMatrix(); });
+document.getElementById('toggle-fs').addEventListener('change', applyFade);
+document.getElementById('toggle-msg').addEventListener('change', applyFade);
+document.getElementById('toggle-bcp').addEventListener('change', applyFade);
+document.getElementById('toggle-labels').addEventListener('change', applyFade);
+document.getElementById('toggle-matrix').addEventListener('change', () => { applyFade(); updateMatrix(); });
 document.querySelectorAll('input[name="analysis-mode"]').forEach(el => {
-  el.addEventListener('change', () => { applyToggles(); updateMatrix(); updateExplainer(); updateViolationCount(); });
+  el.addEventListener('change', () => { applyFade(); updateMatrix(); updateExplainer(); updateViolationCount(); });
 });
 
 function updateExplainer() {
