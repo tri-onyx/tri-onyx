@@ -1178,7 +1178,8 @@ defmodule TriOnyx.AgentSession do
       })
 
       # Push heartbeat text to connected connectors (Matrix, Slack, etc.)
-      if state.last_text && classification != "ok" do
+      # Skip when saving_memory to avoid sending internal memory-save text.
+      if state.last_text && classification != "ok" && state.status != :saving_memory do
         frame =
           Jason.encode!(%{
             "type" => "heartbeat_notification",
@@ -1194,7 +1195,10 @@ defmodule TriOnyx.AgentSession do
     # (cron, inter-agent, webhook). Interactive sessions (verified/unverified
     # input from connectors) already deliver text via EventBus subscriptions,
     # so broadcasting here would duplicate the message.
+    # Skip when saving_memory — the memory-save result is internal and should
+    # not be pushed to chat (otherwise users see a duplicate/garbled message).
     if state.trigger_type not in [:heartbeat, :verified_input, :unverified_input] &&
+         state.status != :saving_memory &&
          state.last_text do
       frame =
         Jason.encode!(%{
