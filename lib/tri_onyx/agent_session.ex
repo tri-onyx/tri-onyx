@@ -1184,6 +1184,7 @@ defmodule TriOnyx.AgentSession do
           Jason.encode!(%{
             "type" => "heartbeat_notification",
             "agent_name" => state.definition.name,
+            "session_id" => state.id,
             "content" => state.last_text
           })
 
@@ -1204,6 +1205,7 @@ defmodule TriOnyx.AgentSession do
         Jason.encode!(%{
           "type" => "heartbeat_notification",
           "agent_name" => state.definition.name,
+          "session_id" => state.id,
           "content" => state.last_text
         })
 

@@ -110,7 +110,26 @@ defmodule TriOnyx.ConnectorHandler do
 
   def handle_info({:push_frame, frame}, state) do
     if state.authenticated do
-      {:push, [{:text, frame}], state}
+      # Deduplicate heartbeat_notification for sessions we already track via
+      # EventBus. When a user message gets routed to an existing non-interactive
+      # session (cron/webhook wildcard match), the connector subscribes to
+      # EventBus — so text is already delivered as agent_text. The completion
+      # broadcast would send the same content again as heartbeat_notification.
+      case Jason.decode(frame) do
+        {:ok, %{"type" => "heartbeat_notification", "session_id" => sid}} when is_binary(sid) ->
+          if Map.has_key?(state.session_channels, sid) do
+            Logger.debug(
+              "ConnectorHandler: skipping heartbeat_notification for tracked session #{sid}"
+            )
+
+            {:ok, state}
+          else
+            {:push, [{:text, frame}], state}
+          end
+
+        _ ->
+          {:push, [{:text, frame}], state}
+      end
     else
       {:ok, state}
     end
