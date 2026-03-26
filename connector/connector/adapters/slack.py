@@ -159,6 +159,9 @@ class SlackAdapter(BaseAdapter):
         # Display name cache: user_id -> display_name
         self._display_names: dict[str, str] = {}
 
+        # Track typing indicator messages per channel so we can delete them
+        self._typing_messages: dict[str, str] = {}  # channel_id -> message ts
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -335,9 +338,26 @@ class SlackAdapter(BaseAdapter):
             await self._post_dm(channel_id, chunk)
 
     async def send_typing(self, channel: dict[str, Any], is_typing: bool) -> None:
-        # Slack doesn't have a persistent typing indicator API for bots,
-        # but we can approximate by doing nothing (messages appear quickly)
-        pass
+        channel_id = channel.get("channel_id", "")
+        if not channel_id or not self._web_client:
+            return
+
+        if is_typing:
+            try:
+                resp = await self._web_client.chat_postMessage(
+                    channel=channel_id,
+                    text=":speech_balloon: _Thinking…_",
+                )
+                self._typing_messages[channel_id] = resp["ts"]
+            except Exception:
+                logger.debug("Slack typing indicator post failed for %s", channel_id)
+        else:
+            ts = self._typing_messages.pop(channel_id, None)
+            if ts:
+                try:
+                    await self._web_client.chat_delete(channel=channel_id, ts=ts)
+                except Exception:
+                    logger.debug("Slack typing indicator delete failed for %s", channel_id)
 
     async def send_reaction(self, channel: dict[str, Any], emoji: str) -> None:
         # Not implemented for DM-only mode
