@@ -110,6 +110,7 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
     log "Ensuring Python Playwright browsers are installed"
     uv run --with playwright playwright install chromium 2>&1 | while read -r line; do log "  $line"; done || true
     chown -R tri_onyx:tri_onyx /opt/playwright-browsers 2>/dev/null || true
+    chown -R tri_onyx:tri_onyx /opt/uv-cache 2>/dev/null || true
 fi
 
 # -----------------------------------------------------------------------
