@@ -27,6 +27,8 @@ defmodule TriOnyx.Workspace.PromptAssembler do
       ...
       # Recent Memory — YYYY-MM-DD
       ...
+      # Notes
+      ...
       # Heartbeat
       ...
       </persona>
@@ -65,6 +67,7 @@ defmodule TriOnyx.Workspace.PromptAssembler do
         {"# Identity", Map.get(context, :identity)},
         {"# User", Map.get(context, :user)},
         {"# Recent Memory \u2014 #{today}", Map.get(context, :daily_memory)},
+        {"# Notes", Map.get(context, :notes)},
         {"# Heartbeat", Map.get(context, :heartbeat)}
       ]
       |> Enum.filter(fn {_heading, content} -> present?(content) end)
@@ -81,11 +84,12 @@ defmodule TriOnyx.Workspace.PromptAssembler do
 
     ## Memory system
 
-    You have a persistent memory system. Previous memories appear in the `<persona>` block above under "# Recent Memory" and "# Heartbeat".
+    You have a persistent memory system. Previous memories appear in the `<persona>` block above under "# Recent Memory", "# Notes", and "# Heartbeat".
 
     To save new memories, write to these files using the Write tool:
 
     - **Daily memory**: `/workspace/agents/#{agent_name}/memory/#{today}.md` — append notes about what you worked on, key findings, and unfinished tasks. If the file already has content, read it first and append rather than overwrite.
+    - **Notes**: `/workspace/agents/#{agent_name}/NOTES.md` — corrections, preferences, and lessons learned. When corrected, append the lesson under a descriptive heading.
     - **Heartbeat**: `/workspace/agents/#{agent_name}/HEARTBEAT.md` — update with your current state, ongoing work, and anything the next session should know immediately.
 
     **Important:** Before writing to a file, you must Read it first. Always read each file in its own separate tool call — never read memory files in parallel with other reads. If a parallel read fails, the sibling reads are also marked as failed and subsequent writes will be blocked.

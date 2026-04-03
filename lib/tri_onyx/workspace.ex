@@ -87,6 +87,7 @@ defmodule TriOnyx.Workspace do
   - `:identity` — contents of IDENTITY.md (or nil)
   - `:user` — contents of USER.md (or nil)
   - `:daily_memory` — contents of memory/YYYY-MM-DD.md for today (or nil)
+  - `:notes` — contents of NOTES.md (or nil)
   - `:heartbeat` — contents of HEARTBEAT.md (or nil)
   """
   @spec read_context(String.t()) :: map()
@@ -110,6 +111,10 @@ defmodule TriOnyx.Workspace do
     # Read per-agent heartbeat
     heartbeat_path = Path.join(dir, "agents/#{agent_name}/HEARTBEAT.md")
     context = Map.put(context, :heartbeat, read_file_or_nil(heartbeat_path))
+
+    # Read per-agent notes
+    notes_path = Path.join(dir, "agents/#{agent_name}/NOTES.md")
+    context = Map.put(context, :notes, read_file_or_nil(notes_path))
 
     # Add daily memory for today's date (per-agent)
     today = Date.utc_today() |> Date.to_iso8601()
