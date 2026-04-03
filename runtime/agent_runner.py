@@ -632,7 +632,7 @@ def _enrich_item_feedback(content: str, agent_name: str) -> str:
 # Timeout for the gateway to deliver a BCP response.
 # Cat-3 responses require human approval which can take minutes,
 # so this must be at least as long as the gateway's approval timeout (5m).
-_BCP_RESPONSE_TIMEOUT_S = 330
+_BCP_RESPONSE_TIMEOUT_S = 600
 
 
 class BCPHandler:
