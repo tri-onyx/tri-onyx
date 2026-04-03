@@ -283,6 +283,7 @@ async def run(config: ConnectorConfig) -> None:
     # Create gateway client with routing callbacks
     gateway = GatewayClient(
         config,
+        adapters=adapters,
         on_outbound=lambda msg: _route_outbound(adapters, msg),
         on_action=lambda req: _route_action(adapters, req),
         on_heartbeat=lambda msg: _route_heartbeat(adapters, msg),

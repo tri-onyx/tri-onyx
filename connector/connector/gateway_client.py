@@ -60,12 +60,14 @@ class GatewayClient:
         self,
         config: ConnectorConfig,
         *,
+        adapters: dict[str, Any] | None = None,
         on_outbound: OutboundHandler | None = None,
         on_action: ActionHandler | None = None,
         on_heartbeat: HeartbeatHandler | None = None,
         on_approval_request: ApprovalRequestHandler | None = None,
     ) -> None:
         self._config = config
+        self._adapters = adapters or {}
         self._on_outbound = on_outbound
         self._on_action = on_action
         self._on_heartbeat = on_heartbeat
@@ -228,7 +230,17 @@ class GatewayClient:
             while True:
                 await asyncio.sleep(_HEALTH_INTERVAL_S)
                 if self._registered.is_set():
-                    msg = HealthMessage(connector_id=self._config.connector_id)
+                    adapter_health: dict[str, Any] = {}
+                    for name, adapter in self._adapters.items():
+                        try:
+                            adapter_health[name] = await adapter.health()
+                        except Exception:
+                            logger.warning("Failed to get health from adapter %s", name)
+                            adapter_health[name] = {"connected": False}
+                    msg = HealthMessage(
+                        connector_id=self._config.connector_id,
+                        adapters=adapter_health,
+                    )
                     await self._send(encode(msg))
         except asyncio.CancelledError:
             pass
