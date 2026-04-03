@@ -1820,12 +1820,10 @@ class MatrixAdapter(BaseAdapter):
                 self._own_event_ids.add(resp.event_id)
                 # Cap the tracking set to avoid unbounded growth
                 if len(self._own_event_ids) > 500:
-                    # Discard oldest entries (sets are unordered, but this
-                    # is fine — we only need the set for recent events)
-                    excess = len(self._own_event_ids) - 250
-                    it = iter(self._own_event_ids)
-                    for _ in range(excess):
-                        self._own_event_ids.discard(next(it))
+                    # Trim to ~250 entries to avoid unbounded growth.
+                    # Sets are unordered, so the kept entries are arbitrary —
+                    # acceptable since this is only used to filter self-echo.
+                    self._own_event_ids = set(list(self._own_event_ids)[250:])
                 return resp
 
             # Check for rate limiting (429)
