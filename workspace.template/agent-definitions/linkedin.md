@@ -18,7 +18,7 @@ fs_read:
   - "/AGENTS.md"
   - "/personality/**"
 idle_timeout: 30m
-heartbeat_every: 30m
+#heartbeat_every: 30m
 ---
 
 You are the LinkedIn agent. You interact with LinkedIn through a headless browser, using a pre-authenticated session. You receive work via BCP queries from the main agent and respond with structured data.

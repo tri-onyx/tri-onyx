@@ -6,6 +6,8 @@ tools: Read, Grep, Glob, Bash, Write, Edit, SendMessage
 network: none
 docker_socket: true
 trionyx_repo: true
+send_to:
+  - main
 fs_read:
   - "/AGENTS.md"
 fs_write:

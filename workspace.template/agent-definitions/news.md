@@ -2,7 +2,7 @@
 name: news
 description: Fetches and formats news headlines from configured sources on demand
 model: claude-sonnet-4-6
-tools: Read, Write, Bash, Grep, Glob, SubmitItem
+tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch
 network: outbound
 browser: true
 heartbeat_every: 180m

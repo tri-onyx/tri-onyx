@@ -5,7 +5,6 @@ model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Grep, Glob, BCPQuery, SendMessage, RestartAgent
 network: none
 send_to:
-  - persona
   - email
   - news
   - calendar
@@ -17,6 +16,7 @@ send_to:
   - introspector
 receive_from:
   - introspector
+  - email
 restart_targets:
   - researcher
 bcp_channels:

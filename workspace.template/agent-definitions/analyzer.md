@@ -13,7 +13,7 @@ fs_write:
 idle_timeout: 30m
 base_taint: low
 cron_schedules:
-  - schedule: "0 6 * * 1"
+  - schedule: "0 6 * * *"
     message: >
       Run a full agent analysis. Review every agent's definition, heartbeat,
       notes, and recent memory files. Generate a per-agent report and an
