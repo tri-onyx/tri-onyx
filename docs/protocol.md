@@ -178,7 +178,6 @@ Validated BCP response delivered to a Controller agent. In addition to query-res
 | `category`        | int    | yes      | BCP category (1, 2, or 3)                                         |
 | `from_agent`      | string | yes      | Reader agent that produced the response                            |
 | `response`        | object | yes      | Validated response payload                                         |
-| `bandwidth_bits`  | float  | yes      | Theoretical bandwidth of the response in bits                      |
 | `subscription_id` | string | no       | Present for subscription pushes, absent for query responses        |
 
 ---

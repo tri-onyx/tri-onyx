@@ -112,17 +112,16 @@ defmodule TriOnyx.InformationClassifier do
   reduces but does not eliminate taint. Sensitivity is always `:low` (structured
   data, no free-text leakage).
 
-  The 2-arity form is kept for backward compatibility and assumes `:low`
-  sender taint (equivalent to `classify_bcp(category, bits, :low)`).
+  The 1-arity form assumes `:low` sender taint.
   """
-  @spec classify_bcp(1 | 2 | 3, float(), information_level()) :: classification()
-  def classify_bcp(category, bandwidth_bits, sender_taint \\ :low) do
+  @spec classify_bcp(1 | 2 | 3, information_level()) :: classification()
+  def classify_bcp(category, sender_taint \\ :low) do
     taint = step_down(sender_taint)
 
     %{
       taint: taint,
       sensitivity: :low,
-      reason: "BCP cat-#{category} (#{bandwidth_bits} bits, sender taint: #{sender_taint})"
+      reason: "BCP cat-#{category} (sender taint: #{sender_taint})"
     }
   end
 

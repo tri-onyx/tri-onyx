@@ -476,7 +476,7 @@ defmodule TriOnyx.GraphAnalyzer do
           paths: [],
           edge_type: :bcp,
           max_category: channel.max_category,
-          budget_bits: channel.budget_bits
+          rates: channel.rates
         }
 
         Map.update(acc, definition.name, [edge], &[edge | &1])

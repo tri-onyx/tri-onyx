@@ -62,9 +62,10 @@ Subscriptions are declared inside `bcp_channels` entries in the Controller's age
 bcp_channels:
   - peer: researcher
     role: controller
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
     subscriptions:
       - id: research-findings
         category: 2
@@ -243,8 +244,7 @@ The existing `bcp_response_delivery` message gains an optional `subscription_id`
   "query_id": "abc123",
   "category": 2,
   "from_agent": "researcher",
-  "response": {"author": "Jane Smith", "latest_version": "4.2.1"},
-  "bandwidth_bits": 671.0
+  "response": {"author": "Jane Smith", "latest_version": "4.2.1"}
 }
 ```
 
@@ -259,8 +259,7 @@ The existing `bcp_response_delivery` message gains an optional `subscription_id`
     "q1": "Quantum computing breakthrough",
     "q2": "Google achieves 100-qubit error correction milestone",
     "q3": "4"
-  },
-  "bandwidth_bits": 671.0
+  }
 }
 ```
 
@@ -271,7 +270,6 @@ The existing `bcp_response_delivery` message gains an optional `subscription_id`
 | `category` | integer | Query category (existing) |
 | `from_agent` | string | Name of the Reader (existing) |
 | `response` | object | Validated response data (existing) |
-| `bandwidth_bits` | float | Bandwidth consumed (existing) |
 
 Both variants are delivered as prompts to the Controller's session with `channel_mode: :bcp` metadata (taint-neutral). The Controller distinguishes them by checking which identifier field is present.
 
@@ -377,20 +375,17 @@ The gateway reuses `BCP.Validator.validate_response/2` by constructing an epheme
 
 ---
 
-## Bandwidth Accounting
+## Rate Limiting
 
-Subscription pushes consume bandwidth from the same channel budget as regular BCP queries. The channel's `budget_bits` is a shared pool.
+Subscription pushes and regular BCP queries share the same per-category rate limits. Each category has an independent request count and time window.
 
-| Event | Budget Impact |
+| Event | Rate Impact |
 |---|---|
-| Controller sends BCP query | Charged against channel budget |
-| Reader publishes via subscription | Charged against same channel budget |
-| Budget exhausted | Further publishes rejected with `budget_exhausted` error |
+| Controller sends BCP query | Counted against category rate limit |
+| Reader publishes via subscription | Counted against same category rate limit |
+| Rate limit reached | Further requests rejected with `rate_limited` error until window resets |
 
-This means operators must size `budget_bits` to account for both pull queries and push subscriptions. A channel with 500 bits of budget and a Cat-2 subscription averaging 200 bits per push can sustain ~2 pushes before the Controller's own queries would exhaust the remaining budget.
-
-!!! note "Budget is per-session"
-    Bandwidth budgets reset with each Controller session. Since subscription deliveries *trigger* new sessions, the budget is effectively per-delivery for the Controller's subsequent queries. The Reader's publish itself is charged against the Reader's current session's view of the channel budget.
+Operators must size category rates to account for both pull queries and push subscriptions. For example, a channel with `cat2: 10/hour` and a subscription that publishes every 15 minutes would consume 4 of those 10 slots per hour, leaving 6 for the Controller's own queries.
 
 ---
 
@@ -450,9 +445,10 @@ tools: Read, Write, Edit, Bash, Grep, Glob, BCPQuery, SendMessage
 bcp_channels:
   - peer: researcher
     role: controller
-    max_category: 2
-    budget_bits: 1000
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
     subscriptions:
       - id: research-findings
         category: 2
@@ -510,9 +506,10 @@ network: outbound
 bcp_channels:
   - peer: main
     role: reader
-    max_category: 2
-    budget_bits: 1000
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
 cron_schedules:
   - schedule: "0 */2 * * *"
     message: "Check for new research findings and publish any relevant results."

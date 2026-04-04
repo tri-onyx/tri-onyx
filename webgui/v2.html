@@ -1479,7 +1479,7 @@ function buildGraphData() {
       sensitivityLevel: type === 'bcp' ? 'low' : (src ? src.sensitivityLevel : 'low'),
       bibaViolation: edge.biba_violation || false,
       blpViolation: edge.blp_violation || false,
-      maxCategory: edge.max_category, budgetBits: edge.budget_bits,
+      maxCategory: edge.max_category, rates: edge.rates,
     });
   }
   S.graphNodes = nodes; S.graphLinks = links; S.graphBibaSet = bibaSet; S.graphBlpSet = blpSet;
@@ -1594,7 +1594,7 @@ function renderGraph() {
         tooltip.innerHTML = `<h3>${src} \u2192 ${tgt} (BCP)</h3>
           <div class="tt-row"><span class="tt-label">Channel:</span><span>Bandwidth-Constrained Protocol</span></div>
           <div class="tt-row"><span class="tt-label">Max category:</span><span class="badge low">Cat-${d.maxCategory||'?'}</span></div>
-          <div class="tt-row"><span class="tt-label">Budget:</span><span>${d.budgetBits||'?'} bits/session</span></div>
+          <div class="tt-row"><span class="tt-label">Rates:</span><span>${d.rates ? Object.entries(d.rates).map(([k,v]) => `${k}: ${v === 0 ? 'denied' : v}`).join(', ') : '?'}</span></div>
           <div class="tt-row"><span class="tt-label">Taint effect:</span><span class="badge low">none (taint-neutral)</span></div>`;
       } else {
         const dir = d.type==='write_read' ? `${src} writes \u2192 ${tgt} reads` : d.type==='messaging' ? `${src} \u2192 ${tgt} (messaging)` : `${src} \u2194 ${tgt}`;

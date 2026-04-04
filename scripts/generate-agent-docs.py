@@ -136,12 +136,14 @@ def format_bcp_channels(channels: list[dict]) -> str:
         "",
         "### BCP Channels",
         "",
-        "| Peer | Role | Max Category | Budget (bits) |",
-        "|------|------|:------------:|:-------------:|",
+        "| Peer | Role | Max Category | Rates |",
+        "|------|------|:------------:|:------|",
     ]
     for ch in channels:
+        rates = ch.get('rates', {})
+        rates_str = ", ".join(f"{k}: {v}" for k, v in rates.items()) if rates else "—"
         lines.append(
-            f"| `{ch['peer']}` | {ch['role']} | {ch['max_category']} | {ch['budget_bits']} |"
+            f"| `{ch['peer']}` | {ch['role']} | {ch['max_category']} | {rates_str} |"
         )
     return "\n".join(lines)
 

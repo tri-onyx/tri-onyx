@@ -419,7 +419,7 @@ defmodule TriOnyx.AgentDefinitionTest do
   end
 
   describe "bcp_channels parsing" do
-    test "parses valid bcp_channels" do
+    test "parses valid bcp_channels with rates" do
       content = """
       ---
       name: controller-agent
@@ -427,10 +427,10 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: researcher
           role: controller
-          max_category: 2
-          budget_bits: 500
-          max_cat2_queries: 5
-          max_cat3_queries: 0
+          rates:
+            cat1: 20/hour
+            cat2: 10/hour
+            cat3: 0
       ---
 
       Controller agent.
@@ -443,9 +443,9 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert channel.peer == "researcher"
       assert channel.role == :controller
       assert channel.max_category == 2
-      assert channel.budget_bits == 500
-      assert channel.max_cat2_queries == 5
-      assert channel.max_cat3_queries == 0
+      assert channel.rates.cat1 == %{limit: 20, window_ms: 3_600_000}
+      assert channel.rates.cat2 == %{limit: 10, window_ms: 3_600_000}
+      assert channel.rates.cat3 == :denied
     end
 
     test "defaults bcp_channels to empty list" do
@@ -461,14 +461,16 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: researcher
           role: controller
-          max_category: 2
-          budget_bits: 500
-          max_cat2_queries: 5
-          max_cat3_queries: 0
+          rates:
+            cat1: 20/hour
+            cat2: 10/hour
+            cat3: 0
         - peer: scanner
           role: reader
-          max_category: 1
-          budget_bits: 100
+          rates:
+            cat1: 5/minute
+            cat2: 0
+            cat3: 0
       ---
 
       Orchestrator.
@@ -481,7 +483,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert Enum.at(def.bcp_channels, 1).role == :reader
     end
 
-    test "defaults max_cat2_queries and max_cat3_queries to 0" do
+    test "derives max_category from rates" do
       content = """
       ---
       name: agent
@@ -489,8 +491,10 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: other
           role: controller
-          max_category: 1
-          budget_bits: 100
+          rates:
+            cat1: 10/hour
+            cat2: 0
+            cat3: 5/hour
       ---
 
       Agent.
@@ -498,8 +502,53 @@ defmodule TriOnyx.AgentDefinitionTest do
 
       assert {:ok, def} = AgentDefinition.parse(content)
       channel = hd(def.bcp_channels)
-      assert channel.max_cat2_queries == 0
-      assert channel.max_cat3_queries == 0
+      assert channel.max_category == 3
+    end
+
+    test "bare integer defaults to per-hour window" do
+      content = """
+      ---
+      name: agent
+      tools: Read
+      bcp_channels:
+        - peer: other
+          role: controller
+          rates:
+            cat1: 20
+            cat2: 0
+            cat3: 0
+      ---
+
+      Agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      channel = hd(def.bcp_channels)
+      assert channel.rates.cat1 == %{limit: 20, window_ms: 3_600_000}
+    end
+
+    test "parses different time units" do
+      content = """
+      ---
+      name: agent
+      tools: Read
+      bcp_channels:
+        - peer: other
+          role: controller
+          rates:
+            cat1: 5/second
+            cat2: 10/minute
+            cat3: 20/hour
+      ---
+
+      Agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      channel = hd(def.bcp_channels)
+      assert channel.rates.cat1 == %{limit: 5, window_ms: 1_000}
+      assert channel.rates.cat2 == %{limit: 10, window_ms: 60_000}
+      assert channel.rates.cat3 == %{limit: 20, window_ms: 3_600_000}
     end
 
     test "rejects invalid role" do
@@ -510,8 +559,10 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: other
           role: supervisor
-          max_category: 1
-          budget_bits: 100
+          rates:
+            cat1: 10/hour
+            cat2: 0
+            cat3: 0
       ---
 
       Agent.
@@ -520,7 +571,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert {:error, {:invalid_bcp_role, 0, "supervisor", _}} = AgentDefinition.parse(content)
     end
 
-    test "rejects invalid max_category" do
+    test "rejects missing rates" do
       content = """
       ---
       name: agent
@@ -528,14 +579,12 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: other
           role: controller
-          max_category: 5
-          budget_bits: 100
       ---
 
       Agent.
       """
 
-      assert {:error, {:invalid_bcp_max_category, 0, 5, _}} = AgentDefinition.parse(content)
+      assert {:error, {:missing_bcp_channel_field, 0, "rates"}} = AgentDefinition.parse(content)
     end
 
     test "rejects missing peer field" do
@@ -545,8 +594,10 @@ defmodule TriOnyx.AgentDefinitionTest do
       tools: Read
       bcp_channels:
         - role: controller
-          max_category: 1
-          budget_bits: 100
+          rates:
+            cat1: 10/hour
+            cat2: 0
+            cat3: 0
       ---
 
       Agent.
@@ -555,7 +606,7 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert {:error, {:missing_bcp_channel_field, 0, "peer"}} = AgentDefinition.parse(content)
     end
 
-    test "rejects zero budget_bits" do
+    test "rejects all categories denied" do
       content = """
       ---
       name: agent
@@ -563,15 +614,36 @@ defmodule TriOnyx.AgentDefinitionTest do
       bcp_channels:
         - peer: other
           role: controller
-          max_category: 1
-          budget_bits: 0
+          rates:
+            cat1: 0
+            cat2: 0
+            cat3: 0
       ---
 
       Agent.
       """
 
-      assert {:error, {:invalid_bcp_channel_field, 0, "budget_bits", :must_be_positive}} =
-               AgentDefinition.parse(content)
+      assert {:error, {:all_bcp_categories_denied, 0}} = AgentDefinition.parse(content)
+    end
+
+    test "rejects invalid rate format" do
+      content = """
+      ---
+      name: agent
+      tools: Read
+      bcp_channels:
+        - peer: other
+          role: controller
+          rates:
+            cat1: "10/day"
+            cat2: 0
+            cat3: 0
+      ---
+
+      Agent.
+      """
+
+      assert {:error, {:invalid_bcp_rate, 0, "cat1", "10/day", _}} = AgentDefinition.parse(content)
     end
   end
 

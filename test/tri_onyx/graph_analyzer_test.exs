@@ -559,11 +559,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
     test "BCP controller inherits step_down of peer taint" do
       # researcher has network → high taint; controller gets step_down(high) = medium
       researcher = make_def(%{name: "researcher", network: :outbound,
-        bcp_channels: [%{peer: "main", role: :reader, max_category: 2,
-          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+        bcp_channels: [%{peer: "main", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 10, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}]})
       main = make_def(%{name: "main", tools: ["Read", "Bash"],
-        bcp_channels: [%{peer: "researcher", role: :controller, max_category: 2,
-          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+        bcp_channels: [%{peer: "researcher", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 10, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}]})
 
       all_defs = %{"main" => main, "researcher" => researcher}
       assert :medium = GraphAnalyzer.worst_case_taint(main, all_defs)
@@ -573,8 +571,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       # peer has no external inputs → low taint; step_down(low) = low
       peer = make_def(%{name: "helper", tools: ["Read"]})
       main = make_def(%{name: "main", tools: ["Read", "Bash"],
-        bcp_channels: [%{peer: "helper", role: :controller, max_category: 1,
-          budget_bits: 100, max_cat2_queries: 0, max_cat3_queries: 0}]})
+        bcp_channels: [%{peer: "helper", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: :denied, cat3: :denied}, max_category: 1, subscriptions: []}]})
 
       all_defs = %{"main" => main, "helper" => peer}
       assert :low = GraphAnalyzer.worst_case_taint(main, all_defs)
@@ -582,8 +579,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
     test "BCP without peer context falls back to low" do
       main = make_def(%{name: "main",
-        bcp_channels: [%{peer: "unknown", role: :controller, max_category: 2,
-          budget_bits: 500, max_cat2_queries: 10, max_cat3_queries: 0}]})
+        bcp_channels: [%{peer: "unknown", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 10, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}]})
 
       assert :low = GraphAnalyzer.worst_case_taint(main, %{})
     end
@@ -626,8 +622,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
         name: "controller",
         tools: ["Read", "SendMessage"],
         bcp_channels: [
-          %{peer: "reader", role: :controller, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "reader", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
@@ -635,8 +630,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
         name: "reader",
         tools: ["Read"],
         bcp_channels: [
-          %{peer: "controller", role: :reader, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "controller", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
@@ -656,8 +650,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       controller = make_def(%{
         name: "ctrl",
         bcp_channels: [
-          %{peer: "nonexistent", role: :controller, max_category: 1, budget_bits: 100,
-            max_cat2_queries: 0, max_cat3_queries: 0}
+          %{peer: "nonexistent", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: :denied, cat3: :denied}, max_category: 1, subscriptions: []}
         ]
       })
 
@@ -671,16 +664,14 @@ defmodule TriOnyx.GraphAnalyzerTest do
       controller = make_def(%{
         name: "ctrl",
         bcp_channels: [
-          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "rdr", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
       reader = make_def(%{
         name: "rdr",
         bcp_channels: [
-          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "ctrl", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
@@ -691,8 +682,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       controller = make_def(%{
         name: "ctrl",
         bcp_channels: [
-          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "rdr", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
@@ -709,8 +699,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       controller = make_def(%{
         name: "ctrl",
         bcp_channels: [
-          %{peer: "ghost", role: :controller, max_category: 1, budget_bits: 100,
-            max_cat2_queries: 0, max_cat3_queries: 0}
+          %{peer: "ghost", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: :denied, cat3: :denied}, max_category: 1, subscriptions: []}
         ]
       })
 
@@ -723,8 +712,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       reader = make_def(%{
         name: "rdr",
         bcp_channels: [
-          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "ctrl", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
@@ -762,13 +750,11 @@ defmodule TriOnyx.GraphAnalyzerTest do
     test "BCP edge applies step_down on taint" do
       controller = make_def(%{
         name: "ctrl",
-        bcp_channels: [%{peer: "rdr", role: :controller, max_category: 2,
-          budget_bits: 500, max_cat2_queries: 5, max_cat3_queries: 0}]
+        bcp_channels: [%{peer: "rdr", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}]
       })
       reader = make_def(%{
         name: "rdr",
-        bcp_channels: [%{peer: "ctrl", role: :reader, max_category: 2,
-          budget_bits: 500, max_cat2_queries: 5, max_cat3_queries: 0}]
+        bcp_channels: [%{peer: "ctrl", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}]
       })
 
       definitions = [controller, reader]
@@ -896,27 +882,25 @@ defmodule TriOnyx.GraphAnalyzerTest do
   end
 
   describe "BCP edge metadata" do
-    test "BCP edges include max_category and budget_bits" do
+    test "BCP edges include max_category and rates" do
       controller = make_def(%{
         name: "ctrl",
         bcp_channels: [
-          %{peer: "rdr", role: :controller, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "rdr", role: :controller, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
       reader = make_def(%{
         name: "rdr",
         bcp_channels: [
-          %{peer: "ctrl", role: :reader, max_category: 2, budget_bits: 500,
-            max_cat2_queries: 5, max_cat3_queries: 0}
+          %{peer: "ctrl", role: :reader, rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}, max_category: 2, subscriptions: []}
         ]
       })
 
       result = GraphAnalyzer.analyze([controller, reader], %{})
       edge = hd(result["ctrl"].incoming_edges)
       assert edge.max_category == 2
-      assert edge.budget_bits == 500
+      assert edge.rates == %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied}
     end
   end
 

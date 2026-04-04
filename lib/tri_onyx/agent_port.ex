@@ -237,18 +237,16 @@ defmodule TriOnyx.AgentPort do
           integer(),
           String.t(),
           map(),
-          float(),
           keyword()
         ) :: :ok
-  def send_bcp_response_delivery(server, query_id, category, from_agent, response, bandwidth_bits, opts \\ []) do
+  def send_bcp_response_delivery(server, query_id, category, from_agent, response, opts \\ []) do
     subscription_id = Keyword.get(opts, :subscription_id)
 
     msg = %{
       "type" => "bcp_response_delivery",
       "category" => category,
       "from_agent" => from_agent,
-      "response" => response,
-      "bandwidth_bits" => bandwidth_bits
+      "response" => response
     }
 
     msg = if query_id, do: Map.put(msg, "query_id", query_id), else: msg

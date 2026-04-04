@@ -897,7 +897,7 @@ defmodule TriOnyx.Router do
             "biba_violation" => MapSet.member?(biba_set, {edge.from, target_name}),
             "blp_violation" => MapSet.member?(blp_set, {edge.from, target_name}),
             "max_category" => Map.get(edge, :max_category),
-            "budget_bits" => Map.get(edge, :budget_bits)
+            "rates" => serialize_rates(Map.get(edge, :rates))
           }
         end)
       end)
@@ -1407,11 +1407,31 @@ defmodule TriOnyx.Router do
         "peer" => ch.peer,
         "role" => to_string(ch.role),
         "max_category" => ch.max_category,
-        "budget_bits" => ch.budget_bits,
-        "max_cat2_queries" => ch.max_cat2_queries,
-        "max_cat3_queries" => ch.max_cat3_queries
+        "rates" => serialize_rates(ch.rates)
       }
     end)
+  end
+
+  @spec serialize_rates(map() | nil) :: map() | nil
+  defp serialize_rates(nil), do: nil
+
+  defp serialize_rates(rates) when is_map(rates) do
+    Map.new(rates, fn {key, value} ->
+      {to_string(key), serialize_single_rate(value)}
+    end)
+  end
+
+  defp serialize_single_rate(:denied), do: 0
+
+  defp serialize_single_rate(%{limit: limit, window_ms: window_ms}) do
+    unit =
+      cond do
+        window_ms <= 1_000 -> "second"
+        window_ms <= 60_000 -> "minute"
+        true -> "hour"
+      end
+
+    "#{limit}/#{unit}"
   end
 
   @spec format_network(TriOnyx.AgentDefinition.network_policy()) :: String.t() | [String.t()]

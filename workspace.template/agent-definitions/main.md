@@ -22,29 +22,34 @@ restart_targets:
 bcp_channels:
   - peer: researcher
     role: controller
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
   - peer: twitter
     role: controller
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
   - peer: linkedin
     role: controller
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
   - peer: finn
     role: controller
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
   - peer: email
     role: controller
-    max_category: 2
-    budget_bits: 1000
-    max_cat2_queries: 20
+    rates:
+      cat1: 40/hour
+      cat2: 20/hour
+      cat3: 0
     subscriptions:
       - id: email-alert
         category: 1

@@ -18,7 +18,6 @@ defmodule TriOnyx.Integration.BCPTaintTest do
   use ExUnit.Case, async: true
 
   alias TriOnyx.AgentDefinition
-  alias TriOnyx.BCP.Bandwidth
   alias TriOnyx.BCP.Query
   alias TriOnyx.BCP.Validator
   alias TriOnyx.InformationClassifier
@@ -36,10 +35,9 @@ defmodule TriOnyx.Integration.BCPTaintTest do
       %{
         peer: "bcp-reader",
         role: :controller,
+        rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied},
         max_category: 2,
-        budget_bits: 100.0,
-        max_cat2_queries: 5,
-        max_cat3_queries: 0
+        subscriptions: []
       }
     ]
   }
@@ -57,10 +55,9 @@ defmodule TriOnyx.Integration.BCPTaintTest do
       %{
         peer: "bcp-controller",
         role: :reader,
+        rates: %{cat1: %{limit: 20, window_ms: 3_600_000}, cat2: %{limit: 5, window_ms: 3_600_000}, cat3: :denied},
         max_category: 2,
-        budget_bits: 100.0,
-        max_cat2_queries: 5,
-        max_cat3_queries: 0
+        subscriptions: []
       }
     ]
   }
@@ -69,30 +66,25 @@ defmodule TriOnyx.Integration.BCPTaintTest do
 
   describe "BCP taint classification" do
     test "classify_bcp steps down sender taint by one level" do
-      assert %{taint: :low} = InformationClassifier.classify_bcp(1, 3.0, :low)
-      assert %{taint: :low} = InformationClassifier.classify_bcp(1, 3.0, :medium)
-      assert %{taint: :medium} = InformationClassifier.classify_bcp(1, 3.0, :high)
+      assert %{taint: :low} = InformationClassifier.classify_bcp(1, :low)
+      assert %{taint: :low} = InformationClassifier.classify_bcp(1, :medium)
+      assert %{taint: :medium} = InformationClassifier.classify_bcp(1, :high)
     end
 
-    test "classify_bcp defaults to low sender taint (backward compat)" do
-      result = InformationClassifier.classify_bcp(1, 3.0)
+    test "classify_bcp defaults to low sender taint" do
+      result = InformationClassifier.classify_bcp(1)
       assert %{taint: :low, sensitivity: :low} = result
     end
 
     test "classify_bcp reason includes category and sender taint" do
-      result = InformationClassifier.classify_bcp(2, 55.0, :high)
+      result = InformationClassifier.classify_bcp(2, :high)
       assert result.reason =~ "BCP cat-2"
       assert result.reason =~ "sender taint: high"
     end
 
-    test "classify_bcp includes bandwidth bits in reason" do
-      result = InformationClassifier.classify_bcp(1, 7.5)
-      assert result.reason =~ "7.5 bits"
-    end
-
     test "classify_bcp sensitivity is always low" do
       for category <- [1, 2, 3], sender <- [:low, :medium, :high] do
-        result = InformationClassifier.classify_bcp(category, 100.0, sender)
+        result = InformationClassifier.classify_bcp(category, sender)
         assert result.sensitivity == :low, "expected :low sensitivity for cat-#{category} sender #{sender}"
       end
     end
@@ -434,182 +426,11 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     end
   end
 
-  # ── Bandwidth budget ──────────────────────────────────────────────────
-
-  describe "bandwidth budget" do
-    test "Bandwidth.new/1 creates budget from map" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 100.0,
-          max_cat2_queries: 5,
-          max_cat3_queries: 2
-        })
-
-      assert budget.max_bits_per_session == 100.0
-      assert budget.max_cat2_queries == 5
-      assert budget.max_cat3_queries == 2
-      assert budget.used_bits == 0.0
-    end
-
-    test "Bandwidth.remaining/1 returns full budget when unused" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 100.0,
-          max_cat2_queries: 5,
-          max_cat3_queries: 2
-        })
-
-      assert Bandwidth.remaining(budget) == 100.0
-    end
-
-    test "Bandwidth.charge/2 deducts from budget and tracks remaining" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 100.0,
-          max_cat2_queries: 5,
-          max_cat3_queries: 2
-        })
-
-      {:ok, query} =
-        Query.new(%{
-          category: 1,
-          from: "bcp-controller",
-          to: "bcp-reader",
-          session_id: "test-session-bw-charge",
-          fields: [
-            %{name: "flag", type: :boolean, options: nil, min: nil, max: nil}
-          ]
-        })
-
-      # Boolean field costs 1 bit
-      assert {:ok, updated} = Bandwidth.charge(budget, query)
-      assert Bandwidth.remaining(updated) < 100.0
-      assert updated.used_bits > 0.0
-    end
-
-    test "Bandwidth.charge/2 rejects when budget exceeded" do
-      # Create a very small budget (2 bits total)
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 2.0,
-          max_cat2_queries: 5,
-          max_cat3_queries: 2
-        })
-
-      # 8 options = log2(8) = 3 bits, which exceeds 2-bit budget
-      {:ok, query} =
-        Query.new(%{
-          category: 1,
-          from: "bcp-controller",
-          to: "bcp-reader",
-          session_id: "test-session-bw-exceed",
-          fields: [
-            %{
-              name: "color",
-              type: :enum,
-              options: [
-                "red",
-                "orange",
-                "yellow",
-                "green",
-                "blue",
-                "indigo",
-                "violet",
-                "black"
-              ],
-              min: nil,
-              max: nil
-            }
-          ]
-        })
-
-      assert {:error, :budget_exceeded} = Bandwidth.charge(budget, query)
-    end
-
-    test "Bandwidth.charge/2 rejects when cat2 query limit exceeded" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 10_000.0,
-          max_cat2_queries: 1,
-          max_cat3_queries: 2
-        })
-
-      {:ok, query} =
-        Query.new(%{
-          category: 2,
-          from: "bcp-controller",
-          to: "bcp-reader",
-          session_id: "test-session-bw-cat2",
-          questions: [
-            %{name: "name", format: :short_text, max_words: 3}
-          ]
-        })
-
-      # First charge succeeds
-      assert {:ok, updated} = Bandwidth.charge(budget, query)
-      # Second charge hits cat2 limit
-      assert {:error, :cat2_limit} = Bandwidth.charge(updated, query)
-    end
-
-    test "Bandwidth.charge/2 rejects when cat3 query limit exceeded" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 10_000.0,
-          max_cat2_queries: 5,
-          max_cat3_queries: 1
-        })
-
-      {:ok, query} =
-        Query.new(%{
-          category: 3,
-          from: "bcp-controller",
-          to: "bcp-reader",
-          session_id: "test-session-bw-cat3",
-          directive: "Summarize the document",
-          max_words: 20
-        })
-
-      # First charge succeeds
-      assert {:ok, updated} = Bandwidth.charge(budget, query)
-      # Second charge hits cat3 limit
-      assert {:error, :cat3_limit} = Bandwidth.charge(updated, query)
-    end
-
-    test "budget tracks cumulative usage across multiple queries" do
-      budget =
-        Bandwidth.new(%{
-          max_bits_per_session: 50.0,
-          max_cat2_queries: 10,
-          max_cat3_queries: 5
-        })
-
-      {:ok, query} =
-        Query.new(%{
-          category: 1,
-          from: "bcp-controller",
-          to: "bcp-reader",
-          session_id: "test-session-bw-cumul",
-          fields: [
-            %{name: "flag", type: :boolean, options: nil, min: nil, max: nil}
-          ]
-        })
-
-      # Charge multiple times, remaining should decrease each time
-      {:ok, b1} = Bandwidth.charge(budget, query)
-      {:ok, b2} = Bandwidth.charge(b1, query)
-      {:ok, b3} = Bandwidth.charge(b2, query)
-
-      assert Bandwidth.remaining(b1) > Bandwidth.remaining(b2)
-      assert Bandwidth.remaining(b2) > Bandwidth.remaining(b3)
-      assert b3.used_bits == b1.used_bits * 3
-    end
-  end
-
   # ── BCP vs free-text contrast ────────────────────────────────────────
 
   describe "BCP vs free-text taint contrast" do
     test "BCP reduces high sender taint to medium, free-text passes it through" do
-      bcp_result = InformationClassifier.classify_bcp(1, 3.0, :high)
+      bcp_result = InformationClassifier.classify_bcp(1, :high)
       assert bcp_result.taint == :medium
 
       freetext_result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: :high, sensitivity: :low})
@@ -617,7 +438,7 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     end
 
     test "BCP reduces medium sender taint to low, free-text passes it through" do
-      bcp_result = InformationClassifier.classify_bcp(2, 55.0, :medium)
+      bcp_result = InformationClassifier.classify_bcp(2, :medium)
       assert bcp_result.taint == :low
 
       freetext_result =
@@ -635,7 +456,7 @@ defmodule TriOnyx.Integration.BCPTaintTest do
 
     test "BCP taint is always strictly lower than free-text for same sender" do
       for sender_taint <- [:medium, :high] do
-        bcp = InformationClassifier.classify_bcp(1, 1.0, sender_taint)
+        bcp = InformationClassifier.classify_bcp(1, sender_taint)
         freetext = InformationClassifier.classify_inter_agent(:sanitized, %{taint: sender_taint, sensitivity: :low})
 
         bcp_rank = %{low: 0, medium: 1, high: 2}

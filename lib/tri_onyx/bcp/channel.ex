@@ -17,6 +17,7 @@ defmodule TriOnyx.BCP.Channel do
   alias TriOnyx.AgentSupervisor
   alias TriOnyx.BCP.ApprovalQueue
   alias TriOnyx.BCP.Query
+  alias TriOnyx.BCP.RateLimiter
   alias TriOnyx.BCP.Validator
   alias TriOnyx.ConnectorHandler
   alias TriOnyx.TriggerRouter
@@ -83,9 +84,8 @@ defmodule TriOnyx.BCP.Channel do
     with {:ok, from_def} <- lookup_agent(from_agent),
          {:ok, _to_def} <- lookup_agent(to_agent),
          {:ok, channel_config} <- find_bcp_channel(from_def, to_agent, :controller),
-         :ok <- validate_category(query_spec, channel_config),
-         {:ok, query} <- build_query(from_agent, to_agent, query_spec),
-         bandwidth <- Query.compute_bandwidth(query) do
+         :ok <- check_category_rate(query_spec, channel_config, from_agent, to_agent),
+         {:ok, query} <- build_query(from_agent, to_agent, query_spec) do
       # Store the query BEFORE dispatching so the reader's response can always
       # find it via pop_query (avoids race where a fast reader responds before
       # dispatch_to_reader returns).
@@ -96,7 +96,7 @@ defmodule TriOnyx.BCP.Channel do
         :ok ->
           Logger.info(
             "BCP.Channel: query #{query.id} from #{from_agent} to #{to_agent} " <>
-              "(cat-#{query.category}, #{Float.round(bandwidth, 1)} bits)"
+              "(cat-#{query.category})"
           )
 
           {:ok, query}
@@ -223,12 +223,21 @@ defmodule TriOnyx.BCP.Channel do
     end
   end
 
-  @spec validate_category(query_spec(), TriOnyx.AgentDefinition.bcp_channel()) ::
+  @spec check_category_rate(query_spec(), TriOnyx.AgentDefinition.bcp_channel(), String.t(), String.t()) ::
           :ok | {:error, term()}
-  defp validate_category(%{category: cat}, %{max_category: max_cat}) when cat <= max_cat, do: :ok
+  defp check_category_rate(%{category: cat}, %{rates: rates}, from_agent, to_agent) do
+    rate_key = :"cat#{cat}"
 
-  defp validate_category(%{category: cat}, %{max_category: max_cat}) do
-    {:error, {:category_exceeds_max, cat, max_cat}}
+    case Map.get(rates, rate_key) do
+      :denied ->
+        {:error, {:category_denied, cat}}
+
+      %{limit: limit, window_ms: window_ms} ->
+        case RateLimiter.check_rate(from_agent, to_agent, cat, limit, window_ms) do
+          :ok -> :ok
+          {:error, :rate_limited, retry_after} -> {:error, {:rate_limited, cat, retry_after}}
+        end
+    end
   end
 
   @spec build_query(String.t(), String.t(), query_spec()) ::
@@ -286,7 +295,6 @@ defmodule TriOnyx.BCP.Channel do
 
   @spec deliver_to_controller(Query.t(), map(), keyword()) :: :ok
   defp deliver_to_controller(query, validated_response, opts) do
-    bandwidth = Query.compute_bandwidth(query)
     subscription_id = Keyword.get(opts, :subscription_id)
 
     session_pid =
@@ -328,7 +336,6 @@ defmodule TriOnyx.BCP.Channel do
              query.category,
              query.to,
              validated_response,
-             bandwidth,
              delivery_opts
            ) do
         :ok ->

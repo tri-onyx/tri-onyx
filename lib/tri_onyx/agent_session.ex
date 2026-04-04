@@ -110,10 +110,10 @@ defmodule TriOnyx.AgentSession do
   The response is delivered with `channel_mode: :bcp` metadata so the session
   knows to skip taint elevation.
   """
-  @spec deliver_bcp_response(GenServer.server(), String.t(), integer(), String.t(), map(), float(), keyword()) ::
+  @spec deliver_bcp_response(GenServer.server(), String.t(), integer(), String.t(), map(), keyword()) ::
           :ok | {:error, :not_ready}
-  def deliver_bcp_response(server, query_id, category, from_agent, response, bandwidth_bits, opts \\ []) do
-    GenServer.call(server, {:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts})
+  def deliver_bcp_response(server, query_id, category, from_agent, response, opts \\ []) do
+    GenServer.call(server, {:bcp_response_delivery, query_id, category, from_agent, response, opts})
   end
 
   @doc """
@@ -282,21 +282,21 @@ defmodule TriOnyx.AgentSession do
   end
 
   # BCP response delivery — send to port when ready (controller is always running)
-  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts}, _from,
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, opts}, _from,
                   %{status: status, port: port} = state)
       when status in [:ready, :running] and port != nil do
-    AgentPort.send_bcp_response_delivery(port, query_id, category, from_agent, response, bandwidth_bits, opts)
+    AgentPort.send_bcp_response_delivery(port, query_id, category, from_agent, response, opts)
     {:reply, :ok, state}
   end
 
-  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, bandwidth_bits, opts}, _from,
+  def handle_call({:bcp_response_delivery, query_id, category, from_agent, response, opts}, _from,
                   %{status: :starting} = state) do
     Logger.info("AgentSession #{state.id}: queuing BCP response delivery #{query_id} (starting)")
     pending = Map.get(state, :pending_bcp_deliveries, [])
-    {:reply, :ok, Map.put(state, :pending_bcp_deliveries, pending ++ [{query_id, category, from_agent, response, bandwidth_bits, opts}])}
+    {:reply, :ok, Map.put(state, :pending_bcp_deliveries, pending ++ [{query_id, category, from_agent, response, opts}])}
   end
 
-  def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _bandwidth_bits, _opts}, _from, state) do
+  def handle_call({:bcp_response_delivery, _query_id, _category, _from_agent, _response, _opts}, _from, state) do
     {:reply, {:error, :not_ready}, state}
   end
 
@@ -406,9 +406,9 @@ defmodule TriOnyx.AgentSession do
       case Map.get(state, :pending_bcp_deliveries, []) do
         [] -> {state, false}
         deliveries ->
-          Enum.each(deliveries, fn {query_id, category, from_agent, response, bandwidth_bits, opts} ->
+          Enum.each(deliveries, fn {query_id, category, from_agent, response, opts} ->
             Logger.info("AgentSession #{state.id}: flushing queued BCP response delivery #{query_id}")
-            AgentPort.send_bcp_response_delivery(state.port, query_id, category, from_agent, response, bandwidth_bits, opts)
+            AgentPort.send_bcp_response_delivery(state.port, query_id, category, from_agent, response, opts)
           end)
           {Map.delete(state, :pending_bcp_deliveries), true}
       end

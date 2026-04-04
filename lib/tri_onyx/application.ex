@@ -45,6 +45,9 @@ defmodule TriOnyx.Application do
       # 4. Webhook rate limiter — must start before Router
       TriOnyx.WebhookRateLimiter,
 
+      # 4b. BCP rate limiter — must start before Router
+      TriOnyx.BCP.RateLimiter,
+
       # 5. Agent session supervisor
       TriOnyx.AgentSupervisor,
 

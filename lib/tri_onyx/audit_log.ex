@@ -216,8 +216,7 @@ defmodule TriOnyx.AuditLog do
       category: category,
       pass: validation_details[:pass],
       anomalies: validation_details[:anomalies],
-      bandwidth_charged: validation_details[:bandwidth_charged],
-      cumulative_bandwidth: validation_details[:cumulative_bandwidth]
+      rate_count: validation_details[:rate_count]
     }})
   end
 

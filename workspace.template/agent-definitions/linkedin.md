@@ -8,10 +8,10 @@ browser: true
 bcp_channels:
   - peer: main
     role: reader
-    max_category: 2
-    budget_bits: 500
-    max_cat2_queries: 10
-    max_cat3_queries: 0
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
 receive_from:
   - main
 fs_read:

@@ -200,7 +200,6 @@ class BCPResponseDeliveryMessage:
     category: int
     from_agent: str
     response: dict[str, Any] = field(default_factory=dict)
-    bandwidth_bits: float = 0.0
     subscription_id: str | None = None
 
     @classmethod
@@ -210,7 +209,6 @@ class BCPResponseDeliveryMessage:
             category=data.get("category", 0),
             from_agent=data.get("from_agent", ""),
             response=data.get("response", {}),
-            bandwidth_bits=data.get("bandwidth_bits", 0.0),
             subscription_id=data.get("subscription_id"),
         )
 

@@ -43,13 +43,13 @@ defmodule TriOnyx.AgentDefinition do
           max_words: pos_integer() | nil
         }
 
+  @type category_rate :: %{limit: pos_integer(), window_ms: pos_integer()} | :denied
+
   @type bcp_channel :: %{
           peer: String.t(),
           role: :controller | :reader,
+          rates: %{cat1: category_rate(), cat2: category_rate(), cat3: category_rate()},
           max_category: 1..3,
-          budget_bits: pos_integer(),
-          max_cat2_queries: non_neg_integer(),
-          max_cat3_queries: non_neg_integer(),
           subscriptions: [bcp_subscription()]
         }
 
@@ -403,23 +403,16 @@ defmodule TriOnyx.AgentDefinition do
     with {:ok, peer} <- require_bcp_field(channel, "peer", idx, &is_binary/1, :string),
          {:ok, role_str} <- require_bcp_field(channel, "role", idx, &is_binary/1, :string),
          {:ok, role} <- validate_bcp_role(role_str, idx),
-         {:ok, max_cat} <- require_bcp_field(channel, "max_category", idx, &is_integer/1, :integer),
-         :ok <- validate_max_category(max_cat, idx),
-         {:ok, budget_bits} <- require_bcp_field(channel, "budget_bits", idx, &is_integer/1, :integer),
-         :ok <- validate_positive(budget_bits, "budget_bits", idx),
-         {:ok, max_cat2} <- get_bcp_field(channel, "max_cat2_queries", idx, &is_integer/1, :integer, 0),
-         :ok <- validate_non_negative(max_cat2, "max_cat2_queries", idx),
-         {:ok, max_cat3} <- get_bcp_field(channel, "max_cat3_queries", idx, &is_integer/1, :integer, 0),
-         :ok <- validate_non_negative(max_cat3, "max_cat3_queries", idx),
+         {:ok, rates} <- parse_bcp_rates(channel, idx),
+         max_cat <- derive_max_category(rates),
+         :ok <- validate_at_least_one_category(rates, idx),
          {:ok, subscriptions} <- parse_bcp_subscriptions(channel, role, max_cat, idx) do
       {:ok,
        %{
          peer: peer,
          role: role,
+         rates: rates,
          max_category: max_cat,
-         budget_bits: budget_bits,
-         max_cat2_queries: max_cat2,
-         max_cat3_queries: max_cat3,
          subscriptions: subscriptions
        }}
     end
@@ -436,12 +429,6 @@ defmodule TriOnyx.AgentDefinition do
     end
   end
 
-  defp get_bcp_field(channel, key, idx, validator, expected_type, default) do
-    case Map.get(channel, key) do
-      nil -> {:ok, default}
-      value -> if validator.(value), do: {:ok, value}, else: {:error, {:invalid_bcp_channel_field, idx, key, expected_type}}
-    end
-  end
 
   defp validate_bcp_role("controller", _idx), do: {:ok, :controller}
   defp validate_bcp_role("reader", _idx), do: {:ok, :reader}
@@ -450,17 +437,71 @@ defmodule TriOnyx.AgentDefinition do
     {:error, {:invalid_bcp_role, idx, role, @valid_bcp_roles}}
   end
 
-  defp validate_max_category(cat, _idx) when cat in @valid_max_categories, do: :ok
+  @rate_pattern ~r/\A(\d+)\/(second|minute|hour)\z/
 
-  defp validate_max_category(cat, idx) do
-    {:error, {:invalid_bcp_max_category, idx, cat, @valid_max_categories}}
+  @spec parse_bcp_rates(map(), non_neg_integer()) :: {:ok, map()} | {:error, term()}
+  defp parse_bcp_rates(channel, idx) do
+    case Map.get(channel, "rates") do
+      nil ->
+        {:error, {:missing_bcp_channel_field, idx, "rates"}}
+
+      rates when is_map(rates) ->
+        with {:ok, cat1} <- parse_single_rate(rates, "cat1", idx),
+             {:ok, cat2} <- parse_single_rate(rates, "cat2", idx),
+             {:ok, cat3} <- parse_single_rate(rates, "cat3", idx) do
+          {:ok, %{cat1: cat1, cat2: cat2, cat3: cat3}}
+        end
+
+      _other ->
+        {:error, {:invalid_bcp_channel_field, idx, "rates", :expected_map}}
+    end
   end
 
-  defp validate_positive(val, _field, _idx) when is_integer(val) and val > 0, do: :ok
-  defp validate_positive(_val, field, idx), do: {:error, {:invalid_bcp_channel_field, idx, field, :must_be_positive}}
+  @spec parse_single_rate(map(), String.t(), non_neg_integer()) ::
+          {:ok, %{limit: pos_integer(), window_ms: pos_integer()} | :denied} | {:error, term()}
+  defp parse_single_rate(rates, key, idx) do
+    case Map.get(rates, key, 0) do
+      0 ->
+        {:ok, :denied}
 
-  defp validate_non_negative(val, _field, _idx) when is_integer(val) and val >= 0, do: :ok
-  defp validate_non_negative(_val, field, idx), do: {:error, {:invalid_bcp_channel_field, idx, field, :must_be_non_negative}}
+      value when is_integer(value) and value > 0 ->
+        # Bare integer defaults to per-hour
+        {:ok, %{limit: value, window_ms: 3_600_000}}
+
+      value when is_binary(value) ->
+        case Regex.run(@rate_pattern, value) do
+          [_, count_str, unit] ->
+            count = String.to_integer(count_str)
+
+            if count == 0 do
+              {:ok, :denied}
+            else
+              {:ok, %{limit: count, window_ms: unit_to_ms(unit)}}
+            end
+
+          nil ->
+            {:error, {:invalid_bcp_rate, idx, key, value, "expected format: N/second, N/minute, or N/hour"}}
+        end
+
+      other ->
+        {:error, {:invalid_bcp_rate, idx, key, other, "expected 0 or \"N/unit\""}}
+    end
+  end
+
+  defp unit_to_ms("second"), do: 1_000
+  defp unit_to_ms("minute"), do: 60_000
+  defp unit_to_ms("hour"), do: 3_600_000
+
+  @spec derive_max_category(map()) :: 1 | 2 | 3
+  defp derive_max_category(%{cat3: rate}) when rate != :denied, do: 3
+  defp derive_max_category(%{cat2: rate}) when rate != :denied, do: 2
+  defp derive_max_category(_), do: 1
+
+  defp validate_at_least_one_category(%{cat1: :denied, cat2: :denied, cat3: :denied}, idx) do
+    {:error, {:all_bcp_categories_denied, idx}}
+  end
+
+  defp validate_at_least_one_category(_, _idx), do: :ok
 
   @subscription_id_pattern ~r/\A[a-z0-9][a-z0-9-]*\z/
 

@@ -1919,7 +1919,6 @@ def _format_bcp_response_delivery_prompt(msg: BCPResponseDeliveryMessage) -> str
         f"  - **From agent:** {msg.from_agent}",
         f"  - **Category:** {msg.category}",
         f"  - **Source:** {source}",
-        f"  - **Bandwidth consumed:** {msg.bandwidth_bits} bits",
         "",
         "**Response data:**",
         f"```json\n{response_json}\n```",

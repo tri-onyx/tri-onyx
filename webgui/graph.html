@@ -454,7 +454,7 @@ function buildGraph() {
       bibaViolation: edge.biba_violation || false,
       blpViolation: edge.blp_violation || false,
       maxCategory: edge.max_category,
-      budgetBits: edge.budget_bits,
+      rates: edge.rates,
     });
   }
 
@@ -819,7 +819,7 @@ function renderGraph() {
           <h3>${src} \u2192 ${tgt} (BCP)</h3>
           <div class="row"><span class="label">Channel:</span><span>Bandwidth-Constrained Protocol</span></div>
           <div class="row"><span class="label">Max category:</span><span class="badge low">Cat-${d.maxCategory || '?'}</span></div>
-          <div class="row"><span class="label">Budget:</span><span>${d.budgetBits || '?'} bits/session</span></div>
+          <div class="row"><span class="label">Rates:</span><span>${d.rates ? Object.entries(d.rates).map(([k,v]) => `${k}: ${v === 0 ? 'denied' : v}`).join(', ') : '?'}</span></div>
           <div class="row"><span class="label">Taint effect:</span><span class="badge low">none (taint-neutral)</span></div>
           <div style="margin-top:6px;color:var(--muted);font-size:10px;">
             Gateway validates all responses. Cat-1: structured primitives. Cat-2: constrained Q&A. Cat-3: free-text (requires approval).

@@ -16,9 +16,10 @@ receive_from:
 bcp_channels:
   - peer: main
     role: reader
-    max_category: 2
-    budget_bits: 1000
-    max_cat2_queries: 20
+    rates:
+      cat1: 40/hour
+      cat2: 20/hour
+      cat3: 0
 idle_timeout: 30m
 ---
 
