@@ -5,7 +5,11 @@ model: claude-sonnet-4-6
 tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch
 network: outbound
 browser: true
-heartbeat_every: 180m
+cron_schedules:
+  - schedule: "0 6,9,12,15,18,21 * * *"
+    message: >
+      Automated heartbeat. Fetch all configured news sources and curate
+      articles against PREFERENCES.md.
 receive_from:
   - main
 plugins:
