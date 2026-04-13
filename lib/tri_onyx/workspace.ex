@@ -324,12 +324,14 @@ defmodule TriOnyx.Workspace do
         case System.cmd("git", add_args, cd: dir, stderr_to_stdout: true) do
           {_, 0} ->
             commit_msg = "review by #{reviewer}\n\nTaint-Level: low"
+            author = "#{reviewer} <#{reviewer}@tri_onyx>"
 
             case System.cmd(
                    "git",
-                   safe ++ ["commit", "-m", commit_msg],
+                   safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
                    cd: dir,
-                   stderr_to_stdout: true
+                   stderr_to_stdout: true,
+                   env: committer_env()
                  ) do
               {_, 0} ->
                 {:ok, paths}
@@ -375,6 +377,72 @@ defmodule TriOnyx.Workspace do
     end
 
     :ok
+  end
+
+  @doc """
+  Commits any uncommitted workspace changes not captured by per-write
+  provenance commits.
+
+  Runs `git add -A` followed by a commit. This catches files created
+  outside the agent FUSE path (plugin installs, manual edits, deletions).
+  Returns `{:ok, commit_hash}` if changes were committed, `{:ok, :clean}`
+  if the workspace was already clean, or `{:error, reason}` on failure.
+  """
+  @spec sweep_uncommitted() :: {:ok, String.t()} | {:ok, :clean} | {:error, term()}
+  def sweep_uncommitted do
+    dir = workspace_dir()
+    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+
+    # Check for any dirty state (untracked, modified, or deleted)
+    case System.cmd("git", safe ++ ["status", "--porcelain"], cd: dir, stderr_to_stdout: true) do
+      {"", 0} ->
+        {:ok, :clean}
+
+      {_dirty, 0} ->
+        # Stage everything (respects .gitignore)
+        case System.cmd("git", safe ++ ["add", "-A"], cd: dir, stderr_to_stdout: true) do
+          {_, 0} ->
+            # Verify there are actual staged changes (git add -A on ignored-only
+            # files produces no staged diff)
+            case System.cmd("git", safe ++ ["diff", "--cached", "--quiet"], cd: dir, stderr_to_stdout: true) do
+              {_, 0} ->
+                {:ok, :clean}
+
+              {_, 1} ->
+                case System.cmd(
+                       "git",
+                       safe ++ ["commit", "-m", "[sweep] uncommitted workspace changes"],
+                       cd: dir,
+                       stderr_to_stdout: true,
+                       env: committer_env()
+                     ) do
+                  {_, 0} ->
+                    {hash, 0} =
+                      System.cmd("git", safe ++ ["rev-parse", "--short", "HEAD"], cd: dir, stderr_to_stdout: true)
+
+                    hash = String.trim(hash)
+                    Logger.info("Workspace: sweep committed #{hash}")
+                    {:ok, hash}
+
+                  {output, _} ->
+                    Logger.error("Workspace: sweep commit failed: #{output}")
+                    {:error, {:commit_failed, output}}
+                end
+
+              {output, code} ->
+                Logger.error("Workspace: sweep diff --cached failed (exit #{code}): #{output}")
+                {:error, {:diff_failed, output}}
+            end
+
+          {output, _} ->
+            Logger.error("Workspace: sweep git add failed: #{output}")
+            {:error, {:add_failed, output}}
+        end
+
+      {output, code} ->
+        Logger.error("Workspace: sweep status check failed (exit #{code}): #{output}")
+        {:error, {:status_failed, output}}
+    end
   end
 
   # --- Private Helpers ---
