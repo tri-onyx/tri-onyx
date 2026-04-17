@@ -34,6 +34,7 @@ defmodule TriOnyx.TriggerRouter do
           | :inter_agent
           | :verified_input
           | :unverified_input
+          | :reflection
 
   @type trigger_event :: %{
           type: trigger_type(),
@@ -76,6 +77,20 @@ defmodule TriOnyx.TriggerRouter do
           {:ok, pid()} | {:error, term()}
   def dispatch(server \\ __MODULE__, event) do
     GenServer.call(server, {:dispatch, event})
+  end
+
+  @doc """
+  Dispatches a daily reflection run for the given agent.
+
+  Unlike normal triggers, this always spawns a *fresh* session in reflection
+  mode — it does not reuse or route to an existing session. The reflection
+  session runs with a hardcoded system prompt, a restricted tool set, and
+  read-only access to today's raw session logs.
+  """
+  @spec dispatch_reflection(GenServer.server(), String.t()) ::
+          {:ok, pid()} | {:error, term()}
+  def dispatch_reflection(server \\ __MODULE__, agent_name) when is_binary(agent_name) do
+    GenServer.call(server, {:dispatch_reflection, agent_name})
   end
 
   @doc """
@@ -155,6 +170,26 @@ defmodule TriOnyx.TriggerRouter do
     end
   end
 
+  def handle_call({:dispatch_reflection, agent_name}, _from, state) do
+    case Map.fetch(state.definitions, agent_name) do
+      {:ok, definition} ->
+        Logger.info("TriggerRouter: dispatching reflection run for '#{agent_name}'")
+
+        session_opts = [
+          definition: definition,
+          trigger_type: :cron,
+          mode: :reflection
+        ]
+
+        result = AgentSupervisor.start_session(state.supervisor, session_opts)
+        {:reply, result, state}
+
+      :error ->
+        Logger.warning("TriggerRouter: reflection requested for unknown agent '#{agent_name}'")
+        {:reply, {:error, {:unknown_agent, agent_name}}, state}
+    end
+  end
+
   def handle_call({:register_agent, definition}, _from, state) do
     Logger.info("TriggerRouter: registering agent '#{definition.name}'")
     new_defs = Map.put(state.definitions, definition.name, definition)
@@ -213,13 +248,14 @@ defmodule TriOnyx.TriggerRouter do
 
         changed = MapSet.union(removed, MapSet.new(updated))
 
-        # Cancel crons and heartbeats for removed and updated agents
+        # Cancel crons, heartbeats, and reflections for removed and updated agents
         Enum.each(changed, fn name ->
           Scheduler.cancel_agent_crons(name)
           Scheduler.cancel_heartbeat(name)
+          Scheduler.cancel_reflection(name)
         end)
 
-        # Register crons and heartbeats for added and updated agents
+        # Register crons, heartbeats, and reflections for added and updated agents
         Enum.each(MapSet.union(added, MapSet.new(updated)), fn name ->
           definition = Map.get(new_defs, name)
 
@@ -230,6 +266,10 @@ defmodule TriOnyx.TriggerRouter do
 
             if definition.heartbeat_every do
               Scheduler.schedule_heartbeat(name, definition.heartbeat_every)
+            end
+
+            if definition.reflection do
+              Scheduler.schedule_reflection(name, definition.reflection)
             end
           end
         end)

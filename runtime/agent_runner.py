@@ -145,6 +145,98 @@ log.addHandler(_protocol_handler)
 # Results are truncated to avoid flooding the protocol channel.
 _MAX_TOOL_RESULT_LEN = 4096
 
+# ---------------------------------------------------------------------------
+# Reflection mode
+# ---------------------------------------------------------------------------
+
+# Tools the reflection harness is allowed to use. Deliberately minimal — we
+# want the model to read JSONL transcripts and write a single markdown report,
+# nothing else. Custom MCP tools (SendMessage, BCP, email, etc.) are not
+# wired up in reflection mode.
+_REFLECTION_TOOLS = ["Read", "Write", "Glob", "Grep"]
+
+# System prompt used exclusively in reflection mode. The agent does NOT see
+# its usual persona, memory, notes, or heartbeat in this mode — only the
+# observable behavior captured in today's session transcripts.
+_REFLECTION_SYSTEM_PROMPT = """\
+You are running in REFLECTION MODE. You do NOT have access to your usual
+persona, memory, notes, or heartbeat. Your only source of truth is the raw
+session transcripts from today, mounted read-only at /reflection-logs/.
+
+Each line in every *.jsonl file under /reflection-logs/ is one event
+(tool_use, tool_result, user_prompt, session_start, session_stop, etc.)
+with a "timestamp" field in ISO 8601 UTC.
+
+Your job is to identify concrete improvements to your tooling and workflow:
+
+  1. Tools you used inefficiently — repeated retries, ignored output,
+     wrong tool for the job, excessive reads before writes.
+  2. Tools or permissions that would have unblocked you but were missing
+     (new fs_read/fs_write paths, new tools, skills, plugins).
+  3. Repeated patterns worth capturing as a reusable snippet, skill,
+     or standing note.
+  4. Errors or friction points — tool_result events with "is_error": true,
+     or repeated corrections — that you want to avoid tomorrow.
+
+Ignore any session whose session_id starts with "reflection-" — those are
+prior reflection runs, not real work.
+
+Write a single markdown report to
+/workspace/agents/{agent_name}/reflections/{date}.md. Keep it under 400
+words. Be concrete and actionable. No narrative recap of the day — focus
+only on improvements.
+
+When the report is written, stop.
+"""
+
+
+def _reflection_user_prompt(agent_name: str, date: str) -> str:
+    return (
+        f"Agent: {agent_name}\n"
+        f"Date: {date}\n\n"
+        "Scan /reflection-logs/ for today's session transcripts, then write "
+        f"your reflection report to /workspace/agents/{agent_name}/reflections/{date}.md "
+        "following the instructions in your system prompt."
+    )
+
+
+async def _run_reflection(config: StartMessage) -> None:
+    """Execute a single reflection turn and return.
+
+    Skips all normal persona/memory assembly. Uses a hardcoded reflection
+    system prompt and a restricted tool allow-list. Runs exactly one
+    conversation turn, then the caller disconnects the client and exits.
+    """
+    date = datetime.now(timezone.utc).date().isoformat()
+
+    log.info(
+        "Reflection mode: agent=%r model=%s date=%s cwd=%s",
+        config.name, config.model, date, config.cwd,
+    )
+
+    options = ClaudeAgentOptions(
+        system_prompt=_REFLECTION_SYSTEM_PROMPT,
+        allowed_tools=_REFLECTION_TOOLS,
+        permission_mode="acceptEdits",
+        max_turns=config.max_turns,
+        model=config.model,
+        cwd=config.cwd,
+    )
+
+    client = ClaudeSDKClient(options=options)
+    await client.connect()
+    log.info("Reflection ClaudeSDKClient connected")
+    emit_ready()
+
+    try:
+        await run_prompt(client, _reflection_user_prompt(config.name, date))
+    finally:
+        log.info("Disconnecting reflection ClaudeSDKClient")
+        try:
+            await client.disconnect()
+        except Exception as exc:
+            log.debug("Reflection disconnect error (suppressed): %s", exc)
+
 
 # ---------------------------------------------------------------------------
 # Inbound message dispatcher
@@ -2201,6 +2293,15 @@ async def main() -> None:
 
             if isinstance(msg, StartMessage):
                 config = msg
+
+                # Reflection mode: take a completely separate code path that
+                # skips persona context, custom MCP tools, and the usual
+                # prompt loop. After the single reflection turn completes we
+                # fall through and the finally-block disconnects & exits.
+                if os.environ.get("TRI_ONYX_MODE") == "reflection":
+                    await _run_reflection(config)
+                    break
+
                 send_handler = SendMessageHandler(dispatcher)
                 restart_handler = RestartAgentHandler(dispatcher)
                 bcp_handler = BCPHandler(dispatcher)

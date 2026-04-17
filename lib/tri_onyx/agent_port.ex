@@ -70,6 +70,7 @@ defmodule TriOnyx.AgentPort do
           | {:session_id, String.t()}
           | {:source_dir, String.t()}
           | {:image, String.t()}
+          | {:mode, :normal | :reflection}
 
   defstruct [:port, :notify, :buffer, :container_name]
 
@@ -99,6 +100,8 @@ defmodule TriOnyx.AgentPort do
 
   - `:notify` — pid to receive `{:agent_event, pid(), event()}` messages (required)
   - `:name` — optional GenServer name
+  - `:mode` — `:normal` (default) or `:reflection`. Passed through to
+    `TriOnyx.Sandbox.build_docker_args/3` in Docker mode.
   """
   @spec start_link([start_opt()]) :: GenServer.on_start()
   def start_link(opts) do
@@ -579,8 +582,9 @@ defmodule TriOnyx.AgentPort do
 
     sandbox_opts =
       opts
-      |> Keyword.take([:image])
+      |> Keyword.take([:image, :mode])
       |> Keyword.put(:workspace_dir, host_workspace)
+      |> Keyword.put(:log_dir, resolve_host_path(Application.get_env(:tri_onyx, :session_log_dir, "logs")))
 
     docker_args = Sandbox.build_docker_args(definition, session_id, sandbox_opts)
     container_name = "tri-onyx-#{definition.name}-#{session_id}"
