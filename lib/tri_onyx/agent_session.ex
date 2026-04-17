@@ -49,7 +49,8 @@ defmodule TriOnyx.AgentSession do
           shutdown_reason: String.t() | nil,
           memory_save_timer: reference() | nil,
           interrupt_prompt: {String.t(), map()} | nil,
-          session_key: String.t() | nil
+          session_key: String.t() | nil,
+          mode: :normal | :reflection
         }
 
   @type start_opt ::
@@ -58,6 +59,7 @@ defmodule TriOnyx.AgentSession do
           | {:id, String.t()}
           | {:name, GenServer.name()}
           | {:session_key, String.t()}
+          | {:mode, :normal | :reflection}
 
   # --- Public API ---
 
@@ -142,7 +144,8 @@ defmodule TriOnyx.AgentSession do
   def init(opts) do
     definition = Keyword.fetch!(opts, :definition)
     trigger_type = Keyword.get(opts, :trigger_type, :external_message)
-    session_id = Keyword.get(opts, :id, generate_session_id())
+    mode = Keyword.get(opts, :mode, :normal)
+    session_id = Keyword.get(opts, :id, generate_session_id(mode))
     session_key = Keyword.get(opts, :session_key)
 
     capability_level = RiskScorer.infer_capability(definition.tools, definition.network, definition)
@@ -191,7 +194,8 @@ defmodule TriOnyx.AgentSession do
       shutdown_reason: nil,
       memory_save_timer: nil,
       interrupt_prompt: nil,
-      session_key: session_key
+      session_key: session_key,
+      mode: mode
     }
 
     # Log session start
@@ -214,18 +218,27 @@ defmodule TriOnyx.AgentSession do
     port_opts = [
       notify: self(),
       definition: state.definition,
-      session_id: state.id
+      session_id: state.id,
+      mode: state.mode
     ]
 
     Workspace.ensure_agent_dir(state.definition.name)
-    workspace_context = Workspace.read_context(state.definition.name)
+
+    # Reflection runs deliberately skip persona assembly — the Python harness
+    # uses a hardcoded reflection system prompt and must not see the agent's
+    # usual memory/notes/heartbeat.
+    workspace_context =
+      case state.mode do
+        :reflection -> %{}
+        _ -> Workspace.read_context(state.definition.name)
+      end
 
     case AgentPort.start_link(port_opts) do
       {:ok, port_pid} ->
         Process.monitor(port_pid)
 
         # Send start configuration to the runtime
-        agent_config = build_agent_config(state.definition, workspace_context)
+        agent_config = build_agent_config(state.definition, workspace_context, state.mode)
         AgentPort.send_start(port_pid, agent_config)
 
         {:noreply, %{state | port: port_pid}}
@@ -1271,7 +1284,14 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:port_down, reason}, state) do
     Logger.warning("AgentSession #{state.id}: port down: #{reason}")
     broadcast_event(state, %{"type" => "port_down", "reason" => reason})
-    {:noreply, %{state | port: nil, status: :stopped}}
+    new_state = %{state | port: nil, status: :stopped}
+
+    case state.mode do
+      # Reflection runs are single-shot; once the port exits there's nothing
+      # left for the session to do, so terminate cleanly instead of lingering.
+      :reflection -> {:stop, :normal, new_state}
+      _ -> {:noreply, new_state}
+    end
   end
 
   # --- Risk Level Management ---
@@ -1443,20 +1463,38 @@ defmodule TriOnyx.AgentSession do
 
   defp maybe_elevate_from_metadata(state, _metadata), do: state
 
-  @spec build_agent_config(AgentDefinition.t(), map()) :: map()
-  defp build_agent_config(definition, workspace_context) do
-    system_prompt = Workspace.PromptAssembler.assemble(definition, workspace_context)
+  @spec build_agent_config(AgentDefinition.t(), map(), :normal | :reflection) :: map()
+  defp build_agent_config(definition, workspace_context, mode) do
+    # In reflection mode the Python harness substitutes its own hardcoded
+    # system prompt and tool allow-list; we send an empty system prompt and
+    # no skills/plugins so no persona or extensions leak through.
+    system_prompt =
+      case mode do
+        :reflection -> ""
+        _ -> Workspace.PromptAssembler.assemble(definition, workspace_context)
+      end
 
-    %{
+    {skills, plugins} =
+      case mode do
+        :reflection -> {[], []}
+        _ -> {definition.skills, definition.plugins}
+      end
+
+    base = %{
       "name" => definition.name,
       "tools" => definition.tools,
       "model" => definition.model,
       "system_prompt" => system_prompt,
       "max_turns" => 100,
       "cwd" => "/workspace",
-      "skills" => definition.skills,
-      "plugins" => definition.plugins
+      "skills" => skills,
+      "plugins" => plugins
     }
+
+    case mode do
+      :reflection -> Map.put(base, "mode", "reflection")
+      _ -> base
+    end
   end
 
 
@@ -1465,9 +1503,14 @@ defmodule TriOnyx.AgentSession do
     InformationClassifier.classify_trigger(trigger_type)
   end
 
-  @spec generate_session_id() :: String.t()
-  defp generate_session_id do
-    :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
+  @spec generate_session_id(:normal | :reflection) :: String.t()
+  defp generate_session_id(mode \\ :normal) do
+    random = :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
+
+    case mode do
+      :reflection -> "reflection-" <> random
+      _ -> random
+    end
   end
 
   @spec mount_sensitivity_floor(AgentDefinition.t()) :: InformationClassifier.sensitivity_level()

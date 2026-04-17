@@ -469,6 +469,49 @@ defmodule TriOnyx.SandboxTest do
     end)
   end
 
+  describe "reflection mode" do
+    test "does NOT add reflection bind mount or env var in normal mode",
+         %{minimal_agent: def} do
+      args =
+        Sandbox.build_docker_args(def, "sess-001",
+          workspace_dir: "/host/workspace",
+          log_dir: "/host/logs"
+        )
+
+      volumes = find_all_volume_args(args)
+      refute Enum.any?(volumes, &String.contains?(&1, "/reflection-logs"))
+      refute Enum.any?(args, &String.starts_with?(&1, "TRI_ONYX_MODE="))
+    end
+
+    test "adds a read-only bind mount of the agent's log dir in reflection mode",
+         %{minimal_agent: def} do
+      args =
+        Sandbox.build_docker_args(def, "reflection-abc",
+          workspace_dir: "/host/workspace",
+          log_dir: "/host/logs",
+          mode: :reflection
+        )
+
+      volumes = find_all_volume_args(args)
+
+      assert Enum.any?(volumes, fn v ->
+               v == "/host/logs/minimal-agent:/reflection-logs:ro"
+             end)
+    end
+
+    test "sets TRI_ONYX_MODE=reflection env var in reflection mode",
+         %{minimal_agent: def} do
+      args =
+        Sandbox.build_docker_args(def, "reflection-abc",
+          workspace_dir: "/host/workspace",
+          log_dir: "/host/logs",
+          mode: :reflection
+        )
+
+      assert "TRI_ONYX_MODE=reflection" in args
+    end
+  end
+
   # Finds all -v volume argument values
   defp find_all_volume_args(args) do
     args

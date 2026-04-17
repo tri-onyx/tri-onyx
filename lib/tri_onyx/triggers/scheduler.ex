@@ -27,6 +27,8 @@ defmodule TriOnyx.Triggers.Scheduler do
   alias TriOnyx.Triggers.CronScheduler
   alias TriOnyx.Workspace
 
+  @reflection_job_prefix "reflection_"
+
   @heartbeat_template "# Heartbeat\n\n<!-- Current state and ongoing work -->\n"
 
   @heartbeat_prompt """
@@ -47,6 +49,7 @@ defmodule TriOnyx.Triggers.Scheduler do
           router: GenServer.server(),
           heartbeats: %{String.t() => heartbeat()},
           cron_jobs: %{String.t() => [atom()]},
+          reflection_jobs: %{String.t() => atom()},
           enabled: boolean()
         }
 
@@ -154,6 +157,37 @@ defmodule TriOnyx.Triggers.Scheduler do
     GenServer.call(server, {:cancel_agent_crons, agent_name})
   end
 
+  @doc """
+  Registers a daily reflection cron job for the given agent.
+
+  When the job fires, the scheduler calls
+  `TriOnyx.TriggerRouter.dispatch_reflection/2` which spawns a fresh
+  reflection-mode session for the agent.
+
+  Replaces any existing reflection job for the same agent.
+  """
+  @spec schedule_reflection(GenServer.server(), String.t(), String.t()) :: :ok
+  def schedule_reflection(server \\ __MODULE__, agent_name, cron_expression)
+      when is_binary(agent_name) and is_binary(cron_expression) do
+    GenServer.call(server, {:schedule_reflection, agent_name, cron_expression})
+  end
+
+  @doc """
+  Cancels the reflection cron job for the given agent, if any.
+  """
+  @spec cancel_reflection(GenServer.server(), String.t()) :: :ok
+  def cancel_reflection(server \\ __MODULE__, agent_name) when is_binary(agent_name) do
+    GenServer.call(server, {:cancel_reflection, agent_name})
+  end
+
+  @doc """
+  Lists all registered reflection jobs as `{agent_name, job_name}` tuples.
+  """
+  @spec list_reflections(GenServer.server()) :: [{String.t(), atom()}]
+  def list_reflections(server \\ __MODULE__) do
+    GenServer.call(server, :list_reflections)
+  end
+
   # --- GenServer Callbacks ---
 
   @impl GenServer
@@ -162,7 +196,7 @@ defmodule TriOnyx.Triggers.Scheduler do
 
     Logger.info("Scheduler started")
 
-    {:ok, %{router: router, heartbeats: %{}, cron_jobs: %{}, enabled: true}}
+    {:ok, %{router: router, heartbeats: %{}, cron_jobs: %{}, reflection_jobs: %{}, enabled: true}}
   end
 
   @impl GenServer
@@ -269,6 +303,58 @@ defmodule TriOnyx.Triggers.Scheduler do
     {:reply, :ok, state}
   end
 
+  def handle_call({:schedule_reflection, agent_name, cron_expression}, _from, state) do
+    state = do_cancel_reflection(state, agent_name)
+
+    case Crontab.CronExpression.Parser.parse(cron_expression) do
+      {:ok, cron_expr} ->
+        job_name = :"#{@reflection_job_prefix}#{agent_name}"
+
+        job =
+          CronScheduler.new_job()
+          |> Quantum.Job.set_name(job_name)
+          |> Quantum.Job.set_schedule(cron_expr)
+          |> Quantum.Job.set_task(fn ->
+            case TriggerRouter.dispatch_reflection(agent_name) do
+              {:ok, _pid} ->
+                Logger.info("Scheduler: reflection dispatched for '#{agent_name}'")
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Scheduler: reflection dispatch failed for '#{agent_name}': #{inspect(reason)}"
+                )
+            end
+          end)
+
+        CronScheduler.add_job(job)
+
+        Logger.info(
+          "Scheduler: reflection job '#{job_name}' registered for '#{agent_name}' " <>
+            "(schedule: #{cron_expression})"
+        )
+
+        new_jobs = Map.put(state.reflection_jobs, agent_name, job_name)
+        {:reply, :ok, %{state | reflection_jobs: new_jobs}}
+
+      {:error, reason} ->
+        Logger.warning(
+          "Scheduler: invalid reflection cron '#{cron_expression}' for '#{agent_name}': " <>
+            inspect(reason)
+        )
+
+        {:reply, {:error, {:invalid_cron, reason}}, state}
+    end
+  end
+
+  def handle_call({:cancel_reflection, agent_name}, _from, state) do
+    state = do_cancel_reflection(state, agent_name)
+    {:reply, :ok, state}
+  end
+
+  def handle_call(:list_reflections, _from, state) do
+    {:reply, Enum.to_list(state.reflection_jobs), state}
+  end
+
   @impl GenServer
   def handle_info({:heartbeat, agent_name}, state) do
     case Map.fetch(state.heartbeats, agent_name) do
@@ -345,6 +431,19 @@ defmodule TriOnyx.Triggers.Scheduler do
         end)
 
         %{state | cron_jobs: Map.delete(state.cron_jobs, agent_name)}
+
+      :error ->
+        state
+    end
+  end
+
+  @spec do_cancel_reflection(state(), String.t()) :: state()
+  defp do_cancel_reflection(state, agent_name) do
+    case Map.fetch(state.reflection_jobs, agent_name) do
+      {:ok, job_name} ->
+        CronScheduler.delete_job(job_name)
+        Logger.info("Scheduler: reflection job '#{job_name}' cancelled for '#{agent_name}'")
+        %{state | reflection_jobs: Map.delete(state.reflection_jobs, agent_name)}
 
       :error ->
         state

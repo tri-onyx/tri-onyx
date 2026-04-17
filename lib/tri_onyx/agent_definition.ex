@@ -26,6 +26,10 @@ defmodule TriOnyx.AgentDefinition do
   - `plugins` — list of workspace plugin names (auto-injects FUSE read paths for `/plugins/<name>/**`)
   - `base_taint` — inherent taint floor from model provenance: "low", "medium", or "high" (default: "low")
   - `exclude_from_personalization` — if true, skip this agent's logs when generating the user profile (default: false)
+  - `reflection` — cron expression for a daily self-reflection run in an isolated
+    container mode (e.g. `"0 23 * * *"`). The reflection run receives only the
+    hardcoded reflection system prompt plus read-only access to today's session
+    logs, and writes its findings to `/workspace/agents/<name>/reflections/`.
   """
 
   alias TriOnyx.ToolRegistry
@@ -82,7 +86,8 @@ defmodule TriOnyx.AgentDefinition do
           browser: boolean(),
           docker_socket: boolean(),
           trionyx_repo: boolean(),
-          exclude_from_personalization: boolean()
+          exclude_from_personalization: boolean(),
+          reflection: String.t() | nil
         }
 
   @enforce_keys [:name, :tools, :system_prompt]
@@ -109,7 +114,8 @@ defmodule TriOnyx.AgentDefinition do
     browser: false,
     docker_socket: false,
     trionyx_repo: false,
-    exclude_from_personalization: false
+    exclude_from_personalization: false,
+    reflection: nil
   ]
 
   @doc """
@@ -191,7 +197,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, browser} <- parse_optional_boolean(yaml, "browser"),
          {:ok, docker_socket} <- parse_optional_boolean(yaml, "docker_socket"),
          {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo"),
-         {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization") do
+         {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization"),
+         {:ok, reflection} <- parse_reflection(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -244,7 +251,8 @@ defmodule TriOnyx.AgentDefinition do
          browser: browser,
          docker_socket: docker_socket,
          trionyx_repo: trionyx_repo,
-         exclude_from_personalization: exclude_from_personalization
+         exclude_from_personalization: exclude_from_personalization,
+         reflection: reflection
        }}
     end
   end
@@ -700,6 +708,23 @@ defmodule TriOnyx.AgentDefinition do
     case Crontab.CronExpression.Parser.parse(schedule_str) do
       {:ok, _expr} -> :ok
       {:error, reason} -> {:error, {:invalid_cron_schedule, idx, {:invalid_expression, reason}}}
+    end
+  end
+
+  @spec parse_reflection(map()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp parse_reflection(yaml) do
+    case Map.get(yaml, "reflection") do
+      nil ->
+        {:ok, nil}
+
+      expr when is_binary(expr) ->
+        case Crontab.CronExpression.Parser.parse(expr) do
+          {:ok, _parsed} -> {:ok, expr}
+          {:error, reason} -> {:error, {:invalid_reflection, {:invalid_expression, reason}}}
+        end
+
+      other ->
+        {:error, {:invalid_field_type, "reflection", :expected_cron_string, other}}
     end
   end
 
