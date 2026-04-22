@@ -21,8 +21,8 @@ This guide walks you through setting up a working TriOnyx instance from a fresh 
 ## 1. Clone and bootstrap
 
 ```bash
-git clone https://github.com/anthropics/TriOnyx.git
-cd TriOnyx
+git clone https://github.com/tri-onyx/tri-onyx.git
+cd tri-onyx
 ```
 
 ### Install git hooks
