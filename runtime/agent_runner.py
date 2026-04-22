@@ -153,7 +153,7 @@ _MAX_TOOL_RESULT_LEN = 4096
 # want the model to read JSONL transcripts and write a single markdown report,
 # nothing else. Custom MCP tools (SendMessage, BCP, email, etc.) are not
 # wired up in reflection mode.
-_REFLECTION_TOOLS = ["Read", "Write", "Glob", "Grep"]
+_REFLECTION_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"]
 
 # System prompt template used exclusively in reflection mode. The agent does
 # NOT see its usual persona, memory, notes, or heartbeat — only the
@@ -167,26 +167,45 @@ Each line in every *.jsonl file under /reflection-logs/ is one event
 (tool_use, tool_result, user_prompt, session_start, session_stop, etc.)
 with a "timestamp" field in ISO 8601 UTC.
 
-Your job is to identify concrete improvements to your tooling and workflow:
+Your job is to identify concrete improvements to your tooling and workflow.
+Classify every finding into one of two categories:
 
-  1. Tools you used inefficiently — repeated retries, ignored output,
-     wrong tool for the job, excessive reads before writes.
-  2. Tools or permissions that would have unblocked you but were missing
-     (new fs_read/fs_write paths, new tools, skills, plugins).
-  3. Repeated patterns worth capturing as a reusable snippet, skill,
-     or standing note.
-  4. Errors or friction points — tool_result events with "is_error": true,
-     or repeated corrections — that you want to avoid tomorrow.
+## Self-Correctable (things you can fix yourself next session)
+
+Behavioral changes, workflow improvements, standing notes, and habit
+corrections that require no external intervention. Examples:
+  - Using the wrong tool for a task (Bash instead of Glob)
+  - Forgetting to Read before Write
+  - Redundant retries or unnecessary tool calls
+  - Missing circuit-breakers or fallback patterns
+  - Knowledge you should remember (correct paths, tool names, constraints)
+
+## Operator Action Required (things you cannot fix yourself)
+
+Changes that require the operator to modify agent definitions, gateway
+configuration, permissions, infrastructure, or code. Examples:
+  - Missing fs_read/fs_write paths in the agent definition
+  - Missing tools or send_to/receive_from peers
+  - SDK bugs, gateway errors, or infrastructure issues
+  - Permission denials that block legitimate workflows
 
 Ignore any session whose session_id starts with "reflection-" — those are
 prior reflection runs, not real work.
 
-Write a single markdown report to
-/workspace/agents/{agent_name}/reflections/{date}.md. Keep it under 400
-words. Be concrete and actionable. No narrative recap of the day — focus
-only on improvements.
+You must produce two outputs:
 
-When the report is written, stop.
+1. Write a markdown reflection report to
+   /workspace/agents/{agent_name}/reflections/{date}.md using the two
+   sections above. Keep it under 400 words. Be concrete and actionable.
+   No narrative recap of the day — focus only on improvements.
+
+2. Read /workspace/agents/{agent_name}/HEARTBEAT.md, then append or update
+   a "## Reflection Items" section at the bottom with a bulleted list of
+   the self-correctable items. These are standing reminders for your next
+   session. Keep each item to one line. Remove any reflection items from
+   previous days that are no longer relevant based on today's logs.
+
+When both files are written, stop.
 """
 
 
@@ -198,9 +217,10 @@ def _reflection_user_prompt(agent_name: str, date: str) -> str:
     return (
         f"Agent: {agent_name}\n"
         f"Date: {date}\n\n"
-        "Scan /reflection-logs/ for today's session transcripts, then write "
-        f"your reflection report to /workspace/agents/{agent_name}/reflections/{date}.md "
-        "following the instructions in your system prompt."
+        "Scan /reflection-logs/ for today's session transcripts, then:\n"
+        f"1. Write your reflection report to /workspace/agents/{agent_name}/reflections/{date}.md\n"
+        f"2. Update /workspace/agents/{agent_name}/HEARTBEAT.md with self-correctable items\n\n"
+        "Follow the instructions in your system prompt."
     )
 
 
@@ -220,6 +240,7 @@ async def _run_reflection(config: StartMessage) -> None:
 
     options = ClaudeAgentOptions(
         system_prompt=_reflection_system_prompt(config.name, date),
+        tools=_REFLECTION_TOOLS,
         allowed_tools=_REFLECTION_TOOLS,
         permission_mode="acceptEdits",
         max_turns=config.max_turns,
@@ -2452,6 +2473,7 @@ async def main() -> None:
 
                 options = ClaudeAgentOptions(
                     system_prompt=config.system_prompt,
+                    tools=sdk_tools,
                     allowed_tools=sdk_tools,
                     permission_mode="acceptEdits",
                     max_turns=config.max_turns,

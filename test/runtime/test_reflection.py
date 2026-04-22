@@ -29,7 +29,7 @@ import agent_runner
 
 def test_reflection_tools_are_restricted() -> None:
     """Reflection mode must not grant SendMessage, Bash, WebFetch, etc."""
-    assert agent_runner._REFLECTION_TOOLS == ["Read", "Write", "Glob", "Grep"]
+    assert agent_runner._REFLECTION_TOOLS == ["Read", "Write", "Edit", "Glob", "Grep"]
 
 
 def test_reflection_system_prompt_references_log_mount() -> None:
@@ -56,8 +56,21 @@ def test_reflection_system_prompt_excludes_prior_reflection_sessions() -> None:
     assert "reflection-" in prompt
 
 
+def test_reflection_system_prompt_has_two_finding_categories() -> None:
+    prompt = agent_runner._REFLECTION_SYSTEM_PROMPT
+    assert "Self-Correctable" in prompt
+    assert "Operator Action Required" in prompt
+
+
+def test_reflection_system_prompt_instructs_heartbeat_update() -> None:
+    prompt = agent_runner._reflection_system_prompt("main", "2026-04-22")
+    assert "HEARTBEAT.md" in prompt
+    assert "Reflection Items" in prompt
+
+
 def test_reflection_user_prompt_fills_template() -> None:
     out = agent_runner._reflection_user_prompt("researcher", "2026-04-17")
     assert "Agent: researcher" in out
     assert "Date: 2026-04-17" in out
     assert "/workspace/agents/researcher/reflections/2026-04-17.md" in out
+    assert "HEARTBEAT.md" in out
