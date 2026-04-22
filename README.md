@@ -22,24 +22,29 @@ The term comes from [Simon Willison's "The Lethal Trifecta"](https://simonwillis
 
 Other agent runtimes sandbox **capability** — restrict filesystem, disable shell, limit network. This misses the point. The real danger isn't any single property. It's the combination of three:
 
-> **Untrusted content** — Web pages, emails, API responses — any of which can carry prompt injections.
+> **Untrusted content** — web pages, emails, API responses carrying prompt injections
 >
-> **x Sensitive information** — Credentials, private files, internal APIs — things an attacker wants to reach.
+> \+ **Sensitive information** — credentials, private files, internal APIs
 >
-> **x Capabilities** — Shell access, file writes, inter-agent messaging — tools to act on a hijacked context.
+> \+ **Capabilities** — shell access, file writes, inter-agent messaging
 >
-> **= High-risk agent** — TriOnyx tracks **information**, not just capability — blocking tainted data from reaching sensitive resources.
+> \= **High-risk agent** — TriOnyx tracks *information flow*, not just capability, blocking tainted data from reaching sensitive resources
 
 ---
 
 ## Features
 
-- **Isolated containers** — each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state
+**Security & information flow**
 - **Taint tracking** — Biba integrity model tracks what each agent has been exposed to
 - **Sensitivity labels** — Bell-LaPadula confidentiality tracks access to secrets and private data
 - **Information flow enforcement** — the gateway intercepts all inter-agent messages and blocks policy violations
 - **Bandwidth-Constrained Protocol** — tainted agents communicate with clean agents through structured, human-approvable formats
+
+**Isolation & sandboxing**
+- **Isolated containers** — each agent runs in its own Docker container with per-agent FUSE filesystem, network rules, and no shared state
 - **FUSE filesystem** — custom Go driver enforces per-file read/write policies with O(1) path-trie lookups
+
+**Runtime**
 - **Browser sessions** — headless Chromium with persistent login sessions from the host
 - **Plugin system** — reusable agent extensions installable from git repos
 - **Auditable everything** — structured logs for file access, tool calls, message routing, and policy violations
