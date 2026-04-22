@@ -69,31 +69,86 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 The gateway runs as a named Erlang node (`gateway`), enabling remote evaluation of Elixir expressions from inside the container. This is useful for triggering internal operations that don't have HTTP endpoints (e.g., reflection runs, scheduler inspection).
 
 ```bash
-# Run an arbitrary Elixir expression on the running gateway node.
+# General pattern — replace HOSTNAME, Module, :function, and [args].
 # ERL_AFLAGS= clears the container-level flags so the admin node gets its own name.
-# Replace HOSTNAME with the container's hostname (docker exec CONTAINER hostname).
 docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
   elixir --sname admin --cookie trionyx -e \
   ':rpc.call(:"gateway@HOSTNAME", Module, :function, [args]) |> IO.inspect()'
+
+# Get the current hostname (changes on every container recreate)
+docker exec trionyx-gateway-1 hostname
 ```
 
-Examples:
+GenServer-based modules (`TriggerRouter`, `AgentSupervisor`, `Scheduler`, `ApprovalQueue`, `WebhookRegistry`) require the module name as the first argument (the server name). Plain modules (`SessionLogger`, `AgentLoader`) do not.
+
+### Agent management
 
 ```bash
-# List registered agents
-docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
-  elixir --sname admin --cookie trionyx -e \
-  ':rpc.call(:"gateway@HOSTNAME", TriOnyx.TriggerRouter, :list_agents, [])
-   |> Enum.map(& &1.name) |> IO.inspect()'
+# List registered agent names
+:rpc.call(N, TriOnyx.TriggerRouter, :list_agents, [TriOnyx.TriggerRouter])
+|> Enum.map(& &1.name)
 
-# Trigger a reflection run for an agent
-docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
-  elixir --sname admin --cookie trionyx -e \
-  ':rpc.call(:"gateway@HOSTNAME", TriOnyx.TriggerRouter, :dispatch_reflection, ["main"])
-   |> IO.inspect()'
+# Get a specific agent definition
+:rpc.call(N, TriOnyx.TriggerRouter, :get_agent, [TriOnyx.TriggerRouter, "main"])
+
+# Reload definitions from disk (returns {:ok, count})
+:rpc.call(N, TriOnyx.TriggerRouter, :load_agents, [TriOnyx.TriggerRouter])
 ```
 
-Note: after `docker compose up -d gateway` (which recreates the container), the hostname changes. Re-check with `docker exec trionyx-gateway-1 hostname`.
+### Sessions
+
+```bash
+# List active sessions with name and status
+:rpc.call(N, TriOnyx.AgentSupervisor, :list_sessions, [TriOnyx.AgentSupervisor])
+|> Enum.map(fn s -> {s.definition.name, s.status} end)
+
+# Count active sessions
+:rpc.call(N, TriOnyx.AgentSupervisor, :count_sessions, [TriOnyx.AgentSupervisor])
+```
+
+### Triggers and scheduling
+
+```bash
+# Trigger a reflection run for an agent
+:rpc.call(N, TriOnyx.TriggerRouter, :dispatch_reflection, [TriOnyx.TriggerRouter, "main"])
+
+# List heartbeat schedules
+:rpc.call(N, TriOnyx.Triggers.Scheduler, :list_heartbeats, [TriOnyx.Triggers.Scheduler])
+
+# List reflection jobs
+:rpc.call(N, TriOnyx.Triggers.Scheduler, :list_reflections, [TriOnyx.Triggers.Scheduler])
+
+# Check/toggle global heartbeat dispatch
+:rpc.call(N, TriOnyx.Triggers.Scheduler, :enabled?, [TriOnyx.Triggers.Scheduler])
+:rpc.call(N, TriOnyx.Triggers.Scheduler, :set_enabled, [TriOnyx.Triggers.Scheduler, false])
+```
+
+### Logs
+
+```bash
+# List agents that have log directories
+:rpc.call(N, TriOnyx.SessionLogger, :list_agents, [])
+
+# List session log files for an agent
+:rpc.call(N, TriOnyx.SessionLogger, :list_sessions, ["main"])
+```
+
+### Approvals
+
+```bash
+# List pending approval items
+:rpc.call(N, TriOnyx.BCP.ApprovalQueue, :list_pending, [TriOnyx.BCP.ApprovalQueue])
+```
+
+To run any of the above, wrap it in the full `docker exec` invocation shown in the general pattern. For example:
+
+```bash
+docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
+  elixir --sname admin --cookie trionyx -e \
+  'n = :"gateway@'$(docker exec trionyx-gateway-1 hostname)'";
+   :rpc.call(n, TriOnyx.TriggerRouter, :list_agents, [TriOnyx.TriggerRouter])
+   |> Enum.map(& &1.name) |> IO.inspect()'
+```
 
 ## Source of Truth
 
