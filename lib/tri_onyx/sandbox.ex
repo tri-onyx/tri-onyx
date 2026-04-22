@@ -51,22 +51,30 @@ defmodule TriOnyx.Sandbox do
   - `:workspace_dir` — host workspace directory to bind-mount into the container
     (default: current working directory)
   - `:image` — Docker image to use (default: `tri-onyx-agent:latest`)
+  - `:mode` — `:normal` (default) or `:reflection`. Reflection mode adds a
+    read-only bind mount of the agent's session log directory at
+    `/reflection-logs` and sets `TRI_ONYX_MODE=reflection` in the container
+    environment so the harness takes the reflection code path.
+  - `:log_dir` — host path to the gateway's session log directory (defaults to
+    the `:session_log_dir` app env). Only consulted when `mode: :reflection`.
   """
   @spec build_docker_args(AgentDefinition.t(), String.t(), keyword()) :: [String.t()]
   def build_docker_args(%AgentDefinition{} = definition, session_id, opts \\ [])
       when is_binary(session_id) do
     workspace_dir = Keyword.get(opts, :workspace_dir, File.cwd!())
     image = Keyword.get(opts, :image, @agent_image)
+    mode = Keyword.get(opts, :mode, :normal)
 
     ["run"] ++
       base_flags(definition.name, session_id) ++
       fuse_flags() ++
       network_flags(definition.network) ++
       volume_flags(workspace_dir) ++
+      reflection_flags(definition, mode, opts) ++
       browser_flags(definition, workspace_dir) ++
       docker_socket_flags(definition) ++
       trionyx_repo_flags(definition) ++
-      env_flags(definition, session_id) ++
+      env_flags(definition, session_id, mode) ++
       [image]
   end
 
@@ -268,8 +276,21 @@ defmodule TriOnyx.Sandbox do
 
   defp trionyx_repo_flags(%AgentDefinition{trionyx_repo: false}), do: []
 
-  @spec env_flags(AgentDefinition.t(), String.t()) :: [String.t()]
-  defp env_flags(%AgentDefinition{} = definition, session_id) do
+  @spec reflection_flags(AgentDefinition.t(), :normal | :reflection, keyword()) :: [String.t()]
+  defp reflection_flags(_definition, :normal, _opts), do: []
+
+  defp reflection_flags(%AgentDefinition{name: name}, :reflection, opts) do
+    log_dir =
+      Keyword.get(opts, :log_dir) ||
+        Application.get_env(:tri_onyx, :session_log_dir, "logs")
+
+    agent_log_dir = Path.join(Path.expand(log_dir), name)
+
+    ["-v", "#{agent_log_dir}:/reflection-logs:ro"]
+  end
+
+  @spec env_flags(AgentDefinition.t(), String.t(), :normal | :reflection) :: [String.t()]
+  defp env_flags(%AgentDefinition{} = definition, session_id, mode) do
     fuse_policy = build_fuse_policy(definition)
 
     # Required env vars
@@ -278,6 +299,12 @@ defmodule TriOnyx.Sandbox do
       {"-e", "TRI_ONYX_AGENT_NAME=#{definition.name}"},
       {"-e", "TRI_ONYX_SESSION_ID=#{session_id}"}
     ]
+
+    mode_env =
+      case mode do
+        :reflection -> [{"-e", "TRI_ONYX_MODE=reflection"}]
+        :normal -> []
+      end
 
     # Plugin list for entrypoint to install Python dependencies
     plugin_env =
@@ -301,7 +328,7 @@ defmodule TriOnyx.Sandbox do
       |> Enum.filter(&System.get_env/1)
       |> Enum.map(fn key -> {"-e", "#{key}=#{System.get_env(key)}"} end)
 
-    (env ++ plugin_env ++ browser_env ++ passthrough)
+    (env ++ mode_env ++ plugin_env ++ browser_env ++ passthrough)
     |> Enum.flat_map(fn {flag, value} -> [flag, value] end)
   end
 end

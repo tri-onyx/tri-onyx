@@ -712,6 +712,58 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "reflection parsing" do
+    test "defaults to nil when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.reflection == nil
+    end
+
+    test "parses a valid cron expression" do
+      content = """
+      ---
+      name: reflector
+      tools: Read
+      reflection: "0 23 * * *"
+      ---
+
+      Reflective agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.reflection == "0 23 * * *"
+    end
+
+    test "rejects an invalid cron expression" do
+      content = """
+      ---
+      name: reflector
+      tools: Read
+      reflection: "not a cron"
+      ---
+
+      Reflective agent.
+      """
+
+      assert {:error, {:invalid_reflection, {:invalid_expression, _}}} =
+               AgentDefinition.parse(content)
+    end
+
+    test "rejects a non-string value" do
+      content = """
+      ---
+      name: reflector
+      tools: Read
+      reflection: 42
+      ---
+
+      Reflective agent.
+      """
+
+      assert {:error, {:invalid_field_type, "reflection", :expected_cron_string, 42}} =
+               AgentDefinition.parse(content)
+    end
+  end
+
   describe "input_sources parsing" do
     test "parses valid input_sources" do
       content = """

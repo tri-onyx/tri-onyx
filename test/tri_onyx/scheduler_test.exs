@@ -114,4 +114,39 @@ defmodule TriOnyx.Triggers.SchedulerTest do
       assert Scheduler.enabled?(scheduler) == true
     end
   end
+
+  describe "schedule_reflection/3" do
+    test "registers a reflection job for an agent", %{scheduler: scheduler} do
+      assert :ok = Scheduler.schedule_reflection(scheduler, "heartbeat-agent", "0 23 * * *")
+
+      assert [{"heartbeat-agent", job_name}] = Scheduler.list_reflections(scheduler)
+      assert job_name == :"reflection_heartbeat-agent"
+    end
+
+    test "replaces an existing reflection job for the same agent", %{scheduler: scheduler} do
+      :ok = Scheduler.schedule_reflection(scheduler, "heartbeat-agent", "0 23 * * *")
+      :ok = Scheduler.schedule_reflection(scheduler, "heartbeat-agent", "0 7 * * *")
+
+      assert [{"heartbeat-agent", _}] = Scheduler.list_reflections(scheduler)
+    end
+
+    test "rejects an invalid cron expression", %{scheduler: scheduler} do
+      assert {:error, {:invalid_cron, _}} =
+               Scheduler.schedule_reflection(scheduler, "heartbeat-agent", "not a cron")
+
+      assert Scheduler.list_reflections(scheduler) == []
+    end
+  end
+
+  describe "cancel_reflection/2" do
+    test "cancels an existing reflection job", %{scheduler: scheduler} do
+      :ok = Scheduler.schedule_reflection(scheduler, "heartbeat-agent", "0 23 * * *")
+      assert :ok = Scheduler.cancel_reflection(scheduler, "heartbeat-agent")
+      assert Scheduler.list_reflections(scheduler) == []
+    end
+
+    test "is a no-op when no reflection job exists", %{scheduler: scheduler} do
+      assert :ok = Scheduler.cancel_reflection(scheduler, "nonexistent")
+    end
+  end
 end

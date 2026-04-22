@@ -126,4 +126,15 @@ defmodule TriOnyx.TriggerRouterTest do
     # Python runtime. These are covered in integration tests (Phase 10).
     # Here we test the routing logic and error handling.
   end
+
+  describe "dispatch_reflection/2" do
+    test "returns error for unknown agent", %{router: router} do
+      assert {:error, {:unknown_agent, "nonexistent"}} =
+               TriggerRouter.dispatch_reflection(router, "nonexistent")
+    end
+
+    # Full dispatch would spawn a Docker-backed session; that path is
+    # exercised in integration tests. Here we only verify the routing
+    # error for an unregistered agent.
+  end
 end
