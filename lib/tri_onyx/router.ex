@@ -1139,15 +1139,15 @@ defmodule TriOnyx.Router do
     safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
     manifest = Workspace.read_risk_manifest()
 
-    # Get git status (porcelain format) for all files
+    # Get git status (porcelain format, NUL-delimited to avoid quoted paths)
     git_status_map =
-      case System.cmd("git", safe ++ ["status", "--porcelain"], cd: dir, stderr_to_stdout: true) do
+      case System.cmd("git", safe ++ ["status", "--porcelain", "-z"], cd: dir, stderr_to_stdout: true) do
         {output, 0} ->
           output
-          |> String.split("\n", trim: true)
-          |> Enum.reduce(%{}, fn line, acc ->
-            status = String.slice(line, 0, 2) |> String.trim()
-            path = String.slice(line, 3..-1//1)
+          |> String.split(<<0>>, trim: true)
+          |> Enum.reduce(%{}, fn entry, acc ->
+            status = String.slice(entry, 0, 2) |> String.trim()
+            path = String.slice(entry, 3..-1//1)
             Map.put(acc, path, status)
           end)
 
@@ -1155,10 +1155,10 @@ defmodule TriOnyx.Router do
           %{}
       end
 
-    # Get all tracked files
+    # Get all tracked files (NUL-delimited to avoid quoted paths)
     tracked =
-      case System.cmd("git", safe ++ ["ls-files"], cd: dir, stderr_to_stdout: true) do
-        {output, 0} -> output |> String.split("\n", trim: true) |> MapSet.new()
+      case System.cmd("git", safe ++ ["ls-files", "-z"], cd: dir, stderr_to_stdout: true) do
+        {output, 0} -> output |> String.split(<<0>>, trim: true) |> MapSet.new()
         _ -> MapSet.new()
       end
 
