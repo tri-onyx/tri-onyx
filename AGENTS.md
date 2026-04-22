@@ -64,6 +64,37 @@ The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control ins
 - After rebuilding, restart any running containers to pick up the new image
 - For runtime-only changes (Python files under `runtime/`), just restart the agent container — no rebuild needed
 
+## Gateway Management Commands
+
+The gateway runs as a named Erlang node (`gateway`), enabling remote evaluation of Elixir expressions from inside the container. This is useful for triggering internal operations that don't have HTTP endpoints (e.g., reflection runs, scheduler inspection).
+
+```bash
+# Run an arbitrary Elixir expression on the running gateway node.
+# ERL_AFLAGS= clears the container-level flags so the admin node gets its own name.
+# Replace HOSTNAME with the container's hostname (docker exec CONTAINER hostname).
+docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
+  elixir --sname admin --cookie trionyx -e \
+  ':rpc.call(:"gateway@HOSTNAME", Module, :function, [args]) |> IO.inspect()'
+```
+
+Examples:
+
+```bash
+# List registered agents
+docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
+  elixir --sname admin --cookie trionyx -e \
+  ':rpc.call(:"gateway@HOSTNAME", TriOnyx.TriggerRouter, :list_agents, [])
+   |> Enum.map(& &1.name) |> IO.inspect()'
+
+# Trigger a reflection run for an agent
+docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
+  elixir --sname admin --cookie trionyx -e \
+  ':rpc.call(:"gateway@HOSTNAME", TriOnyx.TriggerRouter, :dispatch_reflection, ["main"])
+   |> IO.inspect()'
+```
+
+Note: after `docker compose up -d gateway` (which recreates the container), the hostname changes. Re-check with `docker exec trionyx-gateway-1 hostname`.
+
 ## Source of Truth
 
 - **Never duplicate logic or data** across languages/files if it can be avoided. Duplication leads to silent drift across sessions.
