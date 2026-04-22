@@ -24,6 +24,7 @@ defmodule TriOnyx.TriggerRouter do
   alias TriOnyx.AgentLoader
   alias TriOnyx.AgentSession
   alias TriOnyx.AgentSupervisor
+  alias TriOnyx.AuditLog
   alias TriOnyx.Triggers.Scheduler
 
   @type trigger_type ::
@@ -159,6 +160,8 @@ defmodule TriOnyx.TriggerRouter do
       "TriggerRouter: dispatching #{trigger_type} trigger to agent '#{agent_name}'"
     )
 
+    AuditLog.log_trigger(trigger_type, agent_name, TriOnyx.TaintMatrix.trigger_taint(trigger_type))
+
     case Map.fetch(state.definitions, agent_name) do
       {:ok, definition} ->
         result = ensure_session_and_prompt(state.supervisor, definition, trigger_type, payload, metadata)
@@ -174,6 +177,8 @@ defmodule TriOnyx.TriggerRouter do
     case Map.fetch(state.definitions, agent_name) do
       {:ok, definition} ->
         Logger.info("TriggerRouter: dispatching reflection run for '#{agent_name}'")
+
+        AuditLog.log_trigger(:reflection, agent_name, :low)
 
         session_opts = [
           definition: definition,

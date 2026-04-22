@@ -23,6 +23,8 @@ defmodule TriOnyx.AuditLog do
           | :tool_call
           | :tool_result
           | :information_change
+          | :risk_escalation
+          | :axis_change
           | :inter_agent_message
           | :messaging_policy_rejection
           | :trigger
@@ -231,6 +233,43 @@ defmodule TriOnyx.AuditLog do
       to_agent: to_agent,
       old_category: old_category,
       new_category: new_category
+    }})
+  end
+
+  @doc """
+  Logs a risk escalation event (taint or sensitivity axis changed, causing
+  effective_risk to change).
+  """
+  @spec log_risk_escalation(GenServer.server(), String.t(), String.t(), map()) :: :ok
+  def log_risk_escalation(server \\ __MODULE__, session_id, agent_name, details) do
+    GenServer.cast(server, {:log, %{
+      type: :risk_escalation,
+      session_id: session_id,
+      agent_name: agent_name,
+      previous_taint: details[:previous_taint],
+      new_taint: details[:new_taint],
+      previous_sensitivity: details[:previous_sensitivity],
+      new_sensitivity: details[:new_sensitivity],
+      previous_risk: details[:previous_risk],
+      new_risk: details[:new_risk],
+      capability: details[:capability],
+      source: details[:source]
+    }})
+  end
+
+  @doc """
+  Logs a taint or sensitivity change that did not cross a risk boundary.
+  """
+  @spec log_axis_change(GenServer.server(), String.t(), String.t(), map()) :: :ok
+  def log_axis_change(server \\ __MODULE__, session_id, agent_name, details) do
+    GenServer.cast(server, {:log, %{
+      type: :axis_change,
+      session_id: session_id,
+      agent_name: agent_name,
+      axis: details[:axis],
+      previous: details[:previous],
+      new: details[:new],
+      source: details[:source]
     }})
   end
 

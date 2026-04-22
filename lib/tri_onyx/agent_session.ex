@@ -20,6 +20,7 @@ defmodule TriOnyx.AgentSession do
 
   alias TriOnyx.AgentDefinition
   alias TriOnyx.AgentPort
+  alias TriOnyx.AuditLog
   alias TriOnyx.EventBus
   alias TriOnyx.InformationClassifier
   alias TriOnyx.RiskScorer
@@ -207,6 +208,17 @@ defmodule TriOnyx.AgentSession do
       "input_risk" => to_string(input_risk),
       "capability_level" => to_string(capability_level),
       "effective_risk" => RiskScorer.format_risk(effective_risk)
+    })
+
+    AuditLog.log_session_start(session_id, definition.name, %{
+      input_risk: to_string(input_risk),
+      effective_risk: RiskScorer.format_risk(effective_risk),
+      information_level: to_string(InformationClassifier.higher_level(effective_taint, effective_sensitivity)),
+      taint_level: to_string(effective_taint),
+      sensitivity_level: to_string(effective_sensitivity),
+      capability_level: to_string(capability_level),
+      trigger_type: to_string(trigger_type),
+      mode: to_string(mode)
     })
 
     # Spawn the port process asynchronously
@@ -483,6 +495,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:tool_use, id, name, input}, state) do
     Logger.info("AgentSession #{state.id}: tool_use #{name} (#{id})")
     broadcast_event(state, %{"type" => "tool_use", "id" => id, "name" => name, "input" => input})
+    AuditLog.log_tool_call(state.id, id, name, %{})
     {:noreply, %{state | pending_tools: Map.put(state.pending_tools, id, {name, input})}}
   end
 
@@ -501,6 +514,8 @@ defmodule TriOnyx.AgentSession do
       "content" => content,
       "is_error" => is_error
     })
+
+    AuditLog.log_tool_result(state.id, id, is_error == true)
 
     # Classify tool result using the tool name tracked from the tool_use event
     {state, _} =
@@ -1336,6 +1351,33 @@ defmodule TriOnyx.AgentSession do
           "#{RiskScorer.format_risk(new_effective)})"
       )
 
+      agent_name = if is_map_key(state, :definition), do: state.definition.name, else: "unknown"
+
+      if risk_changed do
+        AuditLog.log_risk_escalation(state.id, agent_name, %{
+          previous_taint: current_taint,
+          new_taint: effective_taint,
+          previous_sensitivity: current_sensitivity,
+          new_sensitivity: effective_sensitivity,
+          previous_risk: previous_risk,
+          new_risk: new_effective,
+          capability: cap,
+          source: source
+        })
+      else
+        if taint_changed do
+          AuditLog.log_axis_change(state.id, agent_name, %{
+            axis: :taint, previous: current_taint, new: effective_taint, source: source
+          })
+        end
+
+        if sensitivity_changed do
+          AuditLog.log_axis_change(state.id, agent_name, %{
+            axis: :sensitivity, previous: current_sensitivity, new: effective_sensitivity, source: source
+          })
+        end
+      end
+
       state = %{
         state
         | taint_level: effective_taint,
@@ -1563,6 +1605,14 @@ defmodule TriOnyx.AgentSession do
       "taint_level" => to_string(state.taint_level),
       "sensitivity_level" => to_string(state.sensitivity_level),
       "effective_risk" => RiskScorer.format_risk(state.effective_risk)
+    })
+
+    AuditLog.log_session_stop(state.id, state.definition.name, %{
+      information_level: to_string(state.information_level),
+      effective_risk: RiskScorer.format_risk(state.effective_risk),
+      taint_level: to_string(state.taint_level),
+      sensitivity_level: to_string(state.sensitivity_level),
+      reason: inspect(reason)
     })
 
     SessionLogger.close_session(state.id, state.definition.name)
