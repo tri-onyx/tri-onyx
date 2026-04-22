@@ -7,6 +7,7 @@ services:
     ports:
       - "127.0.0.1:4000:4000"
     environment:
+      - ERL_AFLAGS=-sname gateway -setcookie trionyx
       - TRI_ONYX_CONNECTOR_TOKEN
       - TRI_ONYX_AGENTS_DIR=/app/workspace/agent-definitions
       - TRI_ONYX_WORKSPACE_DIR=/app/workspace

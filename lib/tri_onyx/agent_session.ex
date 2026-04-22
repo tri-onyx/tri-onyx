@@ -1240,6 +1240,11 @@ defmodule TriOnyx.AgentSession do
         AgentPort.send_shutdown(state.port, state.shutdown_reason)
         {:stop, {:shutdown, state.shutdown_reason}, state}
 
+      state.mode == :reflection ->
+        Logger.info("AgentSession #{state.id}: reflection complete, shutting down")
+        AgentPort.send_shutdown(state.port, "reflection complete")
+        {:stop, {:shutdown, "reflection complete"}, state}
+
       state.interrupt_prompt != nil ->
         # Race condition: result arrived before runtime saw the interrupt.
         # The prompt completed normally, so send the queued prompt without
