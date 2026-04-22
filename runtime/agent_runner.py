@@ -155,8 +155,8 @@ _MAX_TOOL_RESULT_LEN = 4096
 # wired up in reflection mode.
 _REFLECTION_TOOLS = ["Read", "Write", "Glob", "Grep"]
 
-# System prompt used exclusively in reflection mode. The agent does NOT see
-# its usual persona, memory, notes, or heartbeat in this mode — only the
+# System prompt template used exclusively in reflection mode. The agent does
+# NOT see its usual persona, memory, notes, or heartbeat — only the
 # observable behavior captured in today's session transcripts.
 _REFLECTION_SYSTEM_PROMPT = """\
 You are running in REFLECTION MODE. You do NOT have access to your usual
@@ -190,6 +190,10 @@ When the report is written, stop.
 """
 
 
+def _reflection_system_prompt(agent_name: str, date: str) -> str:
+    return _REFLECTION_SYSTEM_PROMPT.format(agent_name=agent_name, date=date)
+
+
 def _reflection_user_prompt(agent_name: str, date: str) -> str:
     return (
         f"Agent: {agent_name}\n"
@@ -215,7 +219,7 @@ async def _run_reflection(config: StartMessage) -> None:
     )
 
     options = ClaudeAgentOptions(
-        system_prompt=_REFLECTION_SYSTEM_PROMPT,
+        system_prompt=_reflection_system_prompt(config.name, date),
         allowed_tools=_REFLECTION_TOOLS,
         permission_mode="acceptEdits",
         max_turns=config.max_turns,

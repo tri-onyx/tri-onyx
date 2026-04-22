@@ -447,6 +447,9 @@ defmodule TriOnyx.AgentSession do
         Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP messages already flushed)")
         {:noreply, %{state | status: :running, pending_prompt: nil}}
 
+      nil when state.mode == :reflection ->
+        {:noreply, state}
+
       nil ->
         {:noreply, schedule_idle_timeout(state)}
     end

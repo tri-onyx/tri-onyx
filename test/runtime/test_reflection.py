@@ -46,8 +46,8 @@ def test_reflection_system_prompt_excludes_persona() -> None:
 
 
 def test_reflection_system_prompt_specifies_output_path() -> None:
-    prompt = agent_runner._REFLECTION_SYSTEM_PROMPT
-    assert "/workspace/agents/{agent_name}/reflections/{date}.md" in prompt
+    prompt = agent_runner._reflection_system_prompt("researcher", "2026-04-17")
+    assert "/workspace/agents/researcher/reflections/2026-04-17.md" in prompt
 
 
 def test_reflection_system_prompt_excludes_prior_reflection_sessions() -> None:
