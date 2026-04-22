@@ -491,7 +491,8 @@ defmodule TriOnyx.Workspace do
         "git",
         safe ++ ["commit", "-m", "chore: migrate workspace to per-agent layout"],
         cd: dir,
-        stderr_to_stdout: true
+        stderr_to_stdout: true,
+        env: committer_env()
       )
 
       Logger.info("Workspace: migration complete")
@@ -601,7 +602,9 @@ defmodule TriOnyx.Workspace do
   defp committer_env do
     [
       {"GIT_COMMITTER_NAME", "TriOnyx"},
-      {"GIT_COMMITTER_EMAIL", "gateway@tri_onyx"}
+      {"GIT_COMMITTER_EMAIL", "gateway@tri_onyx"},
+      {"GIT_AUTHOR_NAME", "TriOnyx"},
+      {"GIT_AUTHOR_EMAIL", "gateway@tri_onyx"}
     ]
   end
 end
