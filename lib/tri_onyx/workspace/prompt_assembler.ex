@@ -57,6 +57,8 @@ defmodule TriOnyx.Workspace.PromptAssembler do
 
   # --- Private Helpers ---
 
+  @heartbeat_max_bytes 16_384
+
   @spec build_persona_sections(map()) :: String.t()
   defp build_persona_sections(context) do
     today = Date.utc_today() |> Date.to_iso8601()
@@ -68,7 +70,7 @@ defmodule TriOnyx.Workspace.PromptAssembler do
         {"# User", Map.get(context, :user)},
         {"# Recent Memory \u2014 #{today}", Map.get(context, :daily_memory)},
         {"# Notes", Map.get(context, :notes)},
-        {"# Heartbeat", Map.get(context, :heartbeat)}
+        {"# Heartbeat", context |> Map.get(:heartbeat) |> truncate_tail(@heartbeat_max_bytes)}
       ]
       |> Enum.filter(fn {_heading, content} -> present?(content) end)
       |> Enum.map(fn {heading, content} -> "#{heading}\n#{content}\n" end)
@@ -96,6 +98,23 @@ defmodule TriOnyx.Workspace.PromptAssembler do
 
     You can write to these files at any time during a session, not just at shutdown. Keep entries concise and useful for future sessions.
     """
+  end
+
+  @spec truncate_tail(String.t() | nil, pos_integer()) :: String.t() | nil
+  defp truncate_tail(nil, _max_bytes), do: nil
+  defp truncate_tail(text, max_bytes) when byte_size(text) <= max_bytes, do: text
+
+  defp truncate_tail(text, max_bytes) do
+    tail = binary_part(text, byte_size(text) - max_bytes, max_bytes)
+
+    # Drop the first partial line so we start on a clean boundary
+    trimmed =
+      case :binary.match(tail, "\n") do
+        {pos, 1} -> binary_part(tail, pos + 1, byte_size(tail) - pos - 1)
+        :nomatch -> tail
+      end
+
+    "[truncated — showing last #{div(max_bytes, 1024)} KB of heartbeat]\n\n" <> trimmed
   end
 
   @spec present?(term()) :: boolean()
