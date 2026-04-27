@@ -141,6 +141,7 @@ defmodule TriOnyx.Workspace do
       when is_list(modified_paths) do
     dir = workspace_dir()
     safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    clear_stale_index_lock(dir)
 
     # Filter out paths that no longer exist on disk (files created then
     # deleted during the session, e.g. incoming articles that were reviewed
@@ -151,6 +152,8 @@ defmodule TriOnyx.Workspace do
         full = Path.join(dir, path)
         File.exists?(full) or File.dir?(full)
       end)
+
+    existing_paths = filter_ignored(existing_paths, dir, safe)
 
     if existing_paths == [] do
       Logger.debug("Workspace: no existing files to commit for #{agent_name}/#{session_id}")
@@ -288,6 +291,7 @@ defmodule TriOnyx.Workspace do
   def review_artifacts(paths, reviewer) when is_list(paths) and is_binary(reviewer) do
     dir = workspace_dir()
     safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    clear_stale_index_lock(dir)
     manifest_abs = Path.join(dir, @manifest_path)
 
     # Ensure .tri-onyx directory exists
@@ -392,6 +396,7 @@ defmodule TriOnyx.Workspace do
   def sweep_uncommitted do
     dir = workspace_dir()
     safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    clear_stale_index_lock(dir)
 
     # Check for any dirty state (untracked, modified, or deleted)
     case System.cmd("git", safe ++ ["status", "--porcelain"], cd: dir, stderr_to_stdout: true) do
@@ -446,6 +451,22 @@ defmodule TriOnyx.Workspace do
   end
 
   # --- Private Helpers ---
+
+  # Filters out paths matched by the workspace .gitignore so that
+  # `git add -- <paths>` doesn't fail trying to stage ignored files.
+  @spec filter_ignored([String.t()], String.t(), [String.t()]) :: [String.t()]
+  defp filter_ignored([], _dir, _safe), do: []
+
+  defp filter_ignored(paths, dir, safe) do
+    case System.cmd("git", safe ++ ["check-ignore", "--" | paths],
+           cd: dir,
+           stderr_to_stdout: true
+         ) do
+      {output, _code} ->
+        ignored = output |> String.split("\n", trim: true) |> MapSet.new()
+        Enum.reject(paths, &MapSet.member?(ignored, &1))
+    end
+  end
 
   # Detects old workspace layout (SOUL.md at root, no personality/ dir) and
   # migrates files into the new structure.
@@ -594,6 +615,21 @@ defmodule TriOnyx.Workspace do
         Logger.warning("Workspace: failed to set safe.directory (exit #{code}): #{output}")
         :ok
     end
+  end
+
+  # Removes a stale .git/index.lock left behind by a crashed git process.
+  # The gateway is the sole committer to the workspace repo, so a lock file
+  # with no running git process is always stale.
+  @spec clear_stale_index_lock(String.t()) :: :ok
+  defp clear_stale_index_lock(dir) do
+    lock = Path.join(dir, ".git/index.lock")
+
+    if File.exists?(lock) do
+      Logger.warning("Workspace: removing stale index.lock")
+      File.rm(lock)
+    end
+
+    :ok
   end
 
   # Default committer identity for git operations inside Docker where no

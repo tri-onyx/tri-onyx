@@ -2082,7 +2082,8 @@ async def run_prompt(
     prompt: str,
     interrupt_event: asyncio.Event | None = None,
     images: list[dict[str, str]] | None = None,
-) -> bool:
+    suppress_empty_result: bool = False,
+) -> tuple[bool, int]:
     """Send a prompt and stream the response through the protocol.
 
     Uses the persistent ClaudeSDKClient which maintains conversation context
@@ -2102,7 +2103,11 @@ async def run_prompt(
     and bails out immediately when set (no result emitted — the caller handles
     signalling the gateway).
 
-    Returns True if the prompt completed normally, False if interrupted.
+    When *suppress_empty_result* is True and the prompt completes with 0 turns,
+    the result event is not emitted.  This allows the caller to retry and have
+    the retry's result be the one the gateway sees.
+
+    Returns (completed, num_turns).
     """
     start_time = time.monotonic()
     num_turns = 0
@@ -2137,7 +2142,7 @@ async def run_prompt(
             # Check for interrupt before awaiting the next SDK message.
             if interrupt_event is not None and interrupt_event.is_set():
                 log.info("Interrupt detected between SDK messages, aborting prompt")
-                return False
+                return (False, num_turns)
 
             try:
                 log.debug("Awaiting next SDK message (received %d so far)...", msg_count)
@@ -2184,17 +2189,20 @@ async def run_prompt(
             elif isinstance(message, ResultMessage):
                 got_result = True
                 duration_ms = int((time.monotonic() - start_time) * 1000)
-                emit_result(
-                    duration_ms=duration_ms,
-                    num_turns=num_turns,
-                    cost_usd=getattr(
-                        message,
-                        "total_cost_usd",
-                        getattr(message, "cost_usd", 0.0),
-                    ),
-                    is_error=False,
-                    usage=getattr(message, "usage", None),
-                )
+                if num_turns == 0 and suppress_empty_result:
+                    log.info("Suppressing 0-turn result (caller will retry)")
+                else:
+                    emit_result(
+                        duration_ms=duration_ms,
+                        num_turns=num_turns,
+                        cost_usd=getattr(
+                            message,
+                            "total_cost_usd",
+                            getattr(message, "cost_usd", 0.0),
+                        ),
+                        is_error=False,
+                        usage=getattr(message, "usage", None),
+                    )
                 log.info(
                     "Prompt complete: %d turns, %dms",
                     num_turns,
@@ -2234,7 +2242,7 @@ async def run_prompt(
             is_error=True,
         )
 
-    return True
+    return (True, num_turns)
 
 
 # ---------------------------------------------------------------------------
@@ -2253,20 +2261,39 @@ async def run_prompt_interruptible(
     Returns True if the prompt completed normally, False if it was interrupted.
     On interrupt: ``run_prompt`` checks the event between SDK messages and
     returns early. We then drain stale responses and emit ``interrupted``.
+
+    After an interrupt, the gateway sends a new prompt immediately.  If that
+    prompt completes with 0 turns (the SDK acknowledged it but the model
+    produced no output), we send a "Continue." follow-up to force the model
+    to process the pending message.  The follow-up's text/tool events flow
+    through the normal protocol path and reach the connector.
     """
     dispatcher.interrupt_event.clear()
 
-    completed = await run_prompt(
-        client, prompt, interrupt_event=dispatcher.interrupt_event, images=images
+    completed, num_turns = await run_prompt(
+        client,
+        prompt,
+        interrupt_event=dispatcher.interrupt_event,
+        images=images,
+        suppress_empty_result=True,
     )
 
-    if completed:
-        return True
-    else:
+    if not completed:
         log.info("Prompt was interrupted, draining stale responses")
         dispatcher.drain_stale_responses()
         emit_interrupted("user_message")
         return False
+
+    if num_turns == 0:
+        log.warning(
+            "0-turn result — prompt swallowed without output. "
+            "Sending follow-up to flush pending response."
+        )
+        _completed, _turns = await run_prompt(client, "Continue.")
+        if _turns == 0:
+            log.error("Still 0 turns after retry — SDK in bad state")
+
+    return True
 
 
 # ---------------------------------------------------------------------------
