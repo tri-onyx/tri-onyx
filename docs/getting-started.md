@@ -312,6 +312,7 @@ uv run scripts/generate-templates.py --check
 
 ## Next steps
 
+- [Running as a Service](service-setup.md) — Run TriOnyx on boot with automatic restarts
 - [Matrix Setup](matrix-guide.md) — Detailed chat connector configuration
 - [Agent Runtime](agent-runtime.md) — How agent sessions work
 - [Plugins](plugins.md) — Install and manage agent plugins

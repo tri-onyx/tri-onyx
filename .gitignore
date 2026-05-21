@@ -31,6 +31,7 @@ tmp/
 
 # Local reference docs
 CLAUDE_API_ACCESS.md
+ACCESS_CONTROL_ANALYSIS.md
 
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/
@@ -53,3 +54,15 @@ site/
 
 .devcontainer/
 transcripts/
+
+# Images (logos, screenshots, generated)
+*.png
+*.jpg
+*.jpeg
+
+# Playwright
+.playwright-cli/
+playwright-cli/
+
+# Obsidian plugin dev
+obsidian-trionyx/

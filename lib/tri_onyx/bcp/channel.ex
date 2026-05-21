@@ -22,7 +22,7 @@ defmodule TriOnyx.BCP.Channel do
   alias TriOnyx.ConnectorHandler
   alias TriOnyx.TriggerRouter
 
-  @approval_timeout_ms 300_000
+  @approval_timeout_ms 600_000
 
   # ETS table for pending queries. Created once by Application.start/2 so the
   # table is owned by the long-lived Application process. Task processes that

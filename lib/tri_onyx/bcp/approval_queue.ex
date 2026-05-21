@@ -89,7 +89,7 @@ defmodule TriOnyx.BCP.ApprovalQueue do
   """
   @spec await_decision(GenServer.server(), approval_id(), timeout()) ::
           {:approved, pending_item()} | {:rejected, String.t()} | {:error, :timeout | :not_found}
-  def await_decision(server \\ __MODULE__, approval_id, timeout \\ 300_000) do
+  def await_decision(server \\ __MODULE__, approval_id, timeout \\ 600_000) do
     GenServer.call(server, {:await_decision, approval_id}, timeout)
   catch
     :exit, {:timeout, _} -> {:error, :timeout}

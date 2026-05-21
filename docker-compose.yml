@@ -3,9 +3,16 @@ services:
     build:
       context: .
       dockerfile: gateway.Dockerfile
-    command: ["sh", "-c", "mix deps.get && mix run --no-halt"]
+    command: ["sh", "-c", "ERL_AFLAGS= mix deps.get && ERL_AFLAGS= mix deps.compile && exec mix run --no-halt"]
     ports:
       - "127.0.0.1:4000:4000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://127.0.0.1:4000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     environment:
       - ERL_AFLAGS=-sname gateway -setcookie trionyx
       - TRI_ONYX_CONNECTOR_TOKEN
@@ -73,6 +80,7 @@ services:
     build:
       context: .
       dockerfile: connector.Dockerfile
+    restart: unless-stopped
     volumes:
       - ./connector/connector:/app/connector
       - ./secrets/connector-config.yaml:/app/config.yaml
@@ -83,4 +91,5 @@ services:
       - TRI_ONYX_CONNECTOR_TOKEN
       - MATRIX_ACCESS_TOKEN
     depends_on:
-      - gateway
+      gateway:
+        condition: service_healthy
