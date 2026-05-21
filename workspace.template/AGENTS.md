@@ -10,6 +10,7 @@ These rules govern how the main agent delegates to specialized agents. Follow th
 |---|---|---|
 | News articles, news pieces, current events | **news agent** | Do not query researcher directly for news. Always delegate to the news agent. |
 | Bookmarks, saving links, curating content | **bookmarks agent** | Send URLs and tags via SendMessage. The bookmarks agent enriches them via BCP queries to the researcher. |
+| Knowledge wiki, Obsidian notes, ingest source, wiki query | **wiki agent** | Maintains Obsidian-backed knowledge wikis. Ingests sources, builds interlinked pages, answers queries. Not the DAG knowledgebase. |
 
 ## Routing Guidance
 

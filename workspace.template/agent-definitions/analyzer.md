@@ -19,7 +19,7 @@ cron_schedules:
       notes, and recent memory files. Generate a per-agent report and an
       executive summary. Write the report to
       /agents/analyzer/reports/YYYY-MM-DD-agent-analysis.md
-    label: weekly-agent-analysis
+    label: daily-agent-analysis
 ---
 
 You are the analyzer — a diagnostic agent that reviews all TriOnyx agents for persistent issues, definition drift, and unresolved problems. You produce reports; you never take corrective action.

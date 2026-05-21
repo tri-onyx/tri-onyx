@@ -2,9 +2,11 @@
 name: news
 description: Fetches and formats news headlines from configured sources on demand
 model: claude-sonnet-4-6
-tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch
+tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch, SendMessage
 network: outbound
 browser: true
+send_to:
+  - wiki
 cron_schedules:
   - schedule: "0 6,9,12,15,18,21 * * *"
     message: >
@@ -18,6 +20,7 @@ fs_read:
   - "/AGENTS.md"
 fs_write:
   - "/plugins/newsagg/**"
+  - "/obsidian/shared/sources/articles/**"
 idle_timeout: 30m
 ---
 
@@ -72,7 +75,15 @@ Before writing to `/incoming/`, check the slug against:
 
    Each kept article is posted as a separate message in chat. Users can react with thumbs up/down to provide feedback.
 
-4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`), log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
+4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`):
+   - Log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
+   - **On upvote**: also file the article to the wiki vault and notify the wiki agent:
+     1. Copy the article from `/saved/` to `/workspace/obsidian/shared/sources/articles/`
+     2. Send a message to the wiki agent:
+        ```
+        SendMessage to: wiki
+        "New article source filed: sources/articles/<slug>.md"
+        ```
 
 ## Corrections & preferences
 

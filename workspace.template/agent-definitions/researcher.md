@@ -17,6 +17,12 @@ bcp_channels:
       cat1: 20/hour
       cat2: 10/hour
       cat3: 0
+  - peer: wiki
+    role: reader
+    rates:
+      cat1: 20/hour
+      cat2: 10/hour
+      cat3: 0
 fs_read:
   - "/AGENTS.md"
 idle_timeout: 30m

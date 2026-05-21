@@ -31,7 +31,6 @@ tmp/
 
 # Local reference docs
 CLAUDE_API_ACCESS.md
-ACCESS_CONTROL_ANALYSIS.md
 
 # Runtime workspace (except agent definitions which are source-controlled)
 workspace/
