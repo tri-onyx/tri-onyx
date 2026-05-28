@@ -1,0 +1,7 @@
+{% for agent in agents %}
+  {% include "partials/agent_card.html" %}
+{% empty %}
+  <div class="error-page">
+    <p>No agents configured</p>
+  </div>
+{% endfor %}

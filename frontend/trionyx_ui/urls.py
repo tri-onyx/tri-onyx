@@ -3,6 +3,8 @@ from trionyx_ui.views import approvals, chat, dashboard
 
 urlpatterns = [
     path("", dashboard.index, name="dashboard"),
+    path("dashboard/summary", dashboard.dashboard_summary, name="dashboard-summary"),
+    path("dashboard/agents", dashboard.dashboard_agents, name="dashboard-agents"),
     path("agents/<str:name>/", chat.agent_chat, name="agent-chat"),
     path("agents/<str:name>/start", chat.agent_start, name="agent-start"),
     path("agents/<str:name>/prompt", chat.agent_prompt, name="agent-prompt"),
