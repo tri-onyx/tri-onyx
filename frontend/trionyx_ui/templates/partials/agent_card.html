@@ -1,0 +1,21 @@
+<a href="{% url 'agent-chat' name=agent.name %}" class="agent-card">
+  <div class="agent-card-header">
+    <span class="status-dot {{ agent.status }}"></span>
+    <span class="agent-card-name">{{ agent.name }}</span>
+    {% if agent.effective_risk %}
+      <span class="risk-badge {{ agent.effective_risk }}">{{ agent.effective_risk }}</span>
+    {% endif %}
+  </div>
+  {% if agent.description %}
+    <div class="agent-card-desc">{{ agent.description|truncatechars:80 }}</div>
+  {% endif %}
+  <div class="agent-card-meta">
+    <span>{{ agent.model }}</span>
+    {% if agent.status != "inactive" %}
+      <span>&middot; {{ agent.status }}</span>
+    {% endif %}
+    {% if agent.session_count %}
+      <span>&middot; {{ agent.session_count }} session{{ agent.session_count|pluralize }}{% if agent.active_session_count %} ({{ agent.active_session_count }} active){% endif %}</span>
+    {% endif %}
+  </div>
+</a>

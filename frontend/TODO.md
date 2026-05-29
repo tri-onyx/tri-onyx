@@ -2,11 +2,10 @@
 
 ## Dashboard
 
-- [ ] Agent cards should show session count when an agent has multiple concurrent sessions
+- [x] Agent cards should show session count when an agent has multiple concurrent sessions
 - [ ] Starred/pinned agents — promote favorites to a card view when list view is added
 - [ ] List view toggle (compact table) as an alternative to card grid
 - [x] Auto-refresh dashboard data (HTMX polls summary strip and agent grid every 10s)
-- [ ] Sort/filter agents by status, risk level, model, or name
 
 ## Chat
 

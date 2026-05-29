@@ -122,13 +122,17 @@ defmodule TriOnyx.Router do
     agent_list =
       Enum.map(agents, fn definition ->
         session = Enum.find(sessions, fn s -> s.definition.name == definition.name end)
+        active_count = Enum.count(sessions, fn s -> s.definition.name == definition.name end)
+        logged_sessions = SessionLogger.list_sessions(definition.name)
 
         base = %{
           "name" => definition.name,
           "description" => definition.description,
           "model" => definition.model,
           "tools" => definition.tools,
-          "network" => format_network(definition.network)
+          "network" => format_network(definition.network),
+          "session_count" => length(logged_sessions),
+          "active_session_count" => active_count
         }
 
         if session do
