@@ -16,7 +16,7 @@
 - [x] Textarea auto-grow — smooth resize, height resets after submit, Shift+Enter for newline
 - [x] Message timestamps — relative time ("2m ago") shown on hover, full timestamp in tooltip
 - [x] Collapsible tool call pairs — tool_use + tool_result merged into single collapsible block
-- [ ] Agent context panel — expandable sidebar or drawer showing tools, fs_read/fs_write, network policy, taint/sensitivity/capability breakdown, send_to/receive_from
+- [x] Agent context panel — expandable sidebar showing tools, fs_read/fs_write, network policy, taint/sensitivity/capability breakdown, send_to/receive_from with clickable agent links
 - [ ] Streaming text — currently each `text` event replaces as a full message. Handle partial/streaming text if the gateway adds support
 - [x] Copy button on agent responses and code blocks
 - [x] Session cost running total visible in header

@@ -1,0 +1,106 @@
+{% load ui_filters %}
+
+<div class="ctx-section">
+  <div class="ctx-section-title">Connected Agents</div>
+  {% if agent.send_to or agent.receive_from %}
+    {% for name in agent.send_to %}
+      <a href="{% url 'agent-chat' name=name %}" class="agent-link-card">
+        <span class="ctx-arrow">→</span> {{ name }}
+      </a>
+    {% endfor %}
+    {% for name in agent.receive_from %}
+      <a href="{% url 'agent-chat' name=name %}" class="agent-link-card">
+        <span class="ctx-arrow">←</span> {{ name }}
+      </a>
+    {% endfor %}
+  {% else %}
+    <div class="ctx-empty">No connections</div>
+  {% endif %}
+</div>
+
+<div class="ctx-section">
+  <div class="ctx-section-title">Risk Profile</div>
+  <div class="ctx-risk-box {{ agent.effective_risk }}">
+    <div class="ctx-risk-label">Effective Risk</div>
+    <div class="ctx-risk-value">{{ agent.effective_risk|default:"low" }}</div>
+  </div>
+  <div class="ctx-row">
+    <span class="ctx-row-label">Taint</span>
+    <span class="risk-badge {{ agent.taint_level|default:"low" }}">{{ agent.taint_level|default:"low" }}</span>
+  </div>
+  <div class="ctx-row">
+    <span class="ctx-row-label">Sensitivity</span>
+    <span class="risk-badge {{ agent.sensitivity_level|default:"low" }}">{{ agent.sensitivity_level|default:"low" }}</span>
+  </div>
+  <div class="ctx-row">
+    <span class="ctx-row-label">Capability</span>
+    <span class="risk-badge {{ agent.capability_level|default:"low" }}">{{ agent.capability_level|default:"low" }}</span>
+  </div>
+  {% if agent.taint_status and agent.taint_status != "clean" %}
+    <div class="ctx-row">
+      <span class="ctx-row-label">Taint status</span>
+      <span style="color: var(--yellow); font-size: 12px;">{{ agent.taint_status }}</span>
+    </div>
+  {% endif %}
+</div>
+
+<div class="ctx-section">
+  <div class="ctx-section-title">Tools ({{ agent.tools|length }})</div>
+  <div class="ctx-chips">
+    {% for tool in agent.tools %}
+      <span class="ctx-chip">{{ tool }}</span>
+    {% endfor %}
+  </div>
+</div>
+
+{% if agent.fs_read or agent.fs_write %}
+<div class="ctx-section">
+  <div class="ctx-section-title">Filesystem</div>
+  {% if agent.fs_read %}
+    <div class="ctx-fs-label">Read</div>
+    {% for path in agent.fs_read %}
+      <div class="ctx-path">{{ path }}</div>
+    {% endfor %}
+  {% endif %}
+  {% if agent.fs_write %}
+    <div class="ctx-fs-label">Write</div>
+    {% for path in agent.fs_write %}
+      <div class="ctx-path">{{ path }}</div>
+    {% endfor %}
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="ctx-section">
+  <div class="ctx-section-title">Network</div>
+  <div class="ctx-row">
+    {% if agent.network == "none" or not agent.network %}
+      <span style="color: var(--green); font-size: 12px;">Isolated</span>
+    {% elif agent.network == "outbound" %}
+      <span style="color: var(--purple); font-size: 12px;">Outbound (unrestricted)</span>
+    {% else %}
+      <span style="font-size: 12px;">{{ agent.network }}</span>
+    {% endif %}
+  </div>
+</div>
+
+{% if agent.bcp_channels %}
+<div class="ctx-section">
+  <div class="ctx-section-title">BCP Channels</div>
+  {% for ch in agent.bcp_channels %}
+    <div class="ctx-bcp-item">
+      <a href="{% url 'agent-chat' name=ch.peer %}" class="agent-link-card" style="font-size: 11px;">{{ ch.peer }}</a>
+      <span class="ctx-bcp-meta">{{ ch.role }} · cat {{ ch.max_category }}</span>
+    </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+{% if agent.information_sources %}
+<div class="ctx-section">
+  <div class="ctx-section-title">Information Sources</div>
+  {% for src in agent.information_sources %}
+    <div class="ctx-path">{{ src }}</div>
+  {% endfor %}
+</div>
+{% endif %}
