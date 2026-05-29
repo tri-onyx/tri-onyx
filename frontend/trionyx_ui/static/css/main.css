@@ -803,6 +803,11 @@ a:hover { text-decoration: underline; }
   background: rgba(88, 166, 255, 0.25);
 }
 
+.btn-send:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 /* ── Start Session Prompt ── */
 
 #starting-area {
@@ -1098,45 +1103,25 @@ a:hover { text-decoration: underline; }
   flex-shrink: 0;
 }
 
-/* ── Context Panel (sidebar) ── */
-
-.chat-layout {
-  position: relative;
-}
-
-.chat-layout.sidebar-open {
-  max-width: none;
-  display: grid;
-  grid-template-columns: 1fr 340px;
-  grid-template-rows: auto 1fr auto;
-}
-
-.chat-layout.sidebar-open .chat-header {
-  grid-column: 1 / -1;
-}
-
-.chat-layout.sidebar-open .chat-messages,
-.chat-layout.sidebar-open .prompt-bar,
-.chat-layout.sidebar-open .start-prompt,
-.chat-layout.sidebar-open #starting-area,
-.chat-layout.sidebar-open .history-banner {
-  grid-column: 1;
-}
-
-.chat-layout.sidebar-open .ctx-panel {
-  grid-column: 2;
-  grid-row: 2 / -1;
-}
+/* ── Context Panel (floating card) ── */
 
 .ctx-panel {
   display: none;
-  border-left: 1px solid var(--border);
+  position: fixed;
+  top: 65px;
+  right: 16px;
+  width: 320px;
+  max-height: calc(100vh - 80px);
   background: var(--surface);
-  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4);
+  z-index: 100;
   flex-direction: column;
+  overflow: hidden;
 }
 
-.sidebar-open .ctx-panel {
+.ctx-panel.open {
   display: flex;
 }
 

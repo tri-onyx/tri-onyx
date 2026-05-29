@@ -99,13 +99,14 @@
     </div>
   {% endif %}
 
-  <aside class="ctx-panel" id="ctx-panel">
-    <div class="ctx-panel-header">Agent Details</div>
-    <div class="ctx-panel-body">
-      {% include "partials/context_panel.html" %}
-    </div>
-  </aside>
 </div>
+
+<aside class="ctx-panel" id="ctx-panel">
+  <div class="ctx-panel-header">Agent Details</div>
+  <div class="ctx-panel-body">
+    {% include "partials/context_panel.html" %}
+  </div>
+</aside>
 
 <div id="sse-config"
      data-sse-url="{{ gateway_sse_url }}"
@@ -119,8 +120,8 @@
 <script src="{% static 'js/chat.js' %}"></script>
 <script>
 function toggleContextPanel() {
-  var layout = document.querySelector('.chat-layout');
-  var open = layout.classList.toggle('sidebar-open');
+  var panel = document.getElementById('ctx-panel');
+  var open = panel.classList.toggle('open');
   if (typeof prefs !== 'undefined') prefs.set('sidebarOpen', open);
 }
 function toggleHistoryDropdown() {
