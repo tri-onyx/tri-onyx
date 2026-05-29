@@ -2,15 +2,19 @@
 
 <div class="ctx-section">
   <div class="ctx-section-title">Connected Agents</div>
-  {% if agent.send_to or agent.receive_from %}
-    {% for name in agent.send_to %}
-      <a href="{% url 'agent-chat' name=name %}" class="agent-link-card">
-        <span class="ctx-arrow">→</span> {{ name }}
-      </a>
-    {% endfor %}
-    {% for name in agent.receive_from %}
-      <a href="{% url 'agent-chat' name=name %}" class="agent-link-card">
-        <span class="ctx-arrow">←</span> {{ name }}
+  {% if connected_agents %}
+    {% for conn in connected_agents %}
+      <a href="{% url 'agent-chat' name=conn.name %}" class="ctx-agent-card">
+        <div class="ctx-agent-card-header">
+          <span class="status-dot {{ conn.status }}"></span>
+          <span class="ctx-agent-card-name">{{ conn.name }}</span>
+        </div>
+        <div class="ctx-agent-card-dir">
+          {% for d in conn.directions %}
+            {% if d == "send" %}<span class="ctx-dir-tag send">→ sends to</span>{% endif %}
+            {% if d == "receive" %}<span class="ctx-dir-tag receive">← receives from</span>{% endif %}
+          {% endfor %}
+        </div>
       </a>
     {% endfor %}
   {% else %}
@@ -104,3 +108,26 @@
   {% endfor %}
 </div>
 {% endif %}
+
+<div class="ctx-section">
+  <div class="ctx-section-title">Preferences</div>
+  <label class="ctx-toggle-row">
+    <span class="ctx-row-label">Expand tool calls</span>
+    <input type="checkbox" id="pref-tool-expand" onchange="toggleToolCallsPref(this.checked)">
+  </label>
+</div>
+<script>
+(function() {
+  var cb = document.getElementById('pref-tool-expand');
+  if (cb && typeof prefs !== 'undefined') {
+    cb.checked = prefs.get('toolCallsExpanded', false);
+  }
+})();
+function toggleToolCallsPref(expanded) {
+  if (typeof prefs !== 'undefined') prefs.set('toolCallsExpanded', expanded);
+  var msgs = document.getElementById('chat-messages');
+  if (msgs) {
+    msgs.querySelectorAll('.msg-tool').forEach(function(el) { el.open = expanded; });
+  }
+}
+</script>

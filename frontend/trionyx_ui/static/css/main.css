@@ -1157,13 +1157,55 @@ a:hover { text-decoration: underline; }
   margin-bottom: 8px;
 }
 
-.ctx-section .agent-link-card {
-  margin: 3px 2px;
+.ctx-agent-card {
+  display: block;
+  padding: 8px 10px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 6px;
+  text-decoration: none;
+  color: inherit;
+  transition: border-color 0.15s;
 }
 
-.ctx-arrow {
+.ctx-agent-card:hover {
+  border-color: var(--accent);
+  text-decoration: none;
+}
+
+.ctx-agent-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ctx-agent-card-name {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ctx-agent-card-dir {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+  padding-left: 16px;
+}
+
+.ctx-dir-tag {
   font-size: 10px;
-  opacity: 0.6;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.ctx-dir-tag.send {
+  background: rgba(88, 166, 255, 0.1);
+  color: var(--accent);
+}
+
+.ctx-dir-tag.receive {
+  background: rgba(188, 140, 255, 0.1);
+  color: var(--purple);
 }
 
 .ctx-empty {
@@ -1262,6 +1304,22 @@ a:hover { text-decoration: underline; }
 .ctx-bcp-meta {
   font-size: 11px;
   color: var(--muted);
+}
+
+.ctx-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 3px 0;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ctx-toggle-row input[type="checkbox"] {
+  accent-color: var(--accent);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
 }
 
 /* ── Scrollbar ── */

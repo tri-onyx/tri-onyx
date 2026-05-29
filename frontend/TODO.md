@@ -55,9 +55,9 @@
 - [x] Production static file serving via WhiteNoise + collectstatic in Dockerfile
 - [x] Health check endpoint for the frontend container (`/healthz` — returns 200 with gateway status)
 - [x] Gunicorn production config (Dockerfile CMD uses gunicorn; docker-compose overrides with runserver for dev)
-- [ ] Frontend container logging configuration
-- [ ] Rate limiting on prompt submission to prevent accidental spam
-- [ ] Session-based preferences (e.g., collapsed tool calls, selected view mode) via cookies or localStorage
+- [x] Frontend container logging configuration (LOGGING dict in settings, RequestLoggingMiddleware, gateway module logging)
+- [x] Rate limiting on prompt submission to prevent accidental spam (PromptRateLimitMiddleware server-side + client-side send button debounce)
+- [x] Session-based preferences (e.g., collapsed tool calls, selected view mode) via localStorage (prefs object in chat.js, toggle in context panel)
 
 ## Connector Replacement
 

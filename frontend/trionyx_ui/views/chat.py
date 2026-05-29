@@ -80,6 +80,7 @@ def agent_chat(request, name):
 
     gateway_sse_url = f"{settings.GATEWAY_EXTERNAL_URL}/agents/{name}/events"
     pending_approvals = gateway.get_approval_count()
+    connected_agents = _resolve_connected_agents(agent)
 
     return render(request, "chat.html", {
         "agent": agent,
@@ -91,6 +92,7 @@ def agent_chat(request, name):
         "last_timestamp": last_timestamp,
         "pending_approvals": pending_approvals,
         "session_cost": f"{session_cost:.4f}",
+        "connected_agents": connected_agents,
     })
 
 
@@ -108,6 +110,7 @@ def _render_historical_session(request, agent, name, history_session_id):
 
     session_cost = sum(e.get("cost_usd", 0) for e in raw_events if e.get("type") == "result")
     pending_approvals = gateway.get_approval_count()
+    connected_agents = _resolve_connected_agents(agent)
 
     return render(request, "chat.html", {
         "agent": agent,
@@ -121,7 +124,38 @@ def _render_historical_session(request, agent, name, history_session_id):
         "history_session_id": history_session_id,
         "history_session_start": session_start_ts,
         "session_cost": f"{session_cost:.4f}",
+        "connected_agents": connected_agents,
     })
+
+
+def _resolve_connected_agents(agent: dict) -> list[dict]:
+    send_to = set(agent.get("send_to") or [])
+    receive_from = set(agent.get("receive_from") or [])
+    all_names = send_to | receive_from
+    if not all_names:
+        return []
+
+    status_map = {}
+    try:
+        for a in gateway.get_agents():
+            if a["name"] in all_names:
+                status_map[a["name"]] = a.get("status", "inactive")
+    except gateway.GatewayError:
+        pass
+
+    result = []
+    for name in sorted(all_names):
+        directions = []
+        if name in send_to:
+            directions.append("send")
+        if name in receive_from:
+            directions.append("receive")
+        result.append({
+            "name": name,
+            "status": status_map.get(name, "inactive"),
+            "directions": directions,
+        })
+    return result
 
 
 def agent_sessions(request, name):
