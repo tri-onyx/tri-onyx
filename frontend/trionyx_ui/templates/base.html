@@ -14,6 +14,7 @@
     <a href="{% url 'dashboard' %}" class="nav-brand">TriOnyx</a>
     <div class="nav-links">
       <a href="{% url 'dashboard' %}" class="{% block nav_dashboard %}{% endblock %}">Dashboard</a>
+      <a href="{% url 'graph' %}" class="{% block nav_graph %}{% endblock %}">Graph</a>
     </div>
     <div class="notif-wrapper">
       <button class="notif-bell" onclick="toggleNotifDropdown()" id="notif-bell">

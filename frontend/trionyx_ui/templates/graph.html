@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}TriOnyx — Agent Graph{% endblock %}
+{% block nav_graph %}active{% endblock %}
+
+{% block content %}
+<div class="graph-toolbar">
+  <div class="graph-toolbar-group">
+    <div class="toggle-group">
+      <label><input type="radio" name="analysis-mode" value="none" checked><span>Off</span></label>
+      <label><input type="radio" name="analysis-mode" value="biba"><span>Biba</span></label>
+      <label><input type="radio" name="analysis-mode" value="blp"><span>Bell-LaPadula</span></label>
+    </div>
+  </div>
+  <div class="graph-toolbar-group">
+    <label class="graph-toggle"><input type="checkbox" id="toggle-fs" checked> Filesystem</label>
+    <label class="graph-toggle"><input type="checkbox" id="toggle-msg" checked> Messaging</label>
+    <label class="graph-toggle"><input type="checkbox" id="toggle-bcp" checked> BCP</label>
+    <label class="graph-toggle"><input type="checkbox" id="toggle-labels" checked> Labels</label>
+    <label class="graph-toggle"><input type="checkbox" id="toggle-matrix"> Matrix</label>
+  </div>
+  <div class="graph-toolbar-group" style="margin-left:auto;">
+    <button class="btn" onclick="loadGraph()">Reload</button>
+    <button class="btn" onclick="resetLayout()">Reset layout</button>
+  </div>
+</div>
+
+<div class="graph-container" id="graph-container">
+  <svg id="graph-svg"></svg>
+  <div class="graph-tooltip" id="tooltip"></div>
+
+  <div class="graph-legend" id="legend">
+    <h4>Legend</h4>
+    <div class="legend-section">
+      <div class="legend-subtitle">Node = yin-yang split</div>
+      <div class="legend-detail">Left half = taint (integrity)</div>
+      <div class="legend-detail">Right half = sensitivity (confidentiality)</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--green)"></div> Low</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--orange)"></div> Medium</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--red)"></div> High</div>
+    </div>
+    <div class="legend-section">
+      <div class="legend-subtitle">Node size = effective risk</div>
+      <div class="legend-item"><div class="legend-dot" style="width:12px;height:12px;background:var(--muted)"></div> Low</div>
+      <div class="legend-item"><div class="legend-dot" style="width:16px;height:16px;background:var(--muted)"></div> Moderate</div>
+      <div class="legend-item"><div class="legend-dot" style="width:20px;height:20px;background:var(--muted)"></div> High</div>
+      <div class="legend-item"><div class="legend-dot" style="width:24px;height:24px;background:var(--muted)"></div> Critical</div>
+    </div>
+    <div class="legend-section">
+      <div class="legend-subtitle">Edges</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--green)"></div> Compliant flow</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--yellow)"></div> Warning</div>
+      <div class="legend-item"><div class="legend-line" style="background:var(--red)"></div> Violation</div>
+      <div class="legend-item"><div class="legend-line dashed-blue"></div> Messaging</div>
+      <div class="legend-item"><div class="legend-line dashed-purple"></div> BCP</div>
+    </div>
+  </div>
+
+  <div class="analysis-explainer" id="analysis-explainer" style="display:none;">
+    <h4 id="explainer-title"></h4>
+    <div id="explainer-body"></div>
+  </div>
+
+  <div class="graph-matrix-panel" id="matrix-panel">
+    <h4>Agent Flow Matrix</h4>
+    <div id="matrix-content"></div>
+  </div>
+</div>
+
+<div class="graph-status-bar" id="status-bar">
+  <span id="status-text" class="disconnected">Loading...</span>
+  <span id="agent-count"></span>
+  <span id="edge-count"></span>
+  <span id="violation-count"></span>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://d3js.org/d3.v7.min.js"></script>
+<script src="{% static 'js/graph.js' %}"></script>
+{% endblock %}

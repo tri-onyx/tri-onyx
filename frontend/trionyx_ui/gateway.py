@@ -187,6 +187,15 @@ def list_agent_sessions(agent_name: str) -> list[dict]:
         return []
 
 
+def get_graph_analysis() -> dict:
+    try:
+        resp = _client().get("/graph/analysis")
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError):
+        return {}
+
+
 def get_session_log(agent_name: str, session_id: str) -> list[dict]:
     try:
         resp = _client().get(
