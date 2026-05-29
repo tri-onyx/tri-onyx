@@ -93,6 +93,7 @@ def agent_chat(request, name):
         "pending_approvals": pending_approvals,
         "session_cost": f"{session_cost:.4f}",
         "connected_agents": connected_agents,
+        "viewing_history": False,
     })
 
 

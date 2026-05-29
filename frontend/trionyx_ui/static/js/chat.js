@@ -1,3 +1,25 @@
+// ── Preferences (localStorage) ──
+
+const prefs = {
+  _key: 'trionyx_prefs',
+
+  _load() {
+    try { return JSON.parse(localStorage.getItem(this._key)) || {}; }
+    catch { return {}; }
+  },
+
+  get(key, fallback) {
+    const val = this._load()[key];
+    return val === undefined ? fallback : val;
+  },
+
+  set(key, value) {
+    const data = this._load();
+    data[key] = value;
+    localStorage.setItem(this._key, JSON.stringify(data));
+  },
+};
+
 document.addEventListener('DOMContentLoaded', () => {
   const config = document.getElementById('sse-config');
   if (!config) return;
@@ -10,10 +32,23 @@ document.addEventListener('DOMContentLoaded', () => {
   const sseStatus = document.getElementById('sse-status');
   const promptInput = document.querySelector('.prompt-input');
   const promptForm = document.querySelector('.prompt-bar');
+  const sendBtn = promptForm ? promptForm.querySelector('.btn-send') : null;
 
   if (chatMessages) {
     chatMessages.scrollTop = chatMessages.scrollHeight;
     addCopyButtons(chatMessages);
+  }
+
+  // ── Restore preferences ──
+
+  const savedSidebar = prefs.get('sidebarOpen', undefined);
+  if (savedSidebar !== undefined) {
+    const panel = document.getElementById('ctx-panel');
+    if (panel) panel.classList.toggle('open', savedSidebar);
+  }
+
+  if (prefs.get('toolCallsExpanded', false) && chatMessages) {
+    chatMessages.querySelectorAll('.msg-tool').forEach(el => el.open = true);
   }
 
   // ── Textarea auto-grow ──
@@ -30,10 +65,14 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   if (promptForm) {
-    promptForm.addEventListener('htmx:afterRequest', () => {
+    promptForm.addEventListener('htmx:afterRequest', (e) => {
       promptForm.reset();
       if (promptInput) promptInput.style.height = '';
       if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
+      if (sendBtn) {
+        sendBtn.disabled = true;
+        setTimeout(() => { sendBtn.disabled = false; }, 1000);
+      }
     });
   }
 
@@ -164,10 +203,12 @@ function renderEvent(type, data) {
     case 'user_prompt':
       return `<div class="msg msg-user" data-ts="${escapeAttr(ts)}">${escapeHtml(data.content || '')}</div>`;
 
-    case 'tool_use':
-      return `<details class="msg-tool" data-ts="${escapeAttr(ts)}" data-tool-id="${escapeAttr(data.id || '')}">` +
+    case 'tool_use': {
+      const openAttr = prefs.get('toolCallsExpanded', false) ? ' open' : '';
+      return `<details class="msg-tool" data-ts="${escapeAttr(ts)}" data-tool-id="${escapeAttr(data.id || '')}"${openAttr}>` +
         `<summary>${escapeHtml(data.name || '')} ${formatToolBrief(data.name, data.input)}</summary>` +
         `<pre>${escapeHtml(JSON.stringify(data.input || {}, null, 2))}</pre></details>`;
+    }
 
     case 'tool_result': {
       const cls = data.is_error ? ' error' : '';
