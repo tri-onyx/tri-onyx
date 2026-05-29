@@ -1,4 +1,5 @@
 import json
+import os
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -32,6 +33,7 @@ VISIBLE_EVENT_TYPES = {
     "risk_escalation",
     "approval_request",
     "interrupted",
+    "image",
 }
 
 
@@ -235,6 +237,24 @@ def agent_stop(request, name):
     return redirect("agent-chat", name=name)
 
 
+_ALLOWED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
+
+
+def session_image(request, agent_name, session_id, image_id):
+    ext = os.path.splitext(image_id)[1].lower()
+    if ext not in _ALLOWED_IMAGE_EXTS:
+        return HttpResponse(status=403)
+    try:
+        resp = gateway.get_session_image(agent_name, session_id, image_id)
+        return HttpResponse(
+            resp.content,
+            content_type=resp.headers.get("content-type", "application/octet-stream"),
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except Exception:
+        return HttpResponse(status=404)
+
+
 def classify_event(event: dict) -> dict:
     etype = event.get("type", "unknown")
     base = {
@@ -271,6 +291,11 @@ def classify_event(event: dict) -> dict:
 
     elif etype == "error":
         base["message"] = event.get("message", str(event))
+
+    elif etype == "image":
+        base["image_id"] = event.get("image_id", "")
+        base["filename"] = event.get("filename", "")
+        base["media_type"] = event.get("media_type", "")
 
     elif etype == "send_message":
         base["to_agent"] = event.get("to", "")

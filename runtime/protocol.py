@@ -13,6 +13,7 @@ Gateway -> Runtime (stdin):
   send_message_response  -- gateway response after routing an inter-agent message
   restart_agent_response -- gateway response after a restart_agent_request
   submit_item_response -- gateway response after a submit_item_request
+  submit_image_response -- gateway response after a submit_image_request
   bcp_query              -- BCP query delivered to a Reader agent
   bcp_response_delivery  -- validated BCP response delivered to a Controller agent
                             (carries optional subscription_id for subscription deliveries)
@@ -32,6 +33,7 @@ Runtime -> Gateway (stdout):
   send_message_request   -- request gateway to route a message to another agent
   restart_agent_request  -- request gateway to restart another agent
   submit_item_request -- request gateway to post an item to the connector
+  submit_image_request -- request gateway to save and serve an image to the user
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query (query_id for queries,
                           subscription_id + controller for subscription publishes)
@@ -421,6 +423,23 @@ class SubmitItemResponse:
         )
 
 
+@dataclass
+class SubmitImageResponse:
+    """Response from the gateway after a submit_image_request."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitImageResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+        )
+
+
 InboundMessage = (
     StartMessage
     | PromptMessage
@@ -442,6 +461,7 @@ InboundMessage = (
     | CalendarUpdateResponse
     | CalendarDeleteResponse
     | SubmitItemResponse
+    | SubmitImageResponse
 )
 
 _INBOUND_PARSERS: dict[str, type] = {
@@ -465,6 +485,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "calendar_update_response": CalendarUpdateResponse,
     "calendar_delete_response": CalendarDeleteResponse,
     "submit_item_response": SubmitItemResponse,
+    "submit_image_response": SubmitImageResponse,
 }
 
 
@@ -752,6 +773,22 @@ def emit_bcp_publish(
         "subscription_id": subscription_id,
         "controller": controller,
         "response": response,
+    })
+
+
+def emit_submit_image_request(
+    request_id: str,
+    path: str,
+    filename: str,
+    media_type: str,
+) -> None:
+    """Request the gateway to save and serve an image to the user."""
+    _emit({
+        "type": "submit_image_request",
+        "request_id": request_id,
+        "path": path,
+        "filename": filename,
+        "media_type": media_type,
     })
 
 

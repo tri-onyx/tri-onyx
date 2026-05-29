@@ -1,0 +1,75 @@
+{% if msg.type == "user_prompt" %}
+  <div class="msg msg-user" data-ts="{{ msg.timestamp }}">{{ msg.content }}</div>
+
+{% elif msg.type == "text" %}
+  <div class="msg msg-agent markdown" data-ts="{{ msg.timestamp }}">{{ msg.content_html }}</div>
+
+{% elif msg.type == "tool_pair" %}
+  <details class="msg-tool" data-ts="{{ msg.timestamp }}">
+    <summary>{{ msg.tool_name }} {{ msg.brief }}</summary>
+    <pre>{{ msg.detail }}</pre>
+    <div class="tool-result-section {% if msg.result_is_error %}error{% endif %}">
+      <div class="tool-result-label">result</div>
+      <div class="markdown tool-result-content">{{ msg.result_content_html }}</div>
+    </div>
+  </details>
+
+{% elif msg.type == "tool_use" %}
+  <details class="msg-tool" data-ts="{{ msg.timestamp }}" data-tool-id="{{ msg.tool_id }}">
+    <summary>{{ msg.tool_name }} {{ msg.brief }}</summary>
+    <pre>{{ msg.detail }}</pre>
+  </details>
+
+{% elif msg.type == "tool_result" %}
+  <details class="msg-tool-result {% if msg.is_error %}error{% endif %}" data-ts="{{ msg.timestamp }}">
+    <summary>{{ msg.tool_name }} result</summary>
+    <div class="markdown tool-result-content">{{ msg.content_html }}</div>
+  </details>
+
+{% elif msg.type == "result" %}
+  <div class="msg-result" data-ts="{{ msg.timestamp }}">{{ msg.num_turns }} turns · {{ msg.duration_ms }}ms · ${{ msg.cost_usd }}</div>
+
+{% elif msg.type == "image" %}
+  <div class="msg msg-agent msg-image" data-ts="{{ msg.timestamp }}">
+    <img src="{% url 'session-image' agent_name=agent.name session_id=session_id image_id=msg.image_id %}"
+         alt="{{ msg.filename }}" title="{{ msg.filename }}" loading="lazy">
+    <span class="image-caption">{{ msg.filename }}</span>
+  </div>
+
+{% elif msg.type == "error" %}
+  <div class="msg msg-error" data-ts="{{ msg.timestamp }}">{{ msg.message }}</div>
+
+{% elif msg.type == "ready" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">Runtime ready</div>
+
+{% elif msg.type == "session_start" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">Session started · {{ msg.trigger_type }}</div>
+
+{% elif msg.type == "session_stop" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">Session ended</div>
+
+{% elif msg.type == "interrupted" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">Interrupted: {{ msg.reason }}</div>
+
+{% elif msg.type == "send_message" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">
+    Message → <a href="{% url 'agent-chat' name=msg.to_agent %}" class="agent-link-card">{{ msg.to_agent }}</a>
+  </div>
+
+{% elif msg.type == "bcp_query" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">
+    BCP query → <a href="{% url 'agent-chat' name=msg.to_agent %}" class="agent-link-card">{{ msg.to_agent }}</a>
+    (cat {{ msg.category }})
+  </div>
+
+{% elif msg.type == "risk_escalation" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">
+    Risk escalated: {{ msg.previous_risk }} → {{ msg.effective_risk }} ({{ msg.source }})
+  </div>
+
+{% elif msg.type == "approval_request" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">
+    Approval requested
+  </div>
+
+{% endif %}

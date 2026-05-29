@@ -583,6 +583,56 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  defp handle_agent_event({:submit_image_request, req_id, path, filename, media_type}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: submit_image_request path=#{path} filename=#{filename}"
+    )
+
+    allowed_exts = ~w(.png .jpg .jpeg .gif .webp .svg)
+    ext = Path.extname(filename) |> String.downcase()
+
+    workspace_dir = Workspace.workspace_dir() |> Path.expand()
+    full_path = Path.join(workspace_dir, path) |> Path.expand()
+
+    cond do
+      not String.starts_with?(full_path, workspace_dir) ->
+        AgentPort.send_submit_image_response(state.port, req_id, false, "path traversal denied")
+
+      ext not in allowed_exts ->
+        AgentPort.send_submit_image_response(
+          state.port, req_id, false, "unsupported image type: #{ext}"
+        )
+
+      not File.regular?(full_path) ->
+        AgentPort.send_submit_image_response(state.port, req_id, false, "file not found")
+
+      true ->
+        image_id = :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower, padding: false)
+        images_dir = Path.join(["logs", state.definition.name, "#{state.id}_images"])
+        File.mkdir_p!(images_dir)
+        dest = Path.join(images_dir, "#{image_id}#{ext}")
+
+        case File.cp(full_path, dest) do
+          :ok ->
+            AgentPort.send_submit_image_response(state.port, req_id, true, "")
+
+            broadcast_event(state, %{
+              "type" => "image",
+              "image_id" => "#{image_id}#{ext}",
+              "filename" => filename,
+              "media_type" => media_type
+            })
+
+          {:error, reason} ->
+            AgentPort.send_submit_image_response(
+              state.port, req_id, false, "failed to save image: #{inspect(reason)}"
+            )
+        end
+    end
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:submit_item_request, req_id, item_type, title, url, metadata}, state) do
     Logger.info(
       "AgentSession #{state.id}: submit_item_request type=#{item_type} title=#{title}"

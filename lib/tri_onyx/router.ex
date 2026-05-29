@@ -1136,6 +1136,41 @@ defmodule TriOnyx.Router do
     end
   end
 
+  # --- Session Images ---
+
+  get "/images/:agent_name/:session_id/:image_id" do
+    images_dir = Path.join(["logs", agent_name, "#{session_id}_images"])
+    file_path = Path.join(images_dir, image_id) |> Path.expand()
+    safe_prefix = Path.expand(images_dir)
+
+    content_types = %{
+      ".png" => "image/png",
+      ".jpg" => "image/jpeg",
+      ".jpeg" => "image/jpeg",
+      ".gif" => "image/gif",
+      ".webp" => "image/webp",
+      ".svg" => "image/svg+xml"
+    }
+
+    cond do
+      not String.starts_with?(file_path, safe_prefix) ->
+        conn |> send_resp(403, "forbidden")
+
+      not File.regular?(file_path) ->
+        conn |> send_resp(404, "not found")
+
+      true ->
+        ext = Path.extname(image_id) |> String.downcase()
+        content_type = Map.get(content_types, ext, "application/octet-stream")
+        data = File.read!(file_path)
+
+        conn
+        |> put_resp_content_type(content_type)
+        |> put_resp_header("cache-control", "private, max-age=3600")
+        |> send_resp(200, data)
+    end
+  end
+
   # --- Workspace Explorer ---
 
   get "/api/workspace/tree" do

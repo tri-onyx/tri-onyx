@@ -28,6 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const lastTimestamp = config.dataset.lastTimestamp || '';
   const isActive = config.dataset.isActive === 'true';
   const agentName = config.dataset.agentName;
+  const sessionId = config.dataset.sessionId;
   const chatMessages = document.getElementById('chat-messages');
   const sseStatus = document.getElementById('sse-status');
   const promptInput = document.querySelector('.prompt-input');
@@ -130,7 +131,7 @@ document.addEventListener('DOMContentLoaded', () => {
       'connected', 'ready', 'text', 'tool_use', 'tool_result',
       'result', 'error', 'user_prompt', 'risk_escalation',
       'send_message', 'bcp_query', 'session_stop', 'interrupted',
-      'port_down', 'idle_timeout',
+      'port_down', 'idle_timeout', 'image',
     ];
 
     eventTypes.forEach(type => {
@@ -250,6 +251,12 @@ function renderEvent(type, data) {
 
     case 'idle_timeout':
       return `<div class="msg msg-system" data-ts="${escapeAttr(ts)}">Idle timeout — saving memory</div>`;
+
+    case 'image':
+      return `<div class="msg msg-agent msg-image" data-ts="${escapeAttr(ts)}">` +
+        `<img src="/workspace/images/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${escapeAttr(data.image_id)}"` +
+        ` alt="${escapeAttr(data.filename || '')}" title="${escapeAttr(data.filename || '')}" loading="lazy">` +
+        `<span class="image-caption">${escapeHtml(data.filename || '')}</span></div>`;
 
     default:
       return null;
@@ -434,3 +441,25 @@ function copyToClipboard(text, btn) {
     }, 1500);
   });
 }
+
+// ── Image lightbox ──
+
+document.addEventListener('click', (e) => {
+  if (e.target.matches('.msg-image img')) {
+    const overlay = document.createElement('div');
+    overlay.className = 'lightbox-overlay';
+    const img = document.createElement('img');
+    img.src = e.target.src;
+    img.alt = e.target.alt;
+    overlay.appendChild(img);
+    overlay.addEventListener('click', () => overlay.remove());
+    document.body.appendChild(overlay);
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const overlay = document.querySelector('.lightbox-overlay');
+    if (overlay) overlay.remove();
+  }
+});

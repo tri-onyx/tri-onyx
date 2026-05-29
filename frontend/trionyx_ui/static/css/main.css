@@ -709,6 +709,49 @@ a:hover { text-decoration: underline; }
   word-wrap: break-word;
 }
 
+/* ── Agent Images ── */
+
+.msg-image img {
+  max-width: 100%;
+  max-height: 400px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  cursor: pointer;
+  display: block;
+  transition: border-color 0.15s;
+}
+
+.msg-image img:hover {
+  border-color: var(--accent);
+}
+
+.image-caption {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+
+/* ── Lightbox ── */
+
+.lightbox-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.85);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+}
+
+.lightbox-overlay img {
+  max-width: 90vw;
+  max-height: 90vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
 .msg-result {
   align-self: center;
   background: rgba(63, 185, 80, 0.08);

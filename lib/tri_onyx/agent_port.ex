@@ -426,6 +426,23 @@ defmodule TriOnyx.AgentPort do
   end
 
   @doc """
+  Sends a `submit_image_response` back to the runtime.
+  """
+  @spec send_submit_image_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_submit_image_response(server, request_id, success, detail \\ "") do
+    GenServer.cast(
+      server,
+      {:send,
+       %{
+         "type" => "submit_image_response",
+         "request_id" => request_id,
+         "success" => success,
+         "detail" => detail
+       }}
+    )
+  end
+
+  @doc """
   Sends a `submit_item_response` back to the runtime.
   """
   @spec send_submit_item_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
@@ -806,6 +823,18 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(uid) and is_binary(calendar) ->
         {:ok, {:calendar_delete_request, req_id, uid, calendar}}
+
+      {:ok,
+       %{
+         "type" => "submit_image_request",
+         "request_id" => req_id,
+         "path" => path,
+         "filename" => filename,
+         "media_type" => media_type
+       }}
+      when is_binary(req_id) and is_binary(path) and is_binary(filename) and
+             is_binary(media_type) ->
+        {:ok, {:submit_image_request, req_id, path, filename, media_type}}
 
       {:ok,
        %{
