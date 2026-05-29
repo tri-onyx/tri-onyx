@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+
+{% block title %}Error — TriOnyx{% endblock %}
+
+{% block content %}
+<div class="container">
+  <div class="error-page">
+    <h1>{{ error_code }}</h1>
+    <p>{{ error_message }}</p>
+    {% if agents %}
+      <p style="color: var(--muted); font-size: 13px; margin-top: 16px;">Available agents:</p>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; justify-content: center;">
+        {% for a in agents %}
+          <a href="{% url 'agent-chat' name=a.name %}" class="btn" style="padding: 4px 12px; font-size: 12px;">{{ a.name }}</a>
+        {% endfor %}
+      </div>
+    {% endif %}
+    <a href="{% url 'dashboard' %}" class="btn btn-primary" style="margin-top: 16px;">Back to Dashboard</a>
+  </div>
+</div>
+{% endblock %}

@@ -41,14 +41,21 @@ def agent_chat(request, name):
     try:
         agent = gateway.get_agent(name)
     except gateway.GatewayError as e:
+        agents = []
+        try:
+            agents = gateway.get_agents()
+        except gateway.GatewayError:
+            pass
         if e.status_code == 404:
             return render(request, "error.html", {
                 "error_code": 404,
                 "error_message": f"Agent '{name}' not found",
+                "agents": agents,
             }, status=404)
         return render(request, "error.html", {
             "error_code": e.status_code,
             "error_message": e.message,
+            "agents": agents,
         }, status=e.status_code)
 
     history_session_id = request.GET.get("session")
@@ -93,7 +100,7 @@ def agent_chat(request, name):
         "gateway_sse_url": gateway_sse_url,
         "last_timestamp": last_timestamp,
         "pending_approvals": pending_approvals,
-        "session_cost": f"{session_cost:.4f}",
+        "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
         "connected_agents": connected_agents,
         "viewing_history": False,
     })
@@ -126,7 +133,7 @@ def _render_historical_session(request, agent, name, history_session_id):
         "viewing_history": True,
         "history_session_id": history_session_id,
         "history_session_start": session_start_ts,
-        "session_cost": f"{session_cost:.4f}",
+        "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
         "connected_agents": connected_agents,
     })
 

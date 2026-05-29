@@ -1,3 +1,4 @@
+from django.http import JsonResponse
 from django.shortcuts import render
 
 from trionyx_ui import gateway
@@ -17,6 +18,13 @@ def _dashboard_context():
         1 for a in agents if a.get("status") in ("running", "ready", "starting", "saving_memory")
     )
     idle_count = sum(1 for a in agents if a.get("status") == "inactive")
+
+    status_order = {"running": 0, "ready": 1, "starting": 2, "saving_memory": 3}
+    agents.sort(key=lambda a: (
+        status_order.get(a.get("status", ""), 99),
+        -(a.get("session_count") or 0),
+        a.get("name", ""),
+    ))
 
     return {
         "agents": agents,
@@ -39,3 +47,12 @@ def dashboard_summary(request):
 
 def dashboard_agents(request):
     return render(request, "partials/agent_grid.html", _dashboard_context())
+
+
+def healthz(request):
+    gw = gateway.get_health()
+    gateway_ok = gw.get("status") != "unreachable"
+    return JsonResponse({
+        "status": "ok" if gateway_ok else "degraded",
+        "gateway": "ok" if gateway_ok else "unreachable",
+    }, status=200)

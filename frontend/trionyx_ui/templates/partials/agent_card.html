@@ -13,7 +13,7 @@
     </button>
   </div>
   {% if agent.description %}
-    <div class="agent-card-desc">{{ agent.description|truncatechars:80 }}</div>
+    <div class="agent-card-desc">{{ agent.description|truncatechars:160 }}</div>
   {% endif %}
   <div class="agent-card-meta">
     <span>{{ agent.model }}</span>

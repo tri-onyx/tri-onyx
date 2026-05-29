@@ -13,24 +13,27 @@
       <span class="breadcrumb-current">{{ agent.name }}</span>
     </nav>
     <span class="status-dot {{ agent.status }}"></span>
-    <span class="chat-header-model">{{ agent.model }}</span>
+    <span class="chat-header-model" title="AI model powering this agent">{{ agent.model }}</span>
     {% if agent.effective_risk %}
       <span class="risk-badge {{ agent.effective_risk }}">{{ agent.effective_risk }}</span>
     {% endif %}
-    <span id="session-cost" class="session-cost">${{ session_cost }}</span>
+    <span id="session-cost" class="session-cost" title="Cumulative session API cost">${{ session_cost }}</span>
     <div class="chat-header-actions">
-      <span id="sse-status" class="sse-status"></span>
+      <span id="sse-status" class="sse-status" title="Real-time event stream status"></span>
+      <span class="chat-header-sep"></span>
       <button class="btn btn-history" onclick="toggleContextPanel()" title="Agent details" id="ctx-toggle">
-        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M0 2a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V2zm1 0v12h10V2H1zm12 0v12h2V2h-2z"/>
         </svg>
+        <span class="btn-history-label">Details</span>
       </button>
       <div class="history-wrapper">
         <button class="btn btn-history" onclick="toggleHistoryDropdown()" title="Session history">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 3.5a.5.5 0 0 0-1 0V8a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 7.71V3.5z"/>
             <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
           </svg>
+          <span class="btn-history-label">History</span>
         </button>
         <div class="history-dropdown" id="history-dropdown">
           <div class="history-dropdown-header">Session History</div>
@@ -70,6 +73,20 @@
     </div>
   {% elif is_active or viewing_history %}
     <div id="chat-messages" class="chat-messages">
+      {% if not messages and not viewing_history %}
+        <div class="chat-empty-state">
+          <div class="chat-empty-name">{{ agent.name }}</div>
+          <p class="chat-empty-desc">{{ agent.description }}</p>
+          {% if agent.tools %}
+            <div class="chat-empty-tools">
+              {% for tool in agent.tools|slice:":8" %}
+                <span class="ctx-chip">{{ tool }}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          <p class="chat-empty-hint">Type a message below to get started</p>
+        </div>
+      {% endif %}
       {% for msg in messages %}
         {% include "partials/message.html" %}
       {% endfor %}

@@ -386,7 +386,8 @@ function updateSessionCost(costUsd) {
   const el = document.getElementById('session-cost');
   if (!el) return;
   const current = parseFloat(el.textContent.replace('$', '')) || 0;
-  el.textContent = '$' + (current + costUsd).toFixed(4);
+  const total = current + costUsd;
+  el.textContent = '$' + (total < 0.005 ? total.toFixed(2) : total.toFixed(4));
 }
 
 function autoResize(el) {
