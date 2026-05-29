@@ -3,8 +3,7 @@
 ## Dashboard
 
 - [x] Agent cards should show session count when an agent has multiple concurrent sessions
-- [ ] Starred/pinned agents — promote favorites to a card view when list view is added
-- [ ] List view toggle (compact table) as an alternative to card grid
+- [x] Starred/pinned agents — star toggle on cards, starred agents sorted to top, persisted in localStorage
 - [x] Auto-refresh dashboard data (HTMX polls summary strip and agent grid every 10s)
 
 ## Chat

@@ -386,27 +386,20 @@ a:hover { text-decoration: underline; }
   border: none;
   cursor: pointer;
   padding: 2px;
-  color: var(--muted);
-  opacity: 0;
-  transition: opacity 0.15s, color 0.15s;
+  color: var(--border);
+  transition: color 0.15s;
   flex-shrink: 0;
   display: flex;
   align-items: center;
   line-height: 1;
 }
 
-.agent-card:hover .star-btn { opacity: 1; }
-
 .star-btn:hover { color: var(--yellow); }
 
 .star-btn .star-filled { display: none; }
 .star-btn .star-outline { display: block; }
 
-.agent-card.starred .star-btn {
-  opacity: 1;
-  color: var(--yellow);
-}
-
+.agent-card.starred .star-btn { color: var(--yellow); }
 .agent-card.starred .star-btn .star-filled { display: block; }
 .agent-card.starred .star-btn .star-outline { display: none; }
 
