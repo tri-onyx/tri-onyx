@@ -1180,8 +1180,26 @@ a:hover { text-decoration: underline; }
 }
 
 .ctx-conn-dirs {
-  font-size: 11px;
-  color: var(--muted);
+  display: flex;
+  gap: 4px;
+}
+
+.ctx-dir-tag {
+  font-size: 9px;
+  font-weight: 700;
+  padding: 1px 5px;
+  border-radius: 3px;
+  letter-spacing: 0.03em;
+}
+
+.ctx-dir-tag.in {
+  background: rgba(63, 185, 80, 0.15);
+  color: var(--green);
+}
+
+.ctx-dir-tag.out {
+  background: rgba(88, 166, 255, 0.15);
+  color: var(--accent);
 }
 
 .ctx-empty {

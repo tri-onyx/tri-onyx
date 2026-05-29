@@ -7,7 +7,7 @@
       <a href="{% url 'agent-chat' name=conn.name %}" class="ctx-conn-row">
         <span class="status-dot {{ conn.status }}"></span>
         <span class="ctx-conn-name">{{ conn.name }}</span>
-        <span class="ctx-conn-dirs">{% for d in conn.directions %}{% if d == "send" %}out{% endif %}{% if d == "receive" %}in{% endif %}{% if not forloop.last %} · {% endif %}{% endfor %}</span>
+        <span class="ctx-conn-dirs">{% for d in conn.directions %}{% if d == "send" %}<span class="ctx-dir-tag out">OUT</span>{% endif %}{% if d == "receive" %}<span class="ctx-dir-tag in">IN</span>{% endif %}{% endfor %}</span>
       </a>
     {% endfor %}
   {% else %}
