@@ -819,6 +819,7 @@ a:hover { text-decoration: underline; }
   gap: 16px;
   color: var(--muted);
   font-size: 14px;
+  padding-bottom: 15%;
 }
 
 .spinner {
