@@ -1157,55 +1157,31 @@ a:hover { text-decoration: underline; }
   margin-bottom: 8px;
 }
 
-.ctx-agent-card {
-  display: block;
-  padding: 8px 10px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  margin-bottom: 6px;
-  text-decoration: none;
-  color: inherit;
-  transition: border-color 0.15s;
-}
-
-.ctx-agent-card:hover {
-  border-color: var(--accent);
-  text-decoration: none;
-}
-
-.ctx-agent-card-header {
+.ctx-conn-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  padding: 5px 6px;
+  border-radius: 5px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.1s;
 }
 
-.ctx-agent-card-name {
-  font-size: 13px;
+.ctx-conn-row:hover {
+  background: rgba(88, 166, 255, 0.06);
+  text-decoration: none;
+}
+
+.ctx-conn-name {
+  font-size: 12px;
   font-weight: 600;
+  flex: 1;
 }
 
-.ctx-agent-card-dir {
-  display: flex;
-  gap: 6px;
-  margin-top: 4px;
-  padding-left: 16px;
-}
-
-.ctx-dir-tag {
-  font-size: 10px;
-  padding: 1px 6px;
-  border-radius: 4px;
-}
-
-.ctx-dir-tag.send {
-  background: rgba(88, 166, 255, 0.1);
-  color: var(--accent);
-}
-
-.ctx-dir-tag.receive {
-  background: rgba(188, 140, 255, 0.1);
-  color: var(--purple);
+.ctx-conn-dirs {
+  font-size: 11px;
+  color: var(--muted);
 }
 
 .ctx-empty {

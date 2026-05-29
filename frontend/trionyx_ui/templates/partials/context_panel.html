@@ -4,17 +4,10 @@
   <div class="ctx-section-title">Connected Agents</div>
   {% if connected_agents %}
     {% for conn in connected_agents %}
-      <a href="{% url 'agent-chat' name=conn.name %}" class="ctx-agent-card">
-        <div class="ctx-agent-card-header">
-          <span class="status-dot {{ conn.status }}"></span>
-          <span class="ctx-agent-card-name">{{ conn.name }}</span>
-        </div>
-        <div class="ctx-agent-card-dir">
-          {% for d in conn.directions %}
-            {% if d == "send" %}<span class="ctx-dir-tag send">→ sends to</span>{% endif %}
-            {% if d == "receive" %}<span class="ctx-dir-tag receive">← receives from</span>{% endif %}
-          {% endfor %}
-        </div>
+      <a href="{% url 'agent-chat' name=conn.name %}" class="ctx-conn-row">
+        <span class="status-dot {{ conn.status }}"></span>
+        <span class="ctx-conn-name">{{ conn.name }}</span>
+        <span class="ctx-conn-dirs">{% for d in conn.directions %}{% if d == "send" %}→{% endif %}{% if d == "receive" %}←{% endif %}{% if not forloop.last %} {% endif %}{% endfor %}</span>
       </a>
     {% endfor %}
   {% else %}
