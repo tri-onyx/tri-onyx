@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+{% load static %}
+{% load ui_filters %}
+
+{% block title %}{{ agent.name }} — TriOnyx{% endblock %}
+
+{% block content %}
+<div class="chat-layout">
+  <div class="chat-header">
+    <nav class="breadcrumb">
+      <a href="{% url 'dashboard' %}">Dashboard</a>
+      <span class="breadcrumb-sep">/</span>
+      <span class="breadcrumb-current">{{ agent.name }}</span>
+    </nav>
+    <span class="status-dot {{ agent.status }}"></span>
+    <span class="chat-header-model">{{ agent.model }}</span>
+    {% if agent.effective_risk %}
+      <span class="risk-badge {{ agent.effective_risk }}">{{ agent.effective_risk }}</span>
+    {% endif %}
+    <span id="session-cost" class="session-cost">${{ session_cost }}</span>
+    <div class="chat-header-actions">
+      <span id="sse-status" class="sse-status"></span>
+      <div class="history-wrapper">
+        <button class="btn btn-history" onclick="toggleHistoryDropdown()" title="Session history">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 3.5a.5.5 0 0 0-1 0V8a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 7.71V3.5z"/>
+            <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+          </svg>
+        </button>
+        <div class="history-dropdown" id="history-dropdown">
+          <div class="history-dropdown-header">Session History</div>
+          <div class="history-dropdown-body"
+               id="history-dropdown-body"
+               hx-get="{% url 'agent-sessions' name=agent.name %}?current={{ session_id|default:'' }}"
+               hx-trigger="history-refresh from:body"
+               hx-swap="innerHTML">
+          </div>
+        </div>
+      </div>
+      {% if is_active and not viewing_history %}
+        <form method="post" action="{% url 'agent-stop' name=agent.name %}">
+          {% csrf_token %}
+          <button type="submit" class="btn btn-danger" style="padding: 4px 12px; font-size: 12px;">Stop</button>
+        </form>
+      {% endif %}
+    </div>
+  </div>
+
+  {% if viewing_history %}
+    <div class="history-banner">
+      <span>Viewing historical session{% if history_session_start %} from {{ history_session_start|iso_short }}{% endif %}</span>
+      <a href="{% url 'agent-chat' name=agent.name %}" class="btn btn-primary" style="padding: 4px 12px; font-size: 12px;">&larr; Back to current</a>
+    </div>
+  {% endif %}
+
+  {% if is_starting %}
+    <div id="starting-area"
+         hx-get="{% url 'agent-status-check' name=agent.name %}"
+         hx-trigger="load delay:1s, every 2s"
+         hx-swap="outerHTML">
+      <div class="start-prompt starting">
+        <div class="spinner"></div>
+        <p>Starting agent...</p>
+      </div>
+    </div>
+  {% elif is_active or viewing_history %}
+    <div id="chat-messages" class="chat-messages">
+      {% for msg in messages %}
+        {% include "partials/message.html" %}
+      {% endfor %}
+    </div>
+    {% if viewing_history %}
+      {# read-only: no prompt bar #}
+    {% else %}
+      <form class="prompt-bar"
+            hx-post="{% url 'agent-prompt' name=agent.name %}"
+            hx-target="#chat-messages"
+            hx-swap="beforeend">
+        <textarea name="content"
+                  class="prompt-input"
+                  placeholder="Send a message..."
+                  rows="1"
+                  autocomplete="off"></textarea>
+        <button type="submit" class="btn btn-send">Send</button>
+      </form>
+    {% endif %}
+  {% else %}
+    <div class="start-prompt">
+      <p>Agent is {{ agent.status|default:"inactive" }}</p>
+      <form method="post" action="{% url 'agent-start' name=agent.name %}">
+        {% csrf_token %}
+        <button type="submit" class="btn btn-primary">Start Session</button>
+      </form>
+    </div>
+  {% endif %}
+</div>
+
+<div id="sse-config"
+     data-sse-url="{{ gateway_sse_url }}"
+     data-last-timestamp="{{ last_timestamp }}"
+     data-agent-name="{{ agent.name }}"
+     data-is-active="{{ is_active|yesno:'true,false' }}"
+     style="display:none;"></div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/chat.js' %}"></script>
+<script>
+function toggleHistoryDropdown() {
+  var dd = document.getElementById('history-dropdown');
+  var open = dd.classList.toggle('open');
+  if (open) {
+    htmx.trigger(document.body, 'history-refresh');
+  }
+}
+document.addEventListener('click', function(e) {
+  var wrapper = document.querySelector('.history-wrapper');
+  if (wrapper && !wrapper.contains(e.target)) {
+    document.getElementById('history-dropdown').classList.remove('open');
+  }
+});
+</script>
+{% endblock %}

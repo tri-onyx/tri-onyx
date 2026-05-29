@@ -5,10 +5,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}TriOnyx{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><polygon points='16,2 30,28 2,28' fill='%2358a6ff' opacity='0.9'/><polygon points='16,10 24,26 8,26' fill='%230d1117'/><polygon points='16,16 20,24 12,24' fill='%2358a6ff' opacity='0.6'/></svg>">
   <link rel="stylesheet" href="{% static 'css/main.css' %}">
   <meta name="color-scheme" content="dark">
 </head>
-<body>
+<body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
   <nav class="nav">
     <a href="{% url 'dashboard' %}" class="nav-brand">TriOnyx</a>
     <div class="nav-links">
