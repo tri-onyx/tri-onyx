@@ -24,6 +24,7 @@
       "Bash(sort:*)",
       "Bash(test:*)",
       "Bash(tree:*)",
+      "Bash(scripts/lcurl :*)",
       "Skill(dig-ai-platform:bedrock)",
       "Skill(dig-ai-platform:claude-hooks)",
       "Skill(dig-ai-platform:python)",

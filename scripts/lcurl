@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+# curl wrapper restricted to localhost targets only
+for arg in "$@"; do
+  case "$arg" in
+    http://localhost:*|http://127.0.0.1:*) ;;
+    -*) ;;
+    *) echo "lcurl: only localhost URLs allowed" >&2; exit 1 ;;
+  esac
+done
+exec curl -s "$@"
