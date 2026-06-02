@@ -48,6 +48,7 @@
       {% if is_active and not viewing_history %}
         <form method="post" action="{% url 'agent-stop' name=agent.name %}">
           {% csrf_token %}
+          {% if selected_session_id %}<input type="hidden" name="session_id" value="{{ selected_session_id }}">{% endif %}
           <button type="submit" class="btn btn-danger" style="padding: 4px 12px; font-size: 12px;" aria-label="Stop Session">Stop</button>
         </form>
       {% endif %}
@@ -58,6 +59,22 @@
     <div class="history-banner">
       <span>Viewing historical session{% if history_session_start %} from {{ history_session_start|iso_short }}{% endif %}</span>
       <a href="{% url 'agent-chat' name=agent.name %}" class="btn btn-primary" style="padding: 4px 12px; font-size: 12px;">&larr; Back to current</a>
+    </div>
+  {% endif %}
+
+  {% if active_sessions %}
+    <div class="session-picker" role="tablist" aria-label="Active sessions">
+      <span class="session-picker-label">Sessions</span>
+      {% for s in active_sessions %}
+        <a href="?active={{ s.session_id }}"
+           class="session-tab {% if s.session_id == selected_session_id %}active{% endif %}"
+           role="tab"
+           aria-selected="{% if s.session_id == selected_session_id %}true{% else %}false{% endif %}">
+          <span class="status-dot {{ s.status }}"></span>
+          <span class="session-tab-id">{{ s.session_id|truncatechars:12 }}</span>
+          <span class="session-tab-time">{{ s.started_at|iso_short }}</span>
+        </a>
+      {% endfor %}
     </div>
   {% endif %}
 
@@ -88,6 +105,7 @@
             hx-post="{% url 'agent-prompt' name=agent.name %}"
             hx-target="#chat-messages"
             hx-swap="beforeend">
+        {% if selected_session_id %}<input type="hidden" name="session_id" value="{{ selected_session_id }}">{% endif %}
         <textarea name="content"
                   class="prompt-input"
                   placeholder="Send a message..."

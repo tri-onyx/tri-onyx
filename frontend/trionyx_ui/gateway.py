@@ -147,9 +147,12 @@ def start_agent(name: str) -> dict:
         raise GatewayError(f"Failed to start agent: {e.response.status_code}", e.response.status_code)
 
 
-def stop_agent(name: str) -> dict:
+def stop_agent(name: str, session_id: str | None = None) -> dict:
+    body: dict = {}
+    if session_id:
+        body["session_id"] = session_id
     try:
-        resp = _client().post(f"/agents/{name}/stop", json={})
+        resp = _client().post(f"/agents/{name}/stop", json=body)
         resp.raise_for_status()
         logger.info("Stopped agent %s", name)
         return resp.json()
@@ -161,12 +164,12 @@ def stop_agent(name: str) -> dict:
         raise GatewayError(f"Failed to stop agent: {e.response.status_code}", e.response.status_code)
 
 
-def send_prompt(name: str, content: str) -> dict:
+def send_prompt(name: str, content: str, session_id: str | None = None) -> dict:
+    body: dict = {"content": content}
+    if session_id:
+        body["session_id"] = session_id
     try:
-        resp = _client().post(
-            f"/agents/{name}/prompt",
-            json={"content": content},
-        )
+        resp = _client().post(f"/agents/{name}/prompt", json=body)
         resp.raise_for_status()
         logger.info("Sent prompt to %s (%d chars)", name, len(content))
         return resp.json()

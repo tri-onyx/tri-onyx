@@ -72,7 +72,14 @@ def agent_chat(request, name):
         except gateway.GatewayError:
             pass
 
-    session_id = agent.get("session_id")
+    active_sessions = agent.get("active_sessions", [])
+    selected_active = request.GET.get("active")
+
+    if selected_active and any(s["session_id"] == selected_active for s in active_sessions):
+        session_id = selected_active
+    else:
+        session_id = agent.get("session_id")
+
     messages = []
     last_timestamp = ""
 
@@ -88,8 +95,13 @@ def agent_chat(request, name):
         session_cost = sum(e.get("cost_usd", 0) for e in raw_events if e.get("type") == "result")
 
     gateway_sse_url = f"{settings.GATEWAY_EXTERNAL_URL}/agents/{name}/events"
+    if len(active_sessions) > 1 and session_id:
+        gateway_sse_url += f"?session_id={session_id}"
+
     pending_approvals = gateway.get_approval_count()
     connected_agents = _resolve_connected_agents(agent)
+
+    show_session_picker = len(active_sessions) > 1
 
     return render(request, "chat.html", {
         "agent": agent,
@@ -103,6 +115,8 @@ def agent_chat(request, name):
         "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
         "connected_agents": connected_agents,
         "viewing_history": False,
+        "active_sessions": active_sessions if show_session_picker else [],
+        "selected_session_id": session_id,
     })
 
 
@@ -223,8 +237,10 @@ def agent_prompt(request, name):
     if not content:
         return HttpResponse(status=400)
 
+    session_id = request.POST.get("session_id", "").strip() or None
+
     try:
-        gateway.send_prompt(name, content)
+        gateway.send_prompt(name, content, session_id=session_id)
     except gateway.GatewayError:
         return HttpResponse(
             '<div class="msg msg-error">Failed to send prompt</div>',
@@ -241,10 +257,13 @@ def agent_prompt(request, name):
 def agent_stop(request, name):
     if request.method != "POST":
         return redirect("agent-chat", name=name)
+    session_id = request.POST.get("session_id", "").strip() or None
     try:
-        gateway.stop_agent(name)
+        gateway.stop_agent(name, session_id=session_id)
     except gateway.GatewayError:
         pass
+    if session_id:
+        return redirect(f"/agents/{name}/?active={session_id}")
     return redirect("agent-chat", name=name)
 
 

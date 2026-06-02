@@ -170,7 +170,8 @@ defmodule TriOnyx.Router do
     case TriggerRouter.get_agent(name) do
       {:ok, definition} ->
         sessions = AgentSupervisor.list_sessions()
-        session = Enum.find(sessions, fn s -> s.definition.name == name end)
+        agent_sessions = Enum.filter(sessions, fn s -> s.definition.name == name end)
+        session = List.first(agent_sessions)
         all_defs = Map.new(TriggerRouter.list_agents(), fn d -> {d.name, d} end)
 
         detail = %{
@@ -186,6 +187,19 @@ defmodule TriOnyx.Router do
           "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
           "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network, definition))
         }
+
+        active_sessions =
+          Enum.map(agent_sessions, fn s ->
+            %{
+              "session_id" => s.id,
+              "session_key" => s.session_key,
+              "status" => to_string(s.status),
+              "started_at" => DateTime.to_iso8601(s.started_at),
+              "effective_risk" => RiskScorer.format_risk(s.effective_risk)
+            }
+          end)
+
+        detail = Map.put(detail, "active_sessions", active_sessions)
 
         detail =
           if session do
@@ -266,7 +280,21 @@ defmodule TriOnyx.Router do
   end
 
   post "/agents/:name/stop" do
-    case AgentSupervisor.find_session(name) do
+    body = conn.assigns[:raw_body] || ""
+    target_session_id =
+      case Jason.decode(body) do
+        {:ok, %{"session_id" => sid}} when is_binary(sid) and sid != "" -> sid
+        _ -> nil
+      end
+
+    session_result =
+      if target_session_id do
+        AgentSupervisor.find_session_by_id(target_session_id)
+      else
+        AgentSupervisor.find_session(name)
+      end
+
+    case session_result do
       {:ok, pid} ->
         reason = get_stop_reason(conn)
         AgentSupervisor.stop_session(AgentSupervisor, pid, reason)
@@ -294,8 +322,17 @@ defmodule TriOnyx.Router do
     body = conn.assigns[:raw_body] || ""
 
     case Jason.decode(body) do
-      {:ok, %{"content" => content}} when is_binary(content) ->
-        case AgentSupervisor.find_session(name) do
+      {:ok, %{"content" => content} = payload} when is_binary(content) ->
+        target_session_id = Map.get(payload, "session_id")
+
+        session_result =
+          if is_binary(target_session_id) and target_session_id != "" do
+            AgentSupervisor.find_session_by_id(target_session_id)
+          else
+            AgentSupervisor.find_session(name)
+          end
+
+        case session_result do
           {:ok, pid} ->
             case AgentSession.send_prompt(pid, content) do
               :ok ->
@@ -343,6 +380,9 @@ defmodule TriOnyx.Router do
   # --- SSE Event Stream ---
 
   get "/agents/:name/events" do
+    conn = Plug.Conn.fetch_query_params(conn)
+    target_session_id = conn.params["session_id"]
+
     conn =
       conn
       |> put_resp_header("content-type", "text/event-stream")
@@ -350,7 +390,14 @@ defmodule TriOnyx.Router do
       |> put_resp_header("connection", "keep-alive")
       |> send_chunked(200)
 
-    case AgentSupervisor.find_session(name) do
+    session_result =
+      if is_binary(target_session_id) and target_session_id != "" do
+        AgentSupervisor.find_session_by_id(target_session_id)
+      else
+        AgentSupervisor.find_session(name)
+      end
+
+    case session_result do
       {:ok, pid} ->
         status = AgentSession.get_status(pid)
         session_id = status.id

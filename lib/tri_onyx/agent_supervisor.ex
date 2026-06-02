@@ -166,6 +166,29 @@ defmodule TriOnyx.AgentSupervisor do
   end
 
   @doc """
+  Finds an active session by its session ID (not agent name).
+
+  Returns `{:ok, pid}` if found, `:error` if no session with that ID exists.
+  """
+  @spec find_session_by_id(GenServer.server(), String.t()) :: {:ok, pid()} | :error
+  def find_session_by_id(supervisor \\ __MODULE__, session_id) when is_binary(session_id) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.reduce_while(:error, fn
+      {:undefined, pid, :worker, _}, :error when is_pid(pid) ->
+        try do
+          status = AgentSession.get_status(pid)
+          if status.id == session_id, do: {:halt, {:ok, pid}}, else: {:cont, :error}
+        catch
+          :exit, _ -> {:cont, :error}
+        end
+
+      _, acc ->
+        {:cont, acc}
+    end)
+  end
+
+  @doc """
   Returns the count of active sessions.
   """
   @spec count_sessions(GenServer.server()) :: non_neg_integer()
