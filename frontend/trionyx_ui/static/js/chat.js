@@ -67,7 +67,12 @@ document.addEventListener('DOMContentLoaded', () => {
     promptInput.addEventListener('input', () => autoResize(promptInput));
   }
 
+  let lastSentContent = null;
+
   if (promptForm) {
+    promptForm.addEventListener('htmx:beforeRequest', () => {
+      if (promptInput) lastSentContent = promptInput.value.trim();
+    });
     promptForm.addEventListener('htmx:afterRequest', (e) => {
       promptForm.reset();
       if (promptInput) promptInput.style.height = '';
@@ -125,6 +130,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (watermark && data.timestamp && data.timestamp <= watermark) return;
 
+        if (type === 'user_prompt' && lastSentContent && data.content === lastSentContent) {
+          lastSentContent = null;
+          if (data.timestamp) watermark = data.timestamp;
+          return;
+        }
+
         if (type === 'tool_result' && mergeToolResult(chatMessages, data)) {
           if (data.timestamp) watermark = data.timestamp;
           return;
@@ -144,7 +155,11 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (data.timestamp) watermark = data.timestamp;
 
-        if (type === 'result' || type === 'session_stop' || type === 'port_down') {
+        if (type === 'result') {
+          setStatus('connected', 'idle');
+        }
+
+        if (type === 'session_stop' || type === 'port_down') {
           setStatus('disconnected', 'session ended');
           es.close();
         }

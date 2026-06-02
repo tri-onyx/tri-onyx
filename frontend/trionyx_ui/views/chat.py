@@ -231,7 +231,11 @@ def agent_prompt(request, name):
             content_type="text/html",
         )
 
-    return HttpResponse(status=204)
+    from django.utils.html import escape
+    return HttpResponse(
+        f'<div class="msg msg-user">{escape(content)}</div>',
+        content_type="text/html",
+    )
 
 
 def agent_stop(request, name):
