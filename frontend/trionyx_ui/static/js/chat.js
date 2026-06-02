@@ -270,7 +270,6 @@ function renderEvent(type, data) {
         `<span class="page-card-actions">` +
         `<a href="${escapeAttr(pageUrl)}" target="_blank" class="page-card-open" title="Open in new tab" onclick="event.stopPropagation()">&nearr;</a>` +
         `</span></div>` +
-        `<iframe class="page-card-frame" sandbox="allow-scripts" loading="lazy"></iframe>` +
         `</div></div>`;
     }
 
@@ -416,9 +415,14 @@ function togglePageCard(header) {
   if (!card) return;
   const expanded = card.classList.toggle('expanded');
   if (expanded) {
-    const iframe = card.querySelector('.page-card-frame');
-    if (iframe && !iframe.src) {
+    let iframe = card.querySelector('.page-card-frame');
+    if (!iframe) {
+      iframe = document.createElement('iframe');
+      iframe.className = 'page-card-frame';
+      iframe.setAttribute('sandbox', 'allow-scripts');
+      iframe.loading = 'lazy';
       iframe.src = card.dataset.pageUrl;
+      card.appendChild(iframe);
     }
   }
 }
