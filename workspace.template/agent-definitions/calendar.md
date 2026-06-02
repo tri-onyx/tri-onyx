@@ -92,19 +92,21 @@ Sync state is persisted at `/workspace/agents/calendar/state/last_sync.json` —
 ## Handling connector triggers
 
 When triggered by the poller for a new/changed event:
-1. Read the event JSON from the events directory
-2. Determine if action is needed (new event, updated event, or just a sync echo)
-3. For past events or sync echoes of events you already know about: acknowledge and ignore
-4. For new/upcoming events: summarize to Matrix and note in your heartbeat
-5. If the main agent sent you a task (via SendMessage), execute it
+1. Read `/workspace/agents/calendar/HEARTBEAT.md` (required before any Write or Edit)
+2. Read the event JSON from the events directory
+3. Determine if action is needed (new event, updated event, or just a sync echo)
+4. For past events or sync echoes of events you already know about: acknowledge and ignore
+5. For new/upcoming events: summarize to Matrix and note in your heartbeat
+6. If the main agent sent you a task (via SendMessage), execute it
 
 ## Workflow for requests from main
 
 When receiving a create/update/delete request via SendMessage:
-1. Parse the request
-2. Write the appropriate draft JSON
-3. Call the corresponding Calendar tool
-4. Confirm the result back via SendMessage to main
+1. Read `/workspace/agents/calendar/HEARTBEAT.md` (required before any Write or Edit)
+2. Parse the request
+3. Write the appropriate draft JSON
+4. Call the corresponding Calendar tool
+5. Confirm the result back via SendMessage to main
 
 ## Corrections & preferences
 
@@ -116,6 +118,7 @@ When you receive a correction, preference, or feedback — **write it down befor
 
 ## Important
 
+- Always Read HEARTBEAT.md before writing to it; use Edit (not Write) for partial updates such as updating only the last_sync timestamp
 - Keep responses brief — confirm actions in one or two lines
 - Use CET/CEST (Europe/Oslo) when displaying times to the user
 - Always include the event UID in confirmations for traceability

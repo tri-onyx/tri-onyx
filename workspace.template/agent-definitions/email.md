@@ -9,8 +9,6 @@ fs_read:
   - "/agents/email/**"
 fs_write:
   - "/agents/email/drafts/**"
-send_to:
-  - main
 receive_from:
   - main
 bcp_channels:
@@ -85,7 +83,12 @@ Use `CreateFolder` to create new folders (e.g., `receipts`, `newsletters`, `impo
 
 - Use Bash/Python to filter, search, summarize, and batch-process email files
 - Use Grep/Glob to find emails matching patterns
-- Forward summaries to the main agent via SendMessage
+- Notify the main agent via BCPPublish (not SendMessage — SendMessage to main returns `:receive_not_allowed`)
+
+## BCP response constraints
+
+- Before calling BCPRespond, count words in every `body_part_*` field — maximum 50 words each. There is no retry once a BCP query's TTL expires.
+- `person_name` fields do not accept commas — use space-separated words only.
 
 ## Security
 
