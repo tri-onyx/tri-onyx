@@ -68,7 +68,7 @@ Use the `Workflow` tool to orchestrate the review. The workflow has three phases
 Screenshot every page in the list. Use the screenshot tool:
 
 ```
-uv run scripts/screenshot.py <url> -o ./tmp/ux-review/<page-name>.png -W 1440 -H 900
+uv run scripts/browser.py navigate <url> --screenshot ./tmp/ux-review/<page-name>.png -W 1440 -H 900
 ```
 
 Run all screenshots in parallel via the workflow's `parallel()` helper.
@@ -162,7 +162,7 @@ export const meta = {
   ],
 }
 
-const SCREENSHOT_CMD = 'uv run scripts/screenshot.py'
+const SCREENSHOT_CMD = 'uv run scripts/browser.py navigate'
 const OUT_DIR = './tmp/ux-review'
 
 // PAGES: populated dynamically from Step 1

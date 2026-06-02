@@ -80,7 +80,7 @@ webgui/                       Web dashboard (static HTML)
 
 scripts/                      Utility scripts
   test-agent.py                 End-to-end test harness
-  screenshot.py                 Page screenshot tool (Playwright)
+  browser.py                    Browser automation and screenshot tool (Playwright)
   tri-onyx-plugin.py            Plugin management CLI
   explain-risk.py               Risk score explainer
   log-viewer.py                 CLI log viewer
