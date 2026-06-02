@@ -337,6 +337,7 @@ defmodule TriOnyx.TriggerRouter do
         ) :: {:ok, pid()} | {:error, term()}
   defp ensure_session_and_prompt(supervisor, definition, trigger_type, payload, metadata) do
     session_key = Map.get(metadata, "session_key")
+    session_label = Map.get(metadata, "session_label")
 
     case AgentSupervisor.find_session(supervisor, definition.name, session_key) do
       {:ok, pid} ->
@@ -352,7 +353,8 @@ defmodule TriOnyx.TriggerRouter do
 
         session_opts =
           [definition: definition, trigger_type: trigger_type] ++
-            if(session_key, do: [session_key: session_key], else: [])
+            if(session_key, do: [session_key: session_key], else: []) ++
+            if(session_label, do: [session_label: session_label], else: [])
 
         case AgentSupervisor.start_session(supervisor, session_opts) do
           {:ok, pid} ->

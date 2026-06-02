@@ -51,6 +51,7 @@ defmodule TriOnyx.AgentSession do
           memory_save_timer: reference() | nil,
           interrupt_prompt: {String.t(), map()} | nil,
           session_key: String.t() | nil,
+          session_label: String.t() | nil,
           mode: :normal | :reflection
         }
 
@@ -60,6 +61,7 @@ defmodule TriOnyx.AgentSession do
           | {:id, String.t()}
           | {:name, GenServer.name()}
           | {:session_key, String.t()}
+          | {:session_label, String.t()}
           | {:mode, :normal | :reflection}
 
   # --- Public API ---
@@ -148,6 +150,7 @@ defmodule TriOnyx.AgentSession do
     mode = Keyword.get(opts, :mode, :normal)
     session_id = Keyword.get(opts, :id, generate_session_id(mode))
     session_key = Keyword.get(opts, :session_key)
+    session_label = Keyword.get(opts, :session_label)
 
     capability_level = RiskScorer.infer_capability(definition.tools, definition.network, definition)
     input_risk = RiskScorer.infer_input_risk(trigger_type, definition.tools, definition)
@@ -196,6 +199,7 @@ defmodule TriOnyx.AgentSession do
       memory_save_timer: nil,
       interrupt_prompt: nil,
       session_key: session_key,
+      session_label: session_label,
       mode: mode
     }
 
@@ -351,7 +355,8 @@ defmodule TriOnyx.AgentSession do
        :effective_risk,
        :started_at,
        :status,
-       :session_key
+       :session_key,
+       :session_label
      ]), state}
   end
 

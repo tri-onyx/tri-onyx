@@ -221,6 +221,7 @@ defmodule TriOnyx.ConnectorHandler do
         trigger_type = trust_to_trigger(trust)
         channel_hash = compute_channel_hash(channel)
         session_key = "#{agent_name}:#{channel_hash}"
+        session_label = Map.get(channel, "display_name")
 
         Logger.info(
           "ConnectorHandler: message from #{state.connector_id} for agent #{agent_name} " <>
@@ -237,6 +238,7 @@ defmodule TriOnyx.ConnectorHandler do
             "platform" => state.platform,
             "channel" => channel,
             "session_key" => session_key,
+            "session_label" => session_label,
             "images" => images
           }
         }
@@ -365,6 +367,7 @@ defmodule TriOnyx.ConnectorHandler do
 
         channel_hash = compute_channel_hash(channel)
         session_key = "#{agent_name}:#{channel_hash}"
+        session_label = Map.get(channel, "display_name")
 
         event = %{
           type: trigger_type,
@@ -376,6 +379,7 @@ defmodule TriOnyx.ConnectorHandler do
             "platform" => state.platform,
             "channel" => channel,
             "session_key" => session_key,
+            "session_label" => session_label,
             "trigger_subtype" => "reaction",
             "emoji" => emoji,
             "sender" => sender

@@ -193,6 +193,7 @@ defmodule TriOnyx.Router do
             %{
               "session_id" => s.id,
               "session_key" => s.session_key,
+              "session_label" => s[:session_label],
               "status" => to_string(s.status),
               "started_at" => DateTime.to_iso8601(s.started_at),
               "effective_risk" => RiskScorer.format_risk(s.effective_risk)

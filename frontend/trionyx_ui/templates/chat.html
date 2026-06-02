@@ -71,7 +71,7 @@
            role="tab"
            aria-selected="{% if s.session_id == selected_session_id %}true{% else %}false{% endif %}">
           <span class="status-dot {{ s.status }}"></span>
-          <span class="session-tab-id">{{ s.session_id|truncatechars:12 }}</span>
+          <span class="session-tab-id">{{ s.session_label|default:s.session_id|truncatechars:16 }}</span>
           <span class="session-tab-time">{{ s.started_at|iso_short }}</span>
         </a>
       {% endfor %}
