@@ -1,0 +1,26 @@
+<div class="summary-strip">
+  <div class="summary-item">
+    <span class="label">Agents</span>
+    <span class="value">{{ total_count }}</span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Running</span>
+    <span class="value green">{{ running_count }}</span>
+  </div>
+  <div class="summary-item">
+    <span class="label">Idle</span>
+    <span class="value muted">{{ idle_count }}</span>
+  </div>
+  {% if pending_approvals %}
+  <div class="summary-item">
+    <span class="label">Approvals</span>
+    <span class="value red">{{ pending_approvals }}</span>
+  </div>
+  {% endif %}
+  <div class="summary-item">
+    <span class="label">Heartbeats</span>
+    <span class="value {% if heartbeats_enabled %}green{% else %}muted{% endif %}">
+      {% if heartbeats_enabled %}on{% else %}off{% endif %}
+    </span>
+  </div>
+</div>

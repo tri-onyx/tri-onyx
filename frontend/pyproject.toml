@@ -1,0 +1,17 @@
+[project]
+name = "trionyx-frontend"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "django>=5.1",
+    "httpx>=0.28",
+    "gunicorn>=23.0",
+    "markdown-it-py>=3.0",
+    "whitenoise>=6.8",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-django>=4.8",
+]

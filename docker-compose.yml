@@ -93,3 +93,27 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+
+  frontend:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    command: ["uv", "run", "python", "manage.py", "runserver", "0.0.0.0:8080"]
+    ports:
+      - "127.0.0.1:8080:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    volumes:
+      - ./frontend:/app
+    environment:
+      - GATEWAY_URL=http://gateway:4000
+      - GATEWAY_EXTERNAL_URL=http://localhost:4000
+      - DEBUG=1
+    depends_on:
+      gateway:
+        condition: service_healthy

@@ -1,0 +1,22 @@
+{% load ui_filters %}
+{% if sessions %}
+  {% for s in sessions %}
+    {% if s.session_id == current_session_id %}
+      <div class="session-item session-item-current">
+        <div class="session-item-label">
+          <span class="session-dot current"></span>
+          Current session
+        </div>
+        <div class="session-item-meta">{{ s.session_id|truncatechars:12 }} · {{ s.size_bytes|filesizeformat }}</div>
+      </div>
+    {% else %}
+      <a href="{% url 'agent-chat' name=agent_name %}?session={{ s.session_id }}"
+         class="session-item">
+        <div class="session-item-label">{{ s.modified_at|iso_short }}</div>
+        <div class="session-item-meta">{{ s.session_id|truncatechars:12 }} · {{ s.size_bytes|filesizeformat }}</div>
+      </a>
+    {% endif %}
+  {% endfor %}
+{% else %}
+  <div class="session-empty">No session history</div>
+{% endif %}
