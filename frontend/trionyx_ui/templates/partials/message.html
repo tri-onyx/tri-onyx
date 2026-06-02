@@ -36,6 +36,25 @@
     <span class="image-caption">{{ msg.filename }}</span>
   </div>
 
+{% elif msg.type == "page" %}
+  <div class="msg msg-agent msg-page" data-ts="{{ msg.timestamp }}">
+    <div class="page-card" data-page-url="{% url 'session-page' commit=msg.commit page_path=msg.path %}">
+      <div class="page-card-header" onclick="togglePageCard(this)">
+        <svg class="page-card-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.414A2 2 0 0 0 13.414 3L11 .586A2 2 0 0 0 9.586 0H4zm5.5 1.5v2A1.5 1.5 0 0 0 11 5h2v9a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V2a.5.5 0 0 1 .5-.5h6z"/>
+        </svg>
+        <span class="page-card-title">{{ msg.title|default:msg.filename }}</span>
+        <span class="page-card-actions">
+          <a href="{% url 'session-page' commit=msg.commit page_path=msg.path %}" target="_blank"
+             class="page-card-open" title="Open in new tab" onclick="event.stopPropagation()">&nearr;</a>
+        </span>
+      </div>
+      <iframe class="page-card-frame"
+              sandbox="allow-scripts"
+              loading="lazy"></iframe>
+    </div>
+  </div>
+
 {% elif msg.type == "error" %}
   <div class="msg msg-error" data-ts="{{ msg.timestamp }}">{{ msg.message }}</div>
 

@@ -67,6 +67,7 @@ from protocol import (
     CalendarDeleteResponse,
     SubmitItemResponse,
     SubmitImageResponse,
+    SubmitPageResponse,
     _INBOUND_PARSERS,
     parse_inbound,
     emit_ready,
@@ -91,6 +92,7 @@ from protocol import (
     emit_calendar_delete_request,
     emit_submit_item_request,
     emit_submit_image_request,
+    emit_submit_page_request,
     emit_log,
 )
 
@@ -302,6 +304,7 @@ class InboundDispatcher:
         self.calendar_delete_responses: asyncio.Queue[CalendarDeleteResponse] = asyncio.Queue()
         self.submit_item_responses: asyncio.Queue[SubmitItemResponse] = asyncio.Queue()
         self.submit_image_responses: asyncio.Queue[SubmitImageResponse] = asyncio.Queue()
+        self.submit_page_responses: asyncio.Queue[SubmitPageResponse] = asyncio.Queue()
         self.active_subscriptions: list[dict[str, Any]] = []
         self._task: asyncio.Task[None] | None = None
 
@@ -334,6 +337,7 @@ class InboundDispatcher:
             self.calendar_delete_responses,
             self.submit_item_responses,
             self.submit_image_responses,
+            self.submit_page_responses,
         ]
         for q in queues:
             while not q.empty():
@@ -446,6 +450,12 @@ class InboundDispatcher:
                     await self.submit_image_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse submit_image_response: %s", exc)
+            elif msg_type == "submit_page_response":
+                try:
+                    response = SubmitPageResponse.from_dict(data)
+                    await self.submit_page_responses.put(response)
+                except Exception as exc:
+                    log.error("Failed to parse submit_page_response: %s", exc)
             elif msg_type == "interrupt":
                 # Route directly to interrupt_event (not control_queue) because
                 # the main loop is blocked awaiting run_prompt, not reading control.
@@ -766,6 +776,71 @@ class SubmitImageHandler:
             if response.request_id == request_id:
                 return response
             await self._dispatcher.submit_image_responses.put(response)
+            await asyncio.sleep(0.01)
+
+
+_SUBMIT_PAGE_TIMEOUT_S = 30
+_ALLOWED_PAGE_EXTENSIONS = {".html", ".htm"}
+_PAGE_MAX_SIZE = 5 * 1024 * 1024
+
+
+class SubmitPageHandler:
+    """Handles the SubmitPage virtual tool for sending HTML pages to the user.
+
+    Validates the file locally, then requests the gateway to commit and serve it.
+    """
+
+    def __init__(self, dispatcher: InboundDispatcher) -> None:
+        self._dispatcher = dispatcher
+
+    async def handle(self, path: str, title: str = "") -> str:
+        resolved = Path(path)
+        if not resolved.is_absolute():
+            resolved = Path("/workspace") / path
+
+        if not resolved.is_file():
+            return f"Error: file not found: {path}"
+
+        ext = resolved.suffix.lower()
+        if ext not in _ALLOWED_PAGE_EXTENSIONS:
+            return f"Error: unsupported file type '{ext}'. Allowed: {', '.join(sorted(_ALLOWED_PAGE_EXTENSIONS))}"
+
+        try:
+            size = resolved.stat().st_size
+        except OSError:
+            return f"Error: cannot read file: {path}"
+        if size > _PAGE_MAX_SIZE:
+            return f"Error: file too large ({size // 1024 // 1024}MB). Maximum is 5MB."
+
+        workspace_relative = str(resolved).removeprefix("/workspace/")
+
+        request_id = uuid.uuid4().hex
+        log.info("SubmitPage path=%r title=%r (request_id=%s)", path, title, request_id)
+        emit_submit_page_request(
+            request_id=request_id,
+            path=workspace_relative,
+            title=title or resolved.stem,
+        )
+
+        try:
+            response = await asyncio.wait_for(
+                self._wait_for_response(request_id),
+                timeout=_SUBMIT_PAGE_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("SubmitPage timed out (request_id=%s)", request_id)
+            return f"Error: SubmitPage timed out after {_SUBMIT_PAGE_TIMEOUT_S}s"
+
+        if response.success:
+            return f"Page submitted: {resolved.name}"
+        return f"Error: {response.detail}"
+
+    async def _wait_for_response(self, request_id: str) -> SubmitPageResponse:
+        while True:
+            response = await self._dispatcher.submit_page_responses.get()
+            if response.request_id == request_id:
+                return response
+            await self._dispatcher.submit_page_responses.put(response)
             await asyncio.sleep(0.01)
 
 
@@ -1254,6 +1329,10 @@ _SUBMIT_ITEM_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_ITEM_TOOL}"
 _SUBMIT_IMAGE_TOOL = "SubmitImage"
 _SUBMIT_IMAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_IMAGE_TOOL}"
 
+# SubmitPage tool name
+_SUBMIT_PAGE_TOOL = "SubmitPage"
+_SUBMIT_PAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_PAGE_TOOL}"
+
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
@@ -1271,6 +1350,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _CALENDAR_DELETE_MCP_NAME: _CALENDAR_DELETE_TOOL,
     _SUBMIT_ITEM_MCP_NAME: _SUBMIT_ITEM_TOOL,
     _SUBMIT_IMAGE_MCP_NAME: _SUBMIT_IMAGE_TOOL,
+    _SUBMIT_PAGE_MCP_NAME: _SUBMIT_PAGE_TOOL,
 }
 
 
@@ -2058,6 +2138,59 @@ def build_submit_image_tool(image_handler: SubmitImageHandler) -> Any:
     return submit_image
 
 
+def build_submit_page_tool(page_handler: SubmitPageHandler) -> Any:
+    """Create SubmitPage as an in-process SDK MCP tool."""
+
+    @tool(
+        _SUBMIT_PAGE_TOOL,
+        "Submit a self-contained HTML page to display to the user. "
+        "Write the HTML file first using the Write tool, then call this "
+        "with the path. The page will be rendered in a sandboxed iframe "
+        "with JavaScript enabled. Only .html/.htm files are supported.",
+        {
+            "type": "object",
+            "properties": {
+                "path": {
+                    "type": "string",
+                    "description": (
+                        "Path to the HTML file. Can be absolute "
+                        "(e.g. /workspace/agents/myagent/artifacts/report.html) "
+                        "or relative to /workspace/."
+                    ),
+                },
+                "title": {
+                    "type": "string",
+                    "description": "Display title for the page card in the chat UI.",
+                },
+            },
+            "required": ["path"],
+        },
+    )
+    async def submit_page(args: dict[str, Any]) -> dict[str, Any]:
+        path = args.get("path", "")
+
+        if not path:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Error: 'path' is required.",
+                    }
+                ],
+                "isError": True,
+            }
+
+        title = args.get("title", "")
+        result = await page_handler.handle(path=path, title=title)
+        is_error = result.startswith("Error:")
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": is_error,
+        }
+
+    return submit_page
+
+
 # ---------------------------------------------------------------------------
 # BCP query → prompt formatting
 # ---------------------------------------------------------------------------
@@ -2500,6 +2633,7 @@ async def main() -> None:
                 email_handler = EmailHandler(dispatcher)
                 item_handler = SubmitItemHandler(dispatcher, config.name)
                 image_handler = SubmitImageHandler(dispatcher)
+                page_handler = SubmitPageHandler(dispatcher)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
                     config.name,
@@ -2528,6 +2662,7 @@ async def main() -> None:
                     _CALENDAR_DELETE_TOOL,
                     _SUBMIT_ITEM_TOOL,
                     _SUBMIT_IMAGE_TOOL,
+                    _SUBMIT_PAGE_TOOL,
                 }
                 sdk_tools = [
                     t for t in config.tools if t not in _custom_tools
@@ -2564,6 +2699,10 @@ async def main() -> None:
                 if _SUBMIT_IMAGE_TOOL in config.tools:
                     interagent_tools.append(build_submit_image_tool(image_handler))
                     sdk_tools.append(_SUBMIT_IMAGE_MCP_NAME)
+
+                if _SUBMIT_PAGE_TOOL in config.tools:
+                    interagent_tools.append(build_submit_page_tool(page_handler))
+                    sdk_tools.append(_SUBMIT_PAGE_MCP_NAME)
 
                 if interagent_tools:
                     server = create_sdk_mcp_server(

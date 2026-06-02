@@ -17,6 +17,7 @@ defmodule TriOnyx.ToolRegistry do
     SendEmail SaveDraft MoveEmail CreateFolder
     CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
     SubmitItem
+    SubmitPage
   )
 
   # Auth and capability metadata for built-in tools.
@@ -51,7 +52,8 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarCreate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
-    "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false}
+    "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false}
   }
 
   # Display metadata for the classification matrix UI.
@@ -81,7 +83,8 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "CalendarCreate", display: "CalendarCreate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarUpdate", display: "CalendarUpdate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil},
-    %{key: "SubmitItem", display: "SubmitItem", variant: nil, group: "Messaging",         note: "posts formatted item to chat (articles, listings, etc.)"}
+    %{key: "SubmitItem", display: "SubmitItem", variant: nil, group: "Messaging",         note: "posts formatted item to chat (articles, listings, etc.)"},
+    %{key: "SubmitPage", display: "SubmitPage", variant: nil, group: "Output",            note: "renders self-contained HTML page in chat"}
   ]
 
   @doc """

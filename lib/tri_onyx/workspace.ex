@@ -207,6 +207,99 @@ defmodule TriOnyx.Workspace do
   end
 
   @doc """
+  Commits a single file immediately and returns the full commit SHA.
+
+  Used by SubmitPage to pin an HTML artifact to a specific version.
+  The commit message includes the agent name and a page-specific prefix
+  so it's distinguishable from session-end commits.
+
+  Returns `{:ok, sha}` or `{:error, reason}`.
+  """
+  @spec commit_page(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def commit_page(agent_name, path) do
+    dir = workspace_dir()
+    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    clear_stale_index_lock(dir)
+
+    full_path = Path.join(dir, path) |> Path.expand()
+    safe_prefix = Path.expand(dir)
+
+    cond do
+      not String.starts_with?(full_path, safe_prefix) ->
+        {:error, :path_traversal}
+
+      not File.regular?(full_path) ->
+        {:error, :not_found}
+
+      true ->
+        case System.cmd("git", safe ++ ["add", "--", path], cd: dir, stderr_to_stdout: true) do
+          {_, 0} ->
+            case System.cmd("git", safe ++ ["diff", "--cached", "--quiet"], cd: dir, stderr_to_stdout: true) do
+              {_, 0} ->
+                # File already committed with identical content — return current HEAD
+                {sha, 0} = System.cmd("git", safe ++ ["rev-parse", "HEAD"], cd: dir, stderr_to_stdout: true)
+                {:ok, String.trim(sha)}
+
+              {_, 1} ->
+                filename = Path.basename(path)
+                author = "#{agent_name} <#{agent_name}@tri_onyx>"
+                commit_msg = "#{agent_name} page: #{filename}"
+
+                case System.cmd(
+                       "git",
+                       safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
+                       cd: dir,
+                       stderr_to_stdout: true,
+                       env: committer_env()
+                     ) do
+                  {_, 0} ->
+                    {sha, 0} = System.cmd("git", safe ++ ["rev-parse", "HEAD"], cd: dir, stderr_to_stdout: true)
+                    sha = String.trim(sha)
+                    Logger.info("Workspace: page committed #{sha} for #{agent_name} (#{filename})")
+                    {:ok, sha}
+
+                  {output, _} ->
+                    Logger.error("Workspace: page commit failed: #{output}")
+                    {:error, {:commit_failed, output}}
+                end
+            end
+
+          {output, _} ->
+            Logger.error("Workspace: git add failed for page: #{output}")
+            {:error, {:add_failed, output}}
+        end
+    end
+  end
+
+  @doc """
+  Reads a file at a specific git commit.
+
+  Uses `git show <sha>:<path>` to return the exact content of a file
+  at the given commit, regardless of what the working tree contains now.
+
+  Returns `{:ok, binary}` or `{:error, reason}`.
+  """
+  @spec read_file_at_commit(String.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  def read_file_at_commit(commit, path) do
+    dir = workspace_dir()
+    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+
+    # Validate commit SHA format (hex, 7-40 chars)
+    unless Regex.match?(~r/\A[0-9a-f]{7,40}\z/, commit) do
+      {:error, :invalid_commit}
+    else
+      case System.cmd("git", safe ++ ["show", "#{commit}:#{path}"], cd: dir, stderr_to_stdout: true) do
+        {content, 0} ->
+          {:ok, content}
+
+        {output, _} ->
+          Logger.warning("Workspace: git show #{commit}:#{path} failed: #{output}")
+          {:error, :not_found}
+      end
+    end
+  end
+
+  @doc """
   Updates the risk manifest with entries for the given paths.
 
   The manifest lives at `.tri-onyx/risk-manifest.json` in the workspace and

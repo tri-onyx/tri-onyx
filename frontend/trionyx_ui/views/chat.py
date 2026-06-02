@@ -1,5 +1,6 @@
 import json
 import os
+import re
 
 from django.conf import settings
 from django.http import HttpResponse
@@ -34,6 +35,7 @@ VISIBLE_EVENT_TYPES = {
     "approval_request",
     "interrupted",
     "image",
+    "page",
 }
 
 
@@ -63,12 +65,10 @@ def agent_chat(request, name):
         return _render_historical_session(request, agent, name, history_session_id)
 
     is_active = agent.get("status") not in (None, "inactive", "stopped")
-    is_starting = False
 
     if not is_active:
         try:
             gateway.start_agent(name)
-            is_starting = True
         except gateway.GatewayError:
             pass
 
@@ -94,8 +94,8 @@ def agent_chat(request, name):
     return render(request, "chat.html", {
         "agent": agent,
         "messages": messages,
-        "is_active": is_active,
-        "is_starting": is_starting,
+        "is_active": True,
+        "is_starting": False,
         "session_id": session_id,
         "gateway_sse_url": gateway_sse_url,
         "last_timestamp": last_timestamp,
@@ -262,6 +262,29 @@ def session_image(request, agent_name, session_id, image_id):
         return HttpResponse(status=404)
 
 
+_COMMIT_SHA_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
+
+
+def session_page(request, commit, page_path):
+    if not _COMMIT_SHA_RE.match(commit):
+        return HttpResponse(status=400)
+    ext = os.path.splitext(page_path)[1].lower()
+    if ext not in (".html", ".htm"):
+        return HttpResponse(status=403)
+    try:
+        resp = gateway.get_session_page(commit, page_path)
+        return HttpResponse(
+            resp.content,
+            content_type="text/html",
+            headers={
+                "Content-Security-Policy": "sandbox allow-scripts",
+                "Cache-Control": "public, max-age=31536000, immutable",
+            },
+        )
+    except Exception:
+        return HttpResponse(status=404)
+
+
 def classify_event(event: dict) -> dict:
     etype = event.get("type", "unknown")
     base = {
@@ -303,6 +326,12 @@ def classify_event(event: dict) -> dict:
         base["image_id"] = event.get("image_id", "")
         base["filename"] = event.get("filename", "")
         base["media_type"] = event.get("media_type", "")
+
+    elif etype == "page":
+        base["path"] = event.get("path", "")
+        base["commit"] = event.get("commit", "")
+        base["title"] = event.get("title", "")
+        base["filename"] = event.get("filename", "")
 
     elif etype == "send_message":
         base["to_agent"] = event.get("to", "")

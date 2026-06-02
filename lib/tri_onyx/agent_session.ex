@@ -410,6 +410,13 @@ defmodule TriOnyx.AgentSession do
   @spec handle_agent_event(AgentPort.event(), t()) :: {:noreply, t()}
   defp handle_agent_event({:ready}, state) do
     Logger.info("AgentSession #{state.id}: runtime ready")
+
+    EventBus.broadcast_agent(state.definition.name, %{
+      "type" => "session_started",
+      "session_id" => state.id,
+      "agent" => state.definition.name
+    })
+
     broadcast_event(state, %{"type" => "ready"})
 
     state = %{state | status: :ready}
@@ -626,6 +633,52 @@ defmodule TriOnyx.AgentSession do
           {:error, reason} ->
             AgentPort.send_submit_image_response(
               state.port, req_id, false, "failed to save image: #{inspect(reason)}"
+            )
+        end
+    end
+
+    {:noreply, state}
+  end
+
+  defp handle_agent_event({:submit_page_request, req_id, path, title}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: submit_page_request path=#{path} title=#{title}"
+    )
+
+    allowed_exts = ~w(.html .htm)
+    ext = Path.extname(path) |> String.downcase()
+
+    workspace_dir = Workspace.workspace_dir() |> Path.expand()
+    full_path = Path.join(workspace_dir, path) |> Path.expand()
+
+    cond do
+      not String.starts_with?(full_path, workspace_dir) ->
+        AgentPort.send_submit_page_response(state.port, req_id, false, "path traversal denied")
+
+      ext not in allowed_exts ->
+        AgentPort.send_submit_page_response(
+          state.port, req_id, false, "unsupported file type: #{ext}"
+        )
+
+      not File.regular?(full_path) ->
+        AgentPort.send_submit_page_response(state.port, req_id, false, "file not found")
+
+      true ->
+        case Workspace.commit_page(state.definition.name, path) do
+          {:ok, sha} ->
+            AgentPort.send_submit_page_response(state.port, req_id, true, "")
+
+            broadcast_event(state, %{
+              "type" => "page",
+              "path" => path,
+              "commit" => sha,
+              "title" => title,
+              "filename" => Path.basename(path)
+            })
+
+          {:error, reason} ->
+            AgentPort.send_submit_page_response(
+              state.port, req_id, false, "commit failed: #{inspect(reason)}"
             )
         end
     end

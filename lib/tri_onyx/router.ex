@@ -343,6 +343,13 @@ defmodule TriOnyx.Router do
   # --- SSE Event Stream ---
 
   get "/agents/:name/events" do
+    conn =
+      conn
+      |> put_resp_header("content-type", "text/event-stream")
+      |> put_resp_header("cache-control", "no-cache")
+      |> put_resp_header("connection", "keep-alive")
+      |> send_chunked(200)
+
     case AgentSupervisor.find_session(name) do
       {:ok, pid} ->
         status = AgentSession.get_status(pid)
@@ -350,14 +357,6 @@ defmodule TriOnyx.Router do
 
         EventBus.subscribe(session_id)
 
-        conn =
-          conn
-          |> put_resp_header("content-type", "text/event-stream")
-          |> put_resp_header("cache-control", "no-cache")
-          |> put_resp_header("connection", "keep-alive")
-          |> send_chunked(200)
-
-        # Send initial connected event
         {:ok, conn} =
           Plug.Conn.chunk(
             conn,
@@ -371,15 +370,15 @@ defmodule TriOnyx.Router do
         sse_loop(conn)
 
       :error ->
-        conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          404,
-          Jason.encode!(%{
-            "error" => "no_active_session",
-            "agent" => name
-          })
-        )
+        EventBus.subscribe_agent(name)
+
+        {:ok, conn} =
+          Plug.Conn.chunk(
+            conn,
+            sse_encode("waiting", %{"agent" => name})
+          )
+
+        sse_wait_loop(conn, name)
     end
   end
 
@@ -1171,6 +1170,34 @@ defmodule TriOnyx.Router do
     end
   end
 
+  # --- Session Pages (HTML artifacts) ---
+
+  get "/pages/:commit/*page_path" do
+    path = Enum.join(page_path, "/")
+    ext = path |> Path.extname() |> String.downcase()
+
+    cond do
+      not Regex.match?(~r/\A[0-9a-f]{7,40}\z/, commit) ->
+        conn |> send_resp(400, "invalid commit SHA")
+
+      ext not in [".html", ".htm"] ->
+        conn |> send_resp(403, "forbidden")
+
+      true ->
+        case Workspace.read_file_at_commit(commit, path) do
+          {:ok, data} ->
+            conn
+            |> put_resp_content_type("text/html")
+            |> put_resp_header("content-security-policy", "sandbox allow-scripts")
+            |> put_resp_header("cache-control", "public, max-age=31536000, immutable")
+            |> send_resp(200, data)
+
+          {:error, _} ->
+            conn |> send_resp(404, "not found")
+        end
+    end
+  end
+
   # --- Workspace Explorer ---
 
   get "/api/workspace/tree" do
@@ -1498,6 +1525,25 @@ defmodule TriOnyx.Router do
   end
 
   # --- SSE Helpers ---
+
+  @spec sse_wait_loop(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
+  defp sse_wait_loop(conn, agent_name) do
+    receive do
+      {:event_bus_agent, ^agent_name, %{"type" => "session_started", "session_id" => session_id} = event} ->
+        EventBus.subscribe(session_id)
+
+        case Plug.Conn.chunk(conn, sse_encode("session_started", event)) do
+          {:ok, conn} -> sse_loop(conn)
+          {:error, _reason} -> conn
+        end
+    after
+      30_000 ->
+        case Plug.Conn.chunk(conn, ": keepalive\n\n") do
+          {:ok, conn} -> sse_wait_loop(conn, agent_name)
+          {:error, _reason} -> conn
+        end
+    end
+  end
 
   @spec sse_loop(Plug.Conn.t()) :: Plug.Conn.t()
   defp sse_loop(conn) do

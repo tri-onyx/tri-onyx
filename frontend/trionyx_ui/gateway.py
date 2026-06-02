@@ -206,6 +206,16 @@ def get_session_image(agent_name: str, session_id: str, image_id: str):
     return resp
 
 
+def get_session_page(commit: str, page_path: str):
+    """Proxy an HTML page artifact from the Elixir gateway. Returns raw httpx.Response."""
+    resp = _client().get(
+        f"/pages/{commit}/{page_path}",
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+    return resp
+
+
 def get_session_log(agent_name: str, session_id: str) -> list[dict]:
     try:
         resp = _client().get(

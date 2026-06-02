@@ -106,7 +106,7 @@ document.addEventListener('DOMContentLoaded', () => {
       'text', 'tool_use', 'tool_result',
       'result', 'error', 'user_prompt', 'risk_escalation',
       'send_message', 'bcp_query', 'session_stop', 'interrupted',
-      'port_down', 'idle_timeout', 'image',
+      'port_down', 'idle_timeout', 'image', 'page',
     ];
 
     eventTypes.forEach(type => {
@@ -243,6 +243,22 @@ function renderEvent(type, data) {
         ` alt="${escapeAttr(data.filename || '')}" title="${escapeAttr(data.filename || '')}" loading="lazy">` +
         `<span class="image-caption">${escapeHtml(data.filename || '')}</span></div>`;
 
+    case 'page': {
+      const pageUrl = `/workspace/pages/${encodeURIComponent(data.commit || '')}/${data.path || ''}`;
+      const title = escapeHtml(data.title || data.filename || 'Page');
+      return `<div class="msg msg-agent msg-page" data-ts="${escapeAttr(ts)}">` +
+        `<div class="page-card" data-page-url="${escapeAttr(pageUrl)}">` +
+        `<div class="page-card-header" onclick="togglePageCard(this)">` +
+        `<svg class="page-card-icon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor">` +
+        `<path d="M4 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h8a2 2 0 0 0 2-2V4.414A2 2 0 0 0 13.414 3L11 .586A2 2 0 0 0 9.586 0H4zm5.5 1.5v2A1.5 1.5 0 0 0 11 5h2v9a.5.5 0 0 1-.5.5h-9A.5.5 0 0 1 3 14V2a.5.5 0 0 1 .5-.5h6z"/></svg>` +
+        `<span class="page-card-title">${title}</span>` +
+        `<span class="page-card-actions">` +
+        `<a href="${escapeAttr(pageUrl)}" target="_blank" class="page-card-open" title="Open in new tab" onclick="event.stopPropagation()">&nearr;</a>` +
+        `</span></div>` +
+        `<iframe class="page-card-frame" sandbox="allow-scripts" loading="lazy"></iframe>` +
+        `</div></div>`;
+    }
+
     default:
       return null;
   }
@@ -378,6 +394,18 @@ function updateSessionCost(costUsd) {
 function autoResize(el) {
   el.style.height = 'auto';
   el.style.height = Math.min(el.scrollHeight, 200) + 'px';
+}
+
+function togglePageCard(header) {
+  const card = header.closest('.page-card');
+  if (!card) return;
+  const expanded = card.classList.toggle('expanded');
+  if (expanded) {
+    const iframe = card.querySelector('.page-card-frame');
+    if (iframe && !iframe.src) {
+      iframe.src = card.dataset.pageUrl;
+    }
+  }
 }
 
 // ── Copy buttons ──

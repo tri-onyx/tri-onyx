@@ -14,6 +14,7 @@ Gateway -> Runtime (stdin):
   restart_agent_response -- gateway response after a restart_agent_request
   submit_item_response -- gateway response after a submit_item_request
   submit_image_response -- gateway response after a submit_image_request
+  submit_page_response -- gateway response after a submit_page_request
   bcp_query              -- BCP query delivered to a Reader agent
   bcp_response_delivery  -- validated BCP response delivered to a Controller agent
                             (carries optional subscription_id for subscription deliveries)
@@ -34,6 +35,7 @@ Runtime -> Gateway (stdout):
   restart_agent_request  -- request gateway to restart another agent
   submit_item_request -- request gateway to post an item to the connector
   submit_image_request -- request gateway to save and serve an image to the user
+  submit_page_request -- request gateway to commit and serve an HTML page to the user
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query (query_id for queries,
                           subscription_id + controller for subscription publishes)
@@ -440,6 +442,23 @@ class SubmitImageResponse:
         )
 
 
+@dataclass
+class SubmitPageResponse:
+    """Response from the gateway after a submit_page_request."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitPageResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+        )
+
+
 InboundMessage = (
     StartMessage
     | PromptMessage
@@ -462,6 +481,7 @@ InboundMessage = (
     | CalendarDeleteResponse
     | SubmitItemResponse
     | SubmitImageResponse
+    | SubmitPageResponse
 )
 
 _INBOUND_PARSERS: dict[str, type] = {
@@ -486,6 +506,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "calendar_delete_response": CalendarDeleteResponse,
     "submit_item_response": SubmitItemResponse,
     "submit_image_response": SubmitImageResponse,
+    "submit_page_response": SubmitPageResponse,
 }
 
 
@@ -789,6 +810,20 @@ def emit_submit_image_request(
         "path": path,
         "filename": filename,
         "media_type": media_type,
+    })
+
+
+def emit_submit_page_request(
+    request_id: str,
+    path: str,
+    title: str,
+) -> None:
+    """Request the gateway to commit and serve an HTML page to the user."""
+    _emit({
+        "type": "submit_page_request",
+        "request_id": request_id,
+        "path": path,
+        "title": title,
     })
 
 
