@@ -45,7 +45,9 @@ document.addEventListener('DOMContentLoaded', () => {
   const savedSidebar = prefs.get('sidebarOpen', undefined);
   if (savedSidebar !== undefined) {
     const panel = document.getElementById('ctx-panel');
+    const toggle = document.getElementById('ctx-toggle');
     if (panel) panel.classList.toggle('open', savedSidebar);
+    if (toggle) toggle.setAttribute('aria-expanded', savedSidebar);
   }
 
   if (prefs.get('toolCallsExpanded', false) && chatMessages) {
@@ -92,35 +94,7 @@ document.addEventListener('DOMContentLoaded', () => {
     sseStatus.textContent = label;
   }
 
-  function initPromptBar() {
-    const input = document.querySelector('.prompt-input');
-    const form = document.querySelector('.prompt-bar');
-    if (input) {
-      input.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter' && !e.shiftKey) {
-          e.preventDefault();
-          form.requestSubmit();
-        }
-      });
-      input.addEventListener('input', () => autoResize(input));
-      input.focus();
-    }
-    if (form) {
-      form.addEventListener('htmx:afterRequest', () => {
-        form.reset();
-        if (input) input.style.height = '';
-        if (chatMessages) chatMessages.scrollTop = chatMessages.scrollHeight;
-      });
-    }
-  }
-
-  document.addEventListener('agent-started', () => {
-    const url = config.dataset.sseUrl;
-    if (url) connectSSE(url);
-    initPromptBar();
-  });
-
-  if (!isActive || !sseUrl) return;
+  if (!sseUrl) return;
 
   function connectSSE(url) {
     url = url || sseUrl;
@@ -128,7 +102,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const es = new EventSource(url);
 
     const eventTypes = [
-      'connected', 'ready', 'text', 'tool_use', 'tool_result',
+      'connected', 'waiting', 'session_started', 'ready',
+      'text', 'tool_use', 'tool_result',
       'result', 'error', 'user_prompt', 'risk_escalation',
       'send_message', 'bcp_query', 'session_stop', 'interrupted',
       'port_down', 'idle_timeout', 'image',
@@ -137,6 +112,16 @@ document.addEventListener('DOMContentLoaded', () => {
     eventTypes.forEach(type => {
       es.addEventListener(type, (event) => {
         const data = JSON.parse(event.data);
+
+        if (type === 'waiting') {
+          setStatus('waiting', 'waiting for session');
+          return;
+        }
+
+        if (type === 'connected' || type === 'session_started') {
+          setStatus('connected', 'live');
+          return;
+        }
 
         if (watermark && data.timestamp && data.timestamp <= watermark) return;
 
@@ -166,7 +151,7 @@ document.addEventListener('DOMContentLoaded', () => {
       });
     });
 
-    es.onopen = () => setStatus('connected', 'live');
+    es.onopen = () => {};
 
     es.onerror = () => {
       setStatus('disconnected', 'disconnected');
@@ -409,6 +394,7 @@ function addCopyButtons(container) {
     btn.className = 'copy-btn';
     btn.innerHTML = COPY_SVG;
     btn.title = 'Copy';
+    btn.setAttribute('aria-label', 'Copy');
     btn.onclick = (e) => {
       e.stopPropagation();
       const text = el.textContent.replace(btn.textContent, '').trim();
@@ -423,6 +409,7 @@ function addCopyButtons(container) {
     btn.className = 'copy-btn';
     btn.innerHTML = COPY_SVG;
     btn.title = 'Copy code';
+    btn.setAttribute('aria-label', 'Copy code');
     btn.onclick = (e) => {
       e.stopPropagation();
       const code = el.querySelector('code');

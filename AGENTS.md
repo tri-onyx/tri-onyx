@@ -169,14 +169,22 @@ docker compose -f docker-compose.docs.yml down
 
 - Source files are in `docs/`, config in `mkdocs.yml`, custom styles in `docs/stylesheets/extra.css`
 - The volume mount means edits to any file under `docs/` or `mkdocs.yml` trigger an automatic reload — no container restart needed
-- Use `uv run scripts/screenshot.py http://localhost:8000/<path> -o ./tmp/screenshot.png` to visually verify changes
+- Use `uv run scripts/browser.py navigate http://localhost:8000/<path> --screenshot ./tmp/screenshot.png` to visually verify changes
 - Agent docs in `docs/agents/` are auto-generated from definitions by CI — don't edit them by hand unless also updating the generator
 
-## Screenshot Tool
+## Browser Tool
 
-- Use `uv run scripts/screenshot.py <url-or-file>` to render a page and save a screenshot
-- Accepts local file paths (e.g. `./webgui/index.html`) or URLs (e.g. `http://localhost:8080`)
-- Options: `-o output.png` for output path, `-W 1920 -H 1080` for viewport size
+- Use `uv run scripts/browser.py <command>` for browser automation and screenshots
+- Subcommands: `navigate`, `click`, `fill`, `read`, `screenshot`, `list`, `wait`, `close`
+- Uses accessibility-based locators (ARIA roles + names) to interact with the UI
+- Examples:
+  ```bash
+  uv run scripts/browser.py navigate http://localhost:8080 --screenshot ./tmp/dash.png
+  uv run scripts/browser.py click button "Start Session"
+  uv run scripts/browser.py fill textbox "Message" "Hello"
+  uv run scripts/browser.py list --role button
+  ```
+- Options: `-W 1920 -H 1080` for viewport size, `--wait networkidle` for load strategy
 - Dependencies are managed inline via PEP 723 — no manual install needed
 
 ## Plugin System

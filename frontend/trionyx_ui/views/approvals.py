@@ -68,6 +68,7 @@ def _render_item(item: dict) -> str:
         to_agent = _esc(item.get("to_agent", ""))
         query = _esc(item.get("query", ""))
         justification = _esc(item.get("justification", ""))
+        action_desc = f"{from_agent} to {to_agent}"
 
         desc = (
             f'<div class="notif-item-header">'
@@ -84,6 +85,7 @@ def _render_item(item: dict) -> str:
         tool = _esc(item.get("tool_name", ""))
         tool_input = item.get("tool_input", {})
         brief = _tool_brief(tool, tool_input)
+        action_desc = f"{tool} for {agent}"
 
         desc = (
             f'<div class="notif-item-header">'
@@ -105,12 +107,14 @@ def _render_item(item: dict) -> str:
         f' hx-vals=\'{json.dumps({"action": "approve", "kind": kind})}\''
         f' hx-target="#notif-{_esc(item_id)}"'
         f' hx-swap="outerHTML"'
+        f' aria-label="Approve {action_desc}"'
         f'>Approve</button>'
         f'<button class="btn-notif btn-notif-reject"'
         f' hx-post="/approvals/{_esc(item_id)}"'
         f' hx-vals=\'{json.dumps({"action": "reject", "kind": kind})}\''
         f' hx-target="#notif-{_esc(item_id)}"'
         f' hx-swap="outerHTML"'
+        f' aria-label="Reject {action_desc}"'
         f'>Reject</button>'
         f'</div>'
         f'</div>'

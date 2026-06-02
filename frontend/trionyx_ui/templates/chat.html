@@ -7,7 +7,7 @@
 {% block content %}
 <div class="chat-layout">
   <div class="chat-header">
-    <nav class="breadcrumb">
+    <nav class="breadcrumb" aria-label="Breadcrumb">
       <a href="{% url 'dashboard' %}">Dashboard</a>
       <span class="breadcrumb-sep">/</span>
       <span class="breadcrumb-current">{{ agent.name }}</span>
@@ -19,16 +19,16 @@
     {% endif %}
     <span id="session-cost" class="session-cost" title="Cumulative session API cost">${{ session_cost }}</span>
     <div class="chat-header-actions">
-      <span id="sse-status" class="sse-status" title="Real-time event stream status"></span>
+      <span id="sse-status" class="sse-status" title="Real-time event stream status" aria-label="Connection status"></span>
       <span class="chat-header-sep"></span>
-      <button class="btn btn-history" onclick="toggleContextPanel()" title="Agent details" id="ctx-toggle">
+      <button class="btn btn-history" onclick="toggleContextPanel()" title="Agent details" id="ctx-toggle" aria-label="Details" aria-expanded="false" aria-controls="ctx-panel">
         <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
           <path d="M0 2a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V2zm1 0v12h10V2H1zm12 0v12h2V2h-2z"/>
         </svg>
         <span class="btn-history-label">Details</span>
       </button>
       <div class="history-wrapper">
-        <button class="btn btn-history" onclick="toggleHistoryDropdown()" title="Session history">
+        <button class="btn btn-history" onclick="toggleHistoryDropdown()" title="Session history" aria-label="History" aria-expanded="false" aria-controls="history-dropdown">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M8 3.5a.5.5 0 0 0-1 0V8a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 7.71V3.5z"/>
             <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
@@ -48,7 +48,7 @@
       {% if is_active and not viewing_history %}
         <form method="post" action="{% url 'agent-stop' name=agent.name %}">
           {% csrf_token %}
-          <button type="submit" class="btn btn-danger" style="padding: 4px 12px; font-size: 12px;">Stop</button>
+          <button type="submit" class="btn btn-danger" style="padding: 4px 12px; font-size: 12px;" aria-label="Stop Session">Stop</button>
         </form>
       {% endif %}
     </div>
@@ -61,18 +61,8 @@
     </div>
   {% endif %}
 
-  {% if is_starting %}
-    <div id="starting-area"
-         hx-get="{% url 'agent-status-check' name=agent.name %}"
-         hx-trigger="load delay:1s, every 2s"
-         hx-swap="outerHTML">
-      <div class="start-prompt starting">
-        <div class="spinner"></div>
-        <p>Starting agent...</p>
-      </div>
-    </div>
-  {% elif is_active or viewing_history %}
-    <div id="chat-messages" class="chat-messages">
+  {% if is_active or viewing_history %}
+    <div id="chat-messages" class="chat-messages" role="log" aria-label="Chat messages">
       {% if not messages and not viewing_history %}
         <div class="chat-empty-state">
           <div class="chat-empty-name">{{ agent.name }}</div>
@@ -102,7 +92,8 @@
                   class="prompt-input"
                   placeholder="Send a message..."
                   rows="1"
-                  autocomplete="off"></textarea>
+                  autocomplete="off"
+                  aria-label="Message"></textarea>
         <button type="submit" class="btn btn-send">Send</button>
       </form>
     {% endif %}
@@ -118,7 +109,7 @@
 
 </div>
 
-<aside class="ctx-panel" id="ctx-panel">
+<aside class="ctx-panel" id="ctx-panel" aria-label="Agent Details">
   <div class="ctx-panel-header">Agent Details</div>
   <div class="ctx-panel-body">
     {% include "partials/context_panel.html" %}
@@ -139,12 +130,16 @@
 <script>
 function toggleContextPanel() {
   var panel = document.getElementById('ctx-panel');
+  var toggle = document.getElementById('ctx-toggle');
   var open = panel.classList.toggle('open');
+  toggle.setAttribute('aria-expanded', open);
   if (typeof prefs !== 'undefined') prefs.set('sidebarOpen', open);
 }
 function toggleHistoryDropdown() {
   var dd = document.getElementById('history-dropdown');
+  var btn = dd.closest('.history-wrapper').querySelector('[aria-controls="history-dropdown"]');
   var open = dd.classList.toggle('open');
+  if (btn) btn.setAttribute('aria-expanded', open);
   if (open) {
     htmx.trigger(document.body, 'history-refresh');
   }
@@ -153,6 +148,8 @@ document.addEventListener('click', function(e) {
   var wrapper = document.querySelector('.history-wrapper');
   if (wrapper && !wrapper.contains(e.target)) {
     document.getElementById('history-dropdown').classList.remove('open');
+    var btn = wrapper.querySelector('[aria-controls="history-dropdown"]');
+    if (btn) btn.setAttribute('aria-expanded', 'false');
   }
 });
 </script>

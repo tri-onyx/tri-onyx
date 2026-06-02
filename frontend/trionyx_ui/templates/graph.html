@@ -7,7 +7,7 @@
 {% block content %}
 <div class="graph-toolbar">
   <div class="graph-toolbar-group">
-    <div class="toggle-group">
+    <div class="toggle-group" role="radiogroup" aria-label="Analysis Mode">
       <label><input type="radio" name="analysis-mode" value="none" checked><span>Off</span></label>
       <label><input type="radio" name="analysis-mode" value="biba"><span>Biba</span></label>
       <label><input type="radio" name="analysis-mode" value="blp"><span>Bell-LaPadula</span></label>
@@ -21,13 +21,13 @@
     <label class="graph-toggle"><input type="checkbox" id="toggle-matrix"> Matrix</label>
   </div>
   <div class="graph-toolbar-group" style="margin-left:auto;">
-    <button class="btn" onclick="loadGraph()">Reload</button>
+    <button class="btn" onclick="loadGraph()" aria-label="Reload Graph">Reload</button>
     <button class="btn" onclick="resetLayout()">Reset layout</button>
   </div>
 </div>
 
 <div class="graph-container" id="graph-container">
-  <svg id="graph-svg"></svg>
+  <svg id="graph-svg" role="img" aria-label="Agent topology graph"></svg>
   <div class="graph-tooltip" id="tooltip"></div>
 
   <div class="graph-legend" id="legend">

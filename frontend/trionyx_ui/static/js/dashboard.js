@@ -43,7 +43,10 @@ function applyStars() {
 
   cards.forEach(card => {
     const name = card.dataset.agent;
-    card.classList.toggle('starred', starred.includes(name));
+    const isStarred = starred.includes(name);
+    card.classList.toggle('starred', isStarred);
+    const starBtn = card.querySelector('.star-btn');
+    if (starBtn) starBtn.setAttribute('aria-pressed', isStarred);
   });
 
   const oldDivider = grid.querySelector('.starred-divider');

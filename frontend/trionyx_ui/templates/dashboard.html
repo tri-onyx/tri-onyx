@@ -6,11 +6,11 @@
 
 {% block content %}
 <div class="container">
-  <div hx-get="/dashboard/summary" hx-trigger="every 10s" hx-swap="innerHTML">
+  <div hx-get="/dashboard/summary" hx-trigger="every 10s" hx-swap="innerHTML" aria-label="System Status">
     {% include "partials/summary_strip.html" %}
   </div>
 
-  <div class="agent-grid" hx-get="/dashboard/agents" hx-trigger="every 10s" hx-swap="innerHTML">
+  <div class="agent-grid" hx-get="/dashboard/agents" hx-trigger="every 10s" hx-swap="innerHTML" aria-label="Agents">
     {% include "partials/agent_grid.html" %}
   </div>
 </div>

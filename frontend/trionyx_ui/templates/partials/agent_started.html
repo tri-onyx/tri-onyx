@@ -1,4 +1,4 @@
-<div id="chat-messages" class="chat-messages"></div>
+<div id="chat-messages" class="chat-messages" role="log" aria-label="Chat messages"></div>
 <form class="prompt-bar"
       hx-post="{% url 'agent-prompt' name=agent.name %}"
       hx-target="#chat-messages"
@@ -7,7 +7,8 @@
             class="prompt-input"
             placeholder="Send a message..."
             rows="1"
-            autocomplete="off"></textarea>
+            autocomplete="off"
+            aria-label="Message"></textarea>
   <button type="submit" class="btn btn-send">Send</button>
 </form>
 <script>
