@@ -467,6 +467,14 @@
     });
 
     lines.push('---');
+
+    var editor = document.getElementById('system-prompt-editor');
+    var prompt = editor ? editor.value.trim() : '';
+    if (prompt) {
+      lines.push('');
+      lines.push(prompt);
+    }
+
     pre.textContent = lines.join('\n');
   }
 
