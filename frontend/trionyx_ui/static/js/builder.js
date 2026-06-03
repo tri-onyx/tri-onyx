@@ -13,10 +13,6 @@
   function init() {
     loadInitialState();
     renderFields();
-    renderFrontmatterPreview();
-    setupTabs();
-    setupSave();
-    setupDelete();
 
     var editor = document.getElementById('system-prompt-editor');
     if (editor) {
@@ -26,6 +22,11 @@
       });
       autoResizeEditor(editor);
     }
+
+    renderFrontmatterPreview();
+    setupTabs();
+    setupSave();
+    setupDelete();
   }
 
   function loadInitialState() {
