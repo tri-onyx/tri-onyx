@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/tri-onyx/tri-onyx-fs/internal/pathtrie"
+	"github.com/tri-onyx/tri-onyx-fs/internal/sanitize"
 	"github.com/bmatcuk/doublestar/v4"
 	gofusefs "github.com/hanwen/go-fuse/v2/fs"
 	"github.com/hanwen/go-fuse/v2/fuse"
@@ -511,10 +512,22 @@ func (n *SecureNode) Open(ctx context.Context, flags uint32) (gofusefs.FileHandl
 // --- NodeReader ---
 
 func (n *SecureNode) Read(ctx context.Context, f gofusefs.FileHandle, dest []byte, off int64) (fuse.ReadResult, syscall.Errno) {
-	if fr, ok := f.(gofusefs.FileReader); ok {
-		return fr.Read(ctx, dest, off)
+	fr, ok := f.(gofusefs.FileReader)
+	if !ok {
+		return nil, syscall.ENOTSUP
 	}
-	return nil, syscall.ENOTSUP
+	res, errno := fr.Read(ctx, dest, off)
+	if errno != gofusefs.OK || res == nil {
+		return res, errno
+	}
+	buf := make([]byte, res.Size())
+	data, status := res.Bytes(buf)
+	if status != fuse.OK {
+		return res, syscall.Errno(status)
+	}
+	res.Done()
+	cleaned := sanitize.StripInvisible(data)
+	return fuse.ReadResultData(cleaned), gofusefs.OK
 }
 
 // --- NodeWriter ---
