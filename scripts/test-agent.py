@@ -319,17 +319,18 @@ def _emit(frame: dict) -> None:
 
 def _detect_token() -> str | None:
     """Read the connector token from the running gateway container."""
-    try:
-        result = subprocess.run(
-            ["docker", "exec", "tri-onyx-gateway-1", "printenv", "TRI_ONYX_CONNECTOR_TOKEN"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        if result.returncode == 0 and result.stdout.strip():
-            return result.stdout.strip()
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        pass
+    for container in ("trionyx-gateway-1", "tri-onyx-gateway-1"):
+        try:
+            result = subprocess.run(
+                ["docker", "exec", container, "printenv", "TRI_ONYX_CONNECTOR_TOKEN"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                return result.stdout.strip()
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            pass
     return None
 
 

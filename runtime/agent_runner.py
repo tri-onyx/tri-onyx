@@ -105,6 +105,7 @@ from claude_agent_sdk import (
     TextBlock,
     ToolUseBlock,
     ToolResultBlock,
+    HookMatcher,
     tool,
     create_sdk_mcp_server,
 )
@@ -250,6 +251,11 @@ async def _run_reflection(config: StartMessage) -> None:
         max_turns=config.max_turns,
         model=config.model,
         cwd=config.cwd,
+        hooks={
+            "PreToolUse": [
+                HookMatcher(matcher="Write", hooks=[_enforce_notes_limit]),
+            ],
+        },
     )
 
     client = ClaudeSDKClient(options=options)
@@ -1357,6 +1363,34 @@ _MCP_TO_LOGICAL: dict[str, str] = {
 def _normalize_tool_name(name: str) -> str:
     """Map MCP-prefixed tool names back to logical names for the gateway."""
     return _MCP_TO_LOGICAL.get(name, name)
+
+
+_NOTES_MAX_BYTES = 8192
+
+
+async def _enforce_notes_limit(hook_input, tool_use_id, context):
+    """PreToolUse hook: deny Write calls that would make NOTES.md exceed the size limit."""
+    ti = hook_input.tool_input if hasattr(hook_input, "tool_input") else hook_input.get("tool_input", {})
+    file_path = ti.get("file_path", "")
+    if not file_path.endswith("/NOTES.md"):
+        return {}
+    content = ti.get("content", ti.get("file_text", ""))
+    size = len(content.encode("utf-8")) if content else 0
+    if size <= _NOTES_MAX_BYTES:
+        return {}
+    reason = (
+        f"NOTES.md exceeds {_NOTES_MAX_BYTES} byte limit "
+        f"(content is {size} bytes). Shorten the content and retry."
+    )
+    return {
+        "decision": "block",
+        "reason": reason,
+        "hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "deny",
+            "permissionDecisionReason": reason,
+        },
+    }
 
 
 def build_send_message_tool(
@@ -2769,9 +2803,7 @@ async def main() -> None:
                 # Code CLI to find SKILL.md / plugin.json files in the CWD.
                 # FUSE policy has already restricted access to only the declared
                 # skill/plugin directories, so undeclared ones are not readable.
-                setting_sources = (
-                    ["project"] if config.skills or config.plugins else None
-                )
+                setting_sources = ["project"]
 
                 # Build SDK plugin paths for declared workspace plugins
                 sdk_plugins = (
@@ -2793,6 +2825,11 @@ async def main() -> None:
                     cwd=config.cwd,
                     mcp_servers=mcp_servers,
                     setting_sources=setting_sources,
+                    hooks={
+                        "PreToolUse": [
+                            HookMatcher(matcher="Write", hooks=[_enforce_notes_limit]),
+                        ],
+                    },
                     **({"plugins": sdk_plugins} if sdk_plugins else {}),
                 )
 
