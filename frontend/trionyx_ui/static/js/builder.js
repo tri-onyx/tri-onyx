@@ -223,7 +223,7 @@
     var toolGroupMap = {};
 
     (schema.tool_groups || []).forEach(function(tg) {
-      if (!tg.variant) {
+      if (!toolGroupMap[tg.display]) {
         toolGroupMap[tg.display] = tg.group;
       }
     });

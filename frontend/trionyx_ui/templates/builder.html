@@ -11,9 +11,9 @@
     <div class="builder-form-header">
       <h2>{% if mode == "edit" %}Edit Agent{% else %}New Agent{% endif %}</h2>
       <div class="builder-form-actions">
-        <button class="btn btn-primary" id="builder-save-btn" style="padding: 4px 14px; font-size: 12px;">Save</button>
+        <button class="btn btn-primary btn-sm" id="builder-save-btn">Save</button>
         {% if mode == "edit" %}
-          <button class="btn btn-danger" id="builder-delete-btn" style="padding: 4px 14px; font-size: 12px;">Delete</button>
+          <button class="btn btn-danger btn-sm" id="builder-delete-btn">Delete</button>
         {% endif %}
       </div>
     </div>
@@ -74,12 +74,12 @@
 
 </div>
 
-<script id="builder-config" type="application/json">{{ schema_json|safe }}</script>
-<script id="builder-initial" type="application/json">{{ initial_json|safe }}</script>
+{{ schema|json_script:"builder-config" }}
+{{ initial|json_script:"builder-initial" }}
 
 {% if mode == "edit" %}
 <script>
-var builderAgentName = "{{ agent_name }}";
+var builderAgentName = "{{ agent_name|escapejs }}";
 var builderSaveUrl = "{% url 'builder-save' %}";
 var builderDeleteUrl = "{% url 'builder-delete' name=agent_name %}";
 </script>

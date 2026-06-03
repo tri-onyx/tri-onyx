@@ -313,9 +313,7 @@ defmodule TriOnyx.AgentDefinition do
 
   # --- Schema helpers ---
 
-  @spec field_descriptors() :: [map()]
-  defp field_descriptors do
-    [
+  @field_descriptors [
       # Identity
       %{key: "name", label: "Name", type: "string", required: true, default: nil,
         options: nil, group: "identity", order: 0, hint: "Unique agent identifier (lowercase, hyphens)"},
@@ -407,8 +405,14 @@ defmodule TriOnyx.AgentDefinition do
       %{key: "exclude_from_personalization", label: "Exclude from Personalization", type: "boolean",
         required: false, default: false, options: nil, group: "advanced", order: 1,
         hint: "Skip this agent's logs when generating user profile"}
-    ]
-  end
+  ]
+
+  @default_values @field_descriptors
+                  |> Enum.reject(fn f -> f[:default] in [nil, []] end)
+                  |> Map.new(fn f -> {f.key, f.default} end)
+
+  @spec field_descriptors() :: [map()]
+  defp field_descriptors, do: @field_descriptors
 
   # --- Markdown serialization helpers ---
 
@@ -419,16 +423,6 @@ defmodule TriOnyx.AgentDefinition do
        input_sources heartbeat_every idle_timeout cron_schedules reflection
        bcp_channels base_taint exclude_from_personalization)
   end
-
-  @default_values %{
-    "model" => "claude-sonnet-4-20250514",
-    "network" => "none",
-    "base_taint" => "low",
-    "browser" => false,
-    "docker_socket" => false,
-    "trionyx_repo" => false,
-    "exclude_from_personalization" => false
-  }
 
   @spec serialize_yaml_field(String.t(), term()) :: [String.t()] | [nil]
   defp serialize_yaml_field(key, value) do

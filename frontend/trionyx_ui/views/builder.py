@@ -3,8 +3,12 @@ import logging
 
 from django.http import HttpResponse
 from django.shortcuts import render
+from django.utils.safestring import mark_safe
+from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
+
+_md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
 
 logger = logging.getLogger(__name__)
 
@@ -18,13 +22,13 @@ def builder_new(request):
     pending_approvals = gateway.get_approval_count()
 
     return render(request, "builder.html", {
-        "schema_json": json.dumps(schema),
-        "initial_json": json.dumps({
+        "schema": schema,
+        "initial": {
             "mode": "create",
             "agent_name": None,
             "frontmatter": {},
             "system_prompt": "",
-        }),
+        },
         "mode": "create",
         "agent_name": None,
         "pending_approvals": pending_approvals,
@@ -49,13 +53,13 @@ def builder_edit(request, name):
     pending_approvals = gateway.get_approval_count()
 
     return render(request, "builder.html", {
-        "schema_json": json.dumps(schema),
-        "initial_json": json.dumps({
+        "schema": schema,
+        "initial": {
             "mode": "edit",
             "agent_name": name,
             "frontmatter": definition.get("frontmatter", {}),
             "system_prompt": definition.get("system_prompt", ""),
-        }),
+        },
         "mode": "edit",
         "agent_name": name,
         "pending_approvals": pending_approvals,
@@ -115,7 +119,7 @@ def builder_context(request, name):
     try:
         context = gateway.get_agent_context(name)
         return render(request, "partials/builder_context.html", {
-            "context": context,
+            "context_html": mark_safe(_md.render(context)),
         })
     except gateway.GatewayError:
         return HttpResponse('<div class="builder-empty">Context unavailable</div>')

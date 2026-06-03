@@ -955,6 +955,11 @@ a:hover { text-decoration: underline; }
   border-color: var(--red);
 }
 
+.btn-sm {
+  padding: 4px 14px;
+  font-size: 12px;
+}
+
 .btn-send {
   background: var(--accent);
   border-color: var(--accent);
@@ -2243,18 +2248,106 @@ textarea.builder-input {
 }
 
 .builder-context-content {
-  padding: 16px;
-  font-family: var(--font-mono, monospace);
-  font-size: 12px;
-  line-height: 1.5;
+  padding: 20px 24px;
+  font-size: 13px;
+  line-height: 1.6;
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 6px;
   overflow: auto;
-  white-space: pre-wrap;
-  word-wrap: break-word;
   margin: 0;
+}
+
+.builder-context-content h1,
+.builder-context-content h2,
+.builder-context-content h3,
+.builder-context-content h4 {
+  margin: 1.2em 0 0.4em;
+  color: var(--text);
+  line-height: 1.3;
+}
+
+.builder-context-content h1 { font-size: 1.4em; }
+.builder-context-content h2 { font-size: 1.2em; }
+.builder-context-content h3 { font-size: 1.05em; }
+
+.builder-context-content h1:first-child,
+.builder-context-content h2:first-child,
+.builder-context-content h3:first-child {
+  margin-top: 0;
+}
+
+.builder-context-content p {
+  margin: 0.6em 0;
+}
+
+.builder-context-content ul,
+.builder-context-content ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.builder-context-content li {
+  margin: 0.2em 0;
+}
+
+.builder-context-content code {
+  font-family: var(--font-mono, monospace);
+  font-size: 0.9em;
+  background: var(--bg);
+  padding: 2px 5px;
+  border-radius: 3px;
+}
+
+.builder-context-content pre {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 12px;
+  overflow-x: auto;
+  margin: 0.6em 0;
+}
+
+.builder-context-content pre code {
+  background: none;
+  padding: 0;
+  font-size: 12px;
+}
+
+.builder-context-content hr {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+
+.builder-context-content table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.6em 0;
+}
+
+.builder-context-content th,
+.builder-context-content td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+
+.builder-context-content th {
+  background: var(--bg);
+  font-weight: 600;
+}
+
+.builder-context-content blockquote {
+  border-left: 3px solid var(--border);
+  margin: 0.6em 0;
+  padding: 0.2em 0 0.2em 12px;
+  color: var(--text-secondary);
+}
+
+.builder-context-content strong {
+  font-weight: 600;
 }
 
 /* Right Panel — Overview */
