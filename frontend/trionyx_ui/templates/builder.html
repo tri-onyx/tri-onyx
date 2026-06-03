@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block title %}{% if mode == "edit" %}Edit {{ agent_name }}{% else %}New Agent{% endif %} — TriOnyx{% endblock %}
+{% block nav_builder %}active{% endblock %}
+
+{% block content %}
+<div class="builder-layout{% if mode == 'create' %} create-mode{% endif %}">
+
+  <aside class="builder-form">
+    <div class="builder-form-header">
+      <h2>{% if mode == "edit" %}Edit Agent{% else %}New Agent{% endif %}</h2>
+      <div class="builder-form-actions">
+        <button class="btn btn-primary" id="builder-save-btn" style="padding: 4px 14px; font-size: 12px;">Save</button>
+        {% if mode == "edit" %}
+          <button class="btn btn-danger" id="builder-delete-btn" style="padding: 4px 14px; font-size: 12px;">Delete</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <div id="builder-errors"></div>
+    <div id="builder-fields"></div>
+  </aside>
+
+  <main class="builder-main">
+    <div class="builder-tabs" role="tablist">
+      <button class="builder-tab active" data-tab="prompt" role="tab" aria-selected="true">System Prompt</button>
+      <button class="builder-tab" data-tab="frontmatter" role="tab" aria-selected="false">Frontmatter</button>
+      {% if mode == "edit" %}
+        <button class="builder-tab" data-tab="context" role="tab" aria-selected="false">Context</button>
+      {% endif %}
+    </div>
+
+    <div class="builder-tab-content active" id="tab-prompt">
+      <textarea id="system-prompt-editor" class="builder-editor"
+                placeholder="Write the agent's system prompt here..."
+                spellcheck="false"></textarea>
+    </div>
+
+    <div class="builder-tab-content" id="tab-frontmatter">
+      <pre id="frontmatter-preview" class="builder-preview"></pre>
+    </div>
+
+    {% if mode == "edit" %}
+    <div class="builder-tab-content" id="tab-context">
+      <div id="context-preview"
+           hx-get="{% url 'builder-context' name=agent_name %}"
+           hx-trigger="load"
+           hx-swap="innerHTML">
+        <div class="builder-loading">Loading context...</div>
+      </div>
+    </div>
+    {% endif %}
+  </main>
+
+  {% if mode == "edit" %}
+  <aside class="builder-overview">
+    <div class="builder-overview-header">
+      <span>Agent Overview</span>
+      <button class="builder-overview-toggle" id="overview-toggle" onclick="toggleBuilderOverview()" aria-label="Toggle overview" aria-expanded="true">
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+          <path d="M0 2a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H1a1 1 0 0 1-1-1V2zm1 0v12h10V2H1zm12 0v12h2V2h-2z"/>
+        </svg>
+      </button>
+    </div>
+    <div class="builder-overview-body" id="overview-body"
+         hx-get="{% url 'builder-overview' name=agent_name %}"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+      <div class="builder-loading">Loading...</div>
+    </div>
+  </aside>
+  {% endif %}
+
+</div>
+
+<script id="builder-config" type="application/json">{{ schema_json|safe }}</script>
+<script id="builder-initial" type="application/json">{{ initial_json|safe }}</script>
+
+{% if mode == "edit" %}
+<script>
+var builderAgentName = "{{ agent_name }}";
+var builderSaveUrl = "{% url 'builder-save' %}";
+var builderDeleteUrl = "{% url 'builder-delete' name=agent_name %}";
+</script>
+{% else %}
+<script>
+var builderAgentName = null;
+var builderSaveUrl = "{% url 'builder-save' %}";
+var builderDeleteUrl = null;
+</script>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{% static 'js/builder.js' %}"></script>
+{% endblock %}

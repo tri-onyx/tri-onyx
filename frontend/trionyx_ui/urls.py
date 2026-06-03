@@ -1,9 +1,15 @@
 from django.urls import path
-from trionyx_ui.views import approvals, chat, dashboard, graph
+from trionyx_ui.views import approvals, builder, chat, dashboard, graph
 
 urlpatterns = [
     path("healthz", dashboard.healthz, name="healthz"),
     path("", dashboard.index, name="dashboard"),
+    path("builder/", builder.builder_new, name="builder-new"),
+    path("builder/save", builder.builder_save, name="builder-save"),
+    path("builder/<str:name>/", builder.builder_edit, name="builder-edit"),
+    path("builder/<str:name>/delete", builder.builder_delete, name="builder-delete"),
+    path("builder/<str:name>/context", builder.builder_context, name="builder-context"),
+    path("builder/<str:name>/overview", builder.builder_overview, name="builder-overview"),
     path("dashboard/summary", dashboard.dashboard_summary, name="dashboard-summary"),
     path("dashboard/agents", dashboard.dashboard_agents, name="dashboard-agents"),
     path("graph/", graph.graph, name="graph"),

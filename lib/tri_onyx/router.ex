@@ -40,6 +40,7 @@ defmodule TriOnyx.Router do
 
   require Logger
 
+  alias TriOnyx.AgentDefinition
   alias TriOnyx.AgentSession
   alias TriOnyx.InformationClassifier
   alias TriOnyx.AgentSupervisor
@@ -113,6 +114,38 @@ defmodule TriOnyx.Router do
   end
 
   # --- Agent Management ---
+
+  # IMPORTANT: /agents/schema MUST be defined before /agents/:name
+  # because Plug matches routes in definition order and :name would swallow "schema".
+  get "/agents/schema" do
+    schema = AgentDefinition.schema()
+    tool_groups =
+      TriOnyx.ToolRegistry.display_entries()
+      |> Enum.map(fn entry ->
+        %{
+          "key" => entry.key,
+          "display" => entry.display,
+          "variant" => entry.variant,
+          "group" => entry.group,
+          "note" => entry.note
+        }
+      end)
+
+    known_agents =
+      TriggerRouter.list_agents()
+      |> Enum.map(& &1.name)
+      |> Enum.sort()
+
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(200, Jason.encode!(%{
+      "fields" => schema.fields,
+      "groups" => schema.groups,
+      "tool_groups" => tool_groups,
+      "known_tools" => TriOnyx.ToolRegistry.known_tools(),
+      "known_agents" => known_agents
+    }))
+  end
 
   get "/agents" do
     agents = TriggerRouter.list_agents()
@@ -237,6 +270,208 @@ defmodule TriOnyx.Router do
         conn
         |> put_resp_content_type("application/json")
         |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+    end
+  end
+
+  get "/agents/:name/definition" do
+    agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+    file_path = Path.join(agents_dir, "#{name}.md")
+
+    if File.regular?(file_path) do
+      content = File.read!(file_path)
+
+      case AgentDefinition.parse(content) do
+        {:ok, definition} ->
+          frontmatter = %{
+            "name" => definition.name,
+            "description" => definition.description,
+            "model" => definition.model,
+            "tools" => definition.tools,
+            "network" => format_network(definition.network),
+            "fs_read" => definition.fs_read,
+            "fs_write" => definition.fs_write,
+            "send_to" => definition.send_to,
+            "receive_from" => definition.receive_from,
+            "restart_targets" => definition.restart_targets,
+            "heartbeat_every" => format_duration(definition.heartbeat_every),
+            "idle_timeout" => format_duration(definition.idle_timeout),
+            "bcp_channels" => serialize_bcp_channels_for_edit(definition.bcp_channels),
+            "cron_schedules" => serialize_cron_schedules_for_edit(definition.cron_schedules),
+            "skills" => definition.skills,
+            "plugins" => definition.plugins,
+            "base_taint" => to_string(definition.base_taint),
+            "input_sources" => Enum.map(definition.input_sources, &to_string/1),
+            "browser" => definition.browser,
+            "docker_socket" => definition.docker_socket,
+            "trionyx_repo" => definition.trionyx_repo,
+            "exclude_from_personalization" => definition.exclude_from_personalization,
+            "reflection" => definition.reflection
+          }
+
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(200, Jason.encode!(%{
+            "frontmatter" => frontmatter,
+            "system_prompt" => definition.system_prompt
+          }))
+
+        {:error, reason} ->
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(500, Jason.encode!(%{
+            "error" => "parse_failed",
+            "message" => "Definition file exists but failed to parse: #{inspect(reason)}"
+          }))
+      end
+    else
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+    end
+  end
+
+  get "/agents/:name/context" do
+    case TriggerRouter.get_agent(name) do
+      {:ok, definition} ->
+        workspace_context = TriOnyx.Workspace.read_context(name)
+        assembled = TriOnyx.Workspace.PromptAssembler.assemble(definition, workspace_context)
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{"context" => assembled}))
+
+      :error ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+    end
+  end
+
+  post "/agents" do
+    body = conn.assigns[:raw_body] || ""
+
+    case Jason.decode(body) do
+      {:ok, params} when is_map(params) ->
+        markdown = AgentDefinition.to_markdown(params)
+
+        case AgentDefinition.parse(markdown) do
+          {:ok, definition} ->
+            agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+            file_path = Path.join(agents_dir, "#{definition.name}.md")
+
+            if File.regular?(file_path) do
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(409, Jason.encode!(%{
+                "error" => "already_exists",
+                "message" => "Agent '#{definition.name}' already exists"
+              }))
+            else
+              File.write!(file_path, markdown)
+              TriggerRouter.load_agents()
+
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(201, Jason.encode!(%{
+                "status" => "created",
+                "name" => definition.name
+              }))
+            end
+
+          {:error, reason} ->
+            conn
+            |> put_resp_content_type("application/json")
+            |> send_resp(400, Jason.encode!(%{
+              "error" => "validation_failed",
+              "details" => [AgentDefinition.format_error(reason)]
+            }))
+        end
+
+      _ ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(400, Jason.encode!(%{
+          "error" => "invalid_body",
+          "message" => "Expected JSON object"
+        }))
+    end
+  end
+
+  put "/agents/:name" do
+    body = conn.assigns[:raw_body] || ""
+
+    case Jason.decode(body) do
+      {:ok, params} when is_map(params) ->
+        agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+        file_path = Path.join(agents_dir, "#{name}.md")
+
+        if not File.regular?(file_path) do
+          conn
+          |> put_resp_content_type("application/json")
+          |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        else
+          params = Map.put(params, "name", name)
+          markdown = AgentDefinition.to_markdown(params)
+
+          case AgentDefinition.parse(markdown) do
+            {:ok, _definition} ->
+              File.write!(file_path, markdown)
+              TriggerRouter.load_agents()
+
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(200, Jason.encode!(%{
+                "status" => "updated",
+                "name" => name
+              }))
+
+            {:error, reason} ->
+              conn
+              |> put_resp_content_type("application/json")
+              |> send_resp(400, Jason.encode!(%{
+                "error" => "validation_failed",
+                "details" => [AgentDefinition.format_error(reason)]
+              }))
+          end
+        end
+
+      _ ->
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(400, Jason.encode!(%{
+          "error" => "invalid_body",
+          "message" => "Expected JSON object"
+        }))
+    end
+  end
+
+  delete "/agents/:name" do
+    agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+    file_path = Path.join(agents_dir, "#{name}.md")
+
+    if not File.regular?(file_path) do
+      conn
+      |> put_resp_content_type("application/json")
+      |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+    else
+      sessions = AgentSupervisor.list_sessions()
+      active = Enum.any?(sessions, fn s -> s.definition.name == name end)
+
+      if active do
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(409, Jason.encode!(%{
+          "error" => "agent_has_active_sessions",
+          "message" => "Stop all sessions before deleting"
+        }))
+      else
+        File.rm!(file_path)
+        TriggerRouter.load_agents()
+
+        conn
+        |> put_resp_content_type("application/json")
+        |> send_resp(200, Jason.encode!(%{"status" => "deleted", "name" => name}))
+      end
     end
   end
 
@@ -1546,6 +1781,66 @@ defmodule TriOnyx.Router do
       end
 
     "#{limit}/#{unit}"
+  end
+
+  @spec format_duration(pos_integer() | nil) :: String.t() | nil
+  defp format_duration(nil), do: nil
+  defp format_duration(ms) when is_integer(ms) do
+    cond do
+      rem(ms, 3_600_000) == 0 -> "#{div(ms, 3_600_000)}h"
+      rem(ms, 60_000) == 0 -> "#{div(ms, 60_000)}m"
+      rem(ms, 1_000) == 0 -> "#{div(ms, 1_000)}s"
+      true -> "#{ms}"
+    end
+  end
+
+  defp serialize_bcp_channels_for_edit(channels) do
+    Enum.map(channels, fn ch ->
+      base = %{
+        "peer" => ch.peer,
+        "role" => to_string(ch.role),
+        "rates" => serialize_rates_for_edit(ch.rates)
+      }
+
+      case ch.subscriptions do
+        [] -> base
+        subs ->
+          Map.put(base, "subscriptions",
+            Enum.map(subs, fn s ->
+              sub = %{"id" => s.id, "category" => s.category}
+              sub = if s.fields, do: Map.put(sub, "fields", s.fields), else: sub
+              sub = if s.questions, do: Map.put(sub, "questions", s.questions), else: sub
+              sub = if s.directive, do: Map.put(sub, "directive", s.directive), else: sub
+              sub = if s.max_words, do: Map.put(sub, "max_words", s.max_words), else: sub
+              sub
+            end)
+          )
+      end
+    end)
+  end
+
+  defp serialize_rates_for_edit(rates) when is_map(rates) do
+    Map.new(rates, fn {key, value} ->
+      {to_string(key), serialize_single_rate_for_edit(value)}
+    end)
+  end
+
+  defp serialize_single_rate_for_edit(:denied), do: 0
+  defp serialize_single_rate_for_edit(%{limit: limit, window_ms: window_ms}) do
+    unit =
+      cond do
+        window_ms <= 1_000 -> "second"
+        window_ms <= 60_000 -> "minute"
+        true -> "hour"
+      end
+    "#{limit}/#{unit}"
+  end
+
+  defp serialize_cron_schedules_for_edit(schedules) do
+    Enum.map(schedules, fn s ->
+      base = %{"schedule" => s.schedule, "message" => s.message}
+      if s.label, do: Map.put(base, "label", s.label), else: base
+    end)
   end
 
   @spec format_network(TriOnyx.AgentDefinition.network_policy()) :: String.t() | [String.t()]

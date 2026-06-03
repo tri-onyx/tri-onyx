@@ -1,0 +1,10 @@
+<div class="builder-error-list">
+  {% for err in errors %}
+    <div class="builder-error-item">
+      {% if err.field and err.field != "_global" %}
+        <span class="builder-error-field">{{ err.field }}:</span>
+      {% endif %}
+      <span class="builder-error-msg">{{ err.message }}</span>
+    </div>
+  {% endfor %}
+</div>

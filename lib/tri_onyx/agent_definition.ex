@@ -155,6 +155,439 @@ defmodule TriOnyx.AgentDefinition do
     end
   end
 
+  @doc """
+  Returns a structured schema describing all agent definition fields.
+
+  Used by the frontend agent builder to dynamically render form controls.
+  This is the single source of truth for what fields exist, their types,
+  defaults, and valid options.
+  """
+  @spec schema() :: %{fields: [map()], groups: [map()]}
+  def schema do
+    %{
+      fields: field_descriptors(),
+      groups: [
+        %{key: "identity", label: "Identity", order: 0},
+        %{key: "tools", label: "Tools", order: 1},
+        %{key: "sandbox", label: "Sandbox", order: 2},
+        %{key: "messaging", label: "Messaging", order: 3},
+        %{key: "scheduling", label: "Scheduling", order: 4},
+        %{key: "advanced", label: "Advanced", order: 5}
+      ]
+    }
+  end
+
+  @doc """
+  Builds a markdown string (YAML frontmatter + body) from a JSON-decoded map.
+
+  The map should have string keys matching YAML frontmatter fields, plus a
+  `"system_prompt"` key for the body. Fields matching their defaults are omitted
+  from the frontmatter to keep generated files clean.
+  """
+  @spec to_markdown(map()) :: String.t()
+  def to_markdown(params) when is_map(params) do
+    body = Map.get(params, "system_prompt", "") |> to_string()
+    frontmatter_map = Map.delete(params, "system_prompt")
+
+    yaml_lines =
+      frontmatter_field_order()
+      |> Enum.flat_map(fn key ->
+        case Map.get(frontmatter_map, key) do
+          nil -> []
+          value -> serialize_yaml_field(key, value)
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    yaml = Enum.join(yaml_lines, "\n")
+    "---\n#{yaml}\n---\n\n#{body}\n"
+  end
+
+  @doc """
+  Formats a parse error tuple into a frontend-friendly map.
+
+  Returns `%{field: String.t(), message: String.t()}`.
+  """
+  @spec format_error(term()) :: %{field: String.t(), message: String.t()}
+  def format_error({:missing_required_field, field}) do
+    %{field: field, message: "#{field} is required"}
+  end
+
+  def format_error({:empty_tools_list}) do
+    %{field: "tools", message: "At least one tool is required"}
+  end
+
+  def format_error({:invalid_field_type, field, expected}) do
+    %{field: to_string(field), message: "#{field} must be #{format_expected(expected)}"}
+  end
+
+  def format_error({:invalid_model, _value, hint}) do
+    %{field: "model", message: hint}
+  end
+
+  def format_error({:invalid_network_policy, value}) do
+    %{field: "network", message: "Invalid network policy: #{value}. Use \"none\", \"outbound\", or a list of hostnames"}
+  end
+
+  def format_error({:invalid_network_policy_type}) do
+    %{field: "network", message: "network must be a string or list of hostnames"}
+  end
+
+  def format_error({:invalid_network_hosts, _}) do
+    %{field: "network", message: "Network hosts must be a list of strings"}
+  end
+
+  def format_error({:wildcard_network_hosts, wildcards, hint}) do
+    %{field: "network", message: "#{hint}: #{Enum.join(wildcards, ", ")}"}
+  end
+
+  def format_error({:unknown_tools, tools}) do
+    %{field: "tools", message: "Unknown tools: #{Enum.join(tools, ", ")}"}
+  end
+
+  def format_error({:invalid_heartbeat_every, _value}) do
+    %{field: "heartbeat_every", message: "Invalid format. Use e.g. \"30s\", \"5m\", or \"1h\""}
+  end
+
+  def format_error({:invalid_idle_timeout, _value}) do
+    %{field: "idle_timeout", message: "Invalid format. Use e.g. \"30s\", \"5m\", or \"1h\""}
+  end
+
+  def format_error({:invalid_duration_format, _str, hint}) do
+    %{field: "duration", message: hint}
+  end
+
+  def format_error({:invalid_base_taint, _value, hint}) do
+    %{field: "base_taint", message: hint}
+  end
+
+  def format_error({:invalid_input_sources, invalid, valid}) do
+    %{field: "input_sources", message: "Invalid sources: #{Enum.join(invalid, ", ")}. Valid: #{Enum.join(valid, ", ")}"}
+  end
+
+  def format_error({:invalid_reflection, {:invalid_expression, _reason}}) do
+    %{field: "reflection", message: "Invalid cron expression"}
+  end
+
+  def format_error({:invalid_cron_schedule, idx, {:missing_field, field}}) do
+    %{field: "cron_schedules", message: "Schedule ##{idx + 1}: missing #{field}"}
+  end
+
+  def format_error({:invalid_cron_schedule, idx, {:invalid_expression, _reason}}) do
+    %{field: "cron_schedules", message: "Schedule ##{idx + 1}: invalid cron expression"}
+  end
+
+  def format_error({:invalid_bcp_channel, idx, _}) do
+    %{field: "bcp_channels", message: "BCP channel ##{idx + 1} is invalid"}
+  end
+
+  def format_error({:missing_bcp_channel_field, idx, field}) do
+    %{field: "bcp_channels", message: "BCP channel ##{idx + 1}: missing #{field}"}
+  end
+
+  def format_error({:invalid_bcp_role, idx, role, _valid}) do
+    %{field: "bcp_channels", message: "BCP channel ##{idx + 1}: invalid role \"#{role}\""}
+  end
+
+  def format_error({:all_bcp_categories_denied, idx}) do
+    %{field: "bcp_channels", message: "BCP channel ##{idx + 1}: at least one category must be allowed"}
+  end
+
+  def format_error({:invalid_format}) do
+    %{field: "_global", message: "Invalid format: expected YAML frontmatter between --- delimiters"}
+  end
+
+  def format_error({:frontmatter_not_a_map}) do
+    %{field: "_global", message: "Frontmatter must be a YAML mapping"}
+  end
+
+  def format_error({:yaml_parse_error, _reason}) do
+    %{field: "_global", message: "Failed to parse YAML frontmatter"}
+  end
+
+  def format_error(other) do
+    %{field: "_global", message: "Validation error: #{inspect(other)}"}
+  end
+
+  # --- Private ---
+
+  # --- Schema helpers ---
+
+  @spec field_descriptors() :: [map()]
+  defp field_descriptors do
+    [
+      # Identity
+      %{key: "name", label: "Name", type: "string", required: true, default: nil,
+        options: nil, group: "identity", order: 0, hint: "Unique agent identifier (lowercase, hyphens)"},
+      %{key: "description", label: "Description", type: "string", required: false, default: nil,
+        options: nil, group: "identity", order: 1, hint: "Human-readable purpose"},
+      %{key: "model", label: "Model", type: "enum", required: false,
+        default: "claude-sonnet-4-20250514",
+        options: [
+          %{value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (2025-05-14)"},
+          %{value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6"},
+          %{value: "claude-opus-4-20250514", label: "Claude Opus 4 (2025-05-14)"},
+          %{value: "claude-opus-4-6", label: "Claude Opus 4.6"},
+          %{value: "claude-haiku-4-5-20251001", label: "Claude Haiku 4.5"}
+        ],
+        allow_custom: true, custom_hint: "Must start with \"claude-\"",
+        group: "identity", order: 2, hint: "LLM model to use"},
+
+      # Tools
+      %{key: "tools", label: "Tools", type: "tool_picker", required: true, default: [],
+        options: nil, group: "tools", order: 0, hint: "Allowed tools for this agent"},
+      %{key: "skills", label: "Skills", type: "list", required: false, default: [],
+        options: nil, group: "tools", order: 1, hint: "Claude Code skill names to load"},
+      %{key: "plugins", label: "Plugins", type: "list", required: false, default: [],
+        options: nil, group: "tools", order: 2, hint: "Workspace plugin names"},
+
+      # Sandbox
+      %{key: "network", label: "Network", type: "network", required: false, default: "none",
+        options: [
+          %{value: "none", label: "Isolated (no network)"},
+          %{value: "outbound", label: "Outbound (unrestricted)"}
+        ],
+        group: "sandbox", order: 0, hint: "Network access policy"},
+      %{key: "fs_read", label: "Filesystem Read", type: "list", required: false, default: [],
+        options: nil, group: "sandbox", order: 1, hint: "Glob patterns for read access"},
+      %{key: "fs_write", label: "Filesystem Write", type: "list", required: false, default: [],
+        options: nil, group: "sandbox", order: 2, hint: "Glob patterns for write access (implies read)"},
+      %{key: "browser", label: "Browser", type: "boolean", required: false, default: false,
+        options: nil, group: "sandbox", order: 3, hint: "Enable browser automation"},
+      %{key: "docker_socket", label: "Docker Socket", type: "boolean", required: false, default: false,
+        options: nil, group: "sandbox", order: 4, hint: "Access to Docker socket"},
+      %{key: "trionyx_repo", label: "TriOnyx Repo", type: "boolean", required: false, default: false,
+        options: nil, group: "sandbox", order: 5, hint: "Access to the TriOnyx repo itself"},
+
+      # Messaging
+      %{key: "send_to", label: "Send To", type: "agent_list", required: false, default: [],
+        options: nil, group: "messaging", order: 0, hint: "Agents this agent can send messages to"},
+      %{key: "receive_from", label: "Receive From", type: "agent_list", required: false, default: [],
+        options: nil, group: "messaging", order: 1, hint: "Agents this agent can receive messages from"},
+      %{key: "restart_targets", label: "Restart Targets", type: "agent_list", required: false, default: [],
+        options: nil, group: "messaging", order: 2, hint: "Agents this agent can restart"},
+      %{key: "input_sources", label: "Input Sources", type: "multi_enum", required: false, default: [],
+        options: [
+          %{value: "verified_input", label: "Verified Input"},
+          %{value: "unverified_input", label: "Unverified Input"},
+          %{value: "webhook", label: "Webhook"},
+          %{value: "external_message", label: "External Message"},
+          %{value: "cron", label: "Cron"},
+          %{value: "heartbeat", label: "Heartbeat"}
+        ],
+        group: "messaging", order: 3, hint: "Accepted trigger types"},
+      %{key: "bcp_channels", label: "BCP Channels", type: "yaml", required: false, default: [],
+        options: nil, group: "messaging", order: 4,
+        hint: "Business continuity protocol channels (YAML)",
+        yaml_example: "- peer: other-agent\n  role: controller\n  rates:\n    cat1: 10/minute\n    cat2: 5/minute\n    cat3: 0"},
+
+      # Scheduling
+      %{key: "heartbeat_every", label: "Heartbeat Interval", type: "duration", required: false,
+        default: nil, options: nil, group: "scheduling", order: 0,
+        hint: "e.g. 30s, 5m, 1h"},
+      %{key: "idle_timeout", label: "Idle Timeout", type: "duration", required: false,
+        default: nil, options: nil, group: "scheduling", order: 1,
+        hint: "Auto-stop after inactivity, e.g. 30m, 1h"},
+      %{key: "cron_schedules", label: "Cron Schedules", type: "yaml", required: false, default: [],
+        options: nil, group: "scheduling", order: 2,
+        hint: "Scheduled triggers (YAML)",
+        yaml_example: "- schedule: \"0 9 * * *\"\n  message: \"Good morning\"\n  label: morning-check"},
+      %{key: "reflection", label: "Reflection", type: "cron", required: false,
+        default: nil, options: nil, group: "scheduling", order: 3,
+        hint: "Cron expression for daily self-reflection, e.g. 0 23 * * *"},
+
+      # Advanced
+      %{key: "base_taint", label: "Base Taint", type: "enum", required: false, default: "low",
+        options: [
+          %{value: "low", label: "Low"},
+          %{value: "medium", label: "Medium"},
+          %{value: "high", label: "High"}
+        ],
+        group: "advanced", order: 0, hint: "Inherent taint floor from model provenance"},
+      %{key: "exclude_from_personalization", label: "Exclude from Personalization", type: "boolean",
+        required: false, default: false, options: nil, group: "advanced", order: 1,
+        hint: "Skip this agent's logs when generating user profile"}
+    ]
+  end
+
+  # --- Markdown serialization helpers ---
+
+  @spec frontmatter_field_order() :: [String.t()]
+  defp frontmatter_field_order do
+    ~w(name description model tools network fs_read fs_write send_to receive_from
+       restart_targets browser docker_socket trionyx_repo skills plugins
+       input_sources heartbeat_every idle_timeout cron_schedules reflection
+       bcp_channels base_taint exclude_from_personalization)
+  end
+
+  @default_values %{
+    "model" => "claude-sonnet-4-20250514",
+    "network" => "none",
+    "base_taint" => "low",
+    "browser" => false,
+    "docker_socket" => false,
+    "trionyx_repo" => false,
+    "exclude_from_personalization" => false
+  }
+
+  @spec serialize_yaml_field(String.t(), term()) :: [String.t()] | [nil]
+  defp serialize_yaml_field(key, value) do
+    if value == Map.get(@default_values, key) or value == [] or value == "" do
+      []
+    else
+      do_serialize_yaml_field(key, value)
+    end
+  end
+
+  defp do_serialize_yaml_field(key, value) when is_binary(value) do
+    if String.contains?(value, ["\n", ":", "#", "'", "\"", "[", "]", "{", "}"]) do
+      ["#{key}: #{yaml_quote(value)}"]
+    else
+      ["#{key}: #{value}"]
+    end
+  end
+
+  defp do_serialize_yaml_field(key, value) when is_boolean(value) do
+    ["#{key}: #{value}"]
+  end
+
+  defp do_serialize_yaml_field(key, value) when is_integer(value) do
+    ["#{key}: #{value}"]
+  end
+
+  defp do_serialize_yaml_field(key, value) when is_list(value) do
+    cond do
+      value == [] ->
+        []
+
+      key in ["bcp_channels", "cron_schedules"] ->
+        serialize_yaml_complex_list(key, value)
+
+      Enum.all?(value, &is_binary/1) ->
+        lines = Enum.map(value, fn v -> "  - #{yaml_quote_if_needed(v)}" end)
+        ["#{key}:" | lines]
+
+      true ->
+        ["#{key}: #{inspect(value)}"]
+    end
+  end
+
+  defp do_serialize_yaml_field(key, value) do
+    ["#{key}: #{inspect(value)}"]
+  end
+
+  defp serialize_yaml_complex_list(key, items) when is_list(items) do
+    lines =
+      Enum.flat_map(items, fn item ->
+        case key do
+          "cron_schedules" -> serialize_cron_schedule(item)
+          "bcp_channels" -> serialize_bcp_channel(item)
+          _ -> ["  - #{inspect(item)}"]
+        end
+      end)
+
+    ["#{key}:" | lines]
+  end
+
+  defp serialize_cron_schedule(item) when is_map(item) do
+    schedule = Map.get(item, "schedule", "")
+    message = Map.get(item, "message", "")
+    label = Map.get(item, "label")
+
+    lines = [
+      "  - schedule: #{yaml_quote(schedule)}",
+      "    message: #{yaml_quote(message)}"
+    ]
+
+    if label && label != "" do
+      lines ++ ["    label: #{label}"]
+    else
+      lines
+    end
+  end
+
+  defp serialize_bcp_channel(item) when is_map(item) do
+    peer = Map.get(item, "peer", "")
+    role = Map.get(item, "role", "controller")
+    rates = Map.get(item, "rates", %{})
+
+    lines = [
+      "  - peer: #{peer}",
+      "    role: #{role}",
+      "    rates:"
+    ]
+
+    rate_lines =
+      ~w(cat1 cat2 cat3)
+      |> Enum.map(fn cat ->
+        val = Map.get(rates, cat, 0)
+        "      #{cat}: #{val}"
+      end)
+
+    sub_lines =
+      case Map.get(item, "subscriptions") do
+        subs when is_list(subs) and subs != [] ->
+          ["    subscriptions:" | Enum.flat_map(subs, &serialize_bcp_subscription/1)]
+        _ ->
+          []
+      end
+
+    lines ++ rate_lines ++ sub_lines
+  end
+
+  defp serialize_bcp_subscription(sub) when is_map(sub) do
+    id = Map.get(sub, "id", "")
+    category = Map.get(sub, "category", 1)
+
+    base = [
+      "      - id: #{id}",
+      "        category: #{category}"
+    ]
+
+    case category do
+      1 ->
+        fields = Map.get(sub, "fields", [])
+        base ++ ["        fields: #{Jason.encode!(fields)}"]
+
+      2 ->
+        questions = Map.get(sub, "questions", [])
+        lines = base ++ ["        questions: #{Jason.encode!(questions)}"]
+        case Map.get(sub, "max_words") do
+          nil -> lines
+          mw -> lines ++ ["        max_words: #{mw}"]
+        end
+
+      3 ->
+        directive = Map.get(sub, "directive", "")
+        max_words = Map.get(sub, "max_words", 100)
+        base ++ [
+          "        directive: #{yaml_quote(directive)}",
+          "        max_words: #{max_words}"
+        ]
+
+      _ ->
+        base
+    end
+  end
+
+  defp yaml_quote(str) when is_binary(str), do: "\"#{String.replace(str, "\"", "\\\"")}\""
+
+  defp yaml_quote_if_needed(str) when is_binary(str) do
+    if String.contains?(str, [" ", ":", "#", "'", "\"", "[", "]", "{", "}", ","]) or
+         String.starts_with?(str, ["*", "!", "&", "%", "@"]) do
+      yaml_quote(str)
+    else
+      str
+    end
+  end
+
+  defp format_expected(:expected_string), do: "a string"
+  defp format_expected(:expected_list), do: "a list"
+  defp format_expected(:expected_string_list), do: "a list of strings"
+  defp format_expected(:expected_boolean), do: "true or false"
+  defp format_expected(:expected_string_or_list), do: "a string or list"
+  defp format_expected(other), do: inspect(other)
+
   # --- Private ---
 
   @spec extract_frontmatter(String.t()) :: {:ok, String.t(), String.t()} | {:error, :invalid_format}

@@ -153,7 +153,8 @@ docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
 ## Source of Truth
 
 - **Never duplicate logic or data** across languages/files if it can be avoided. Duplication leads to silent drift across sessions.
-- **Elixir is the source of truth** for risk model data (taint, sensitivity, capability matrices), tool metadata, and agent configuration logic. When other languages (Python scripts, docs generators, etc.) need this data, export it from Elixir (e.g., Mix task outputting JSON) rather than maintaining a parallel copy.
+- **Elixir is the source of truth** for risk model data (taint, sensitivity, capability matrices), tool metadata, agent definition schema, and agent configuration logic. When other languages (Python scripts, docs generators, the frontend, etc.) need this data, they must fetch it from the gateway at runtime (e.g., via API endpoints) or at build time (e.g., Mix task outputting JSON) — never maintain a parallel copy.
+- **The frontend must never hardcode** lists of valid fields, tool names, model options, or enum values that the gateway already knows. Expose a schema/metadata endpoint from the gateway and have the frontend render dynamically from that response.
 
 ## Documentation
 

@@ -26,6 +26,12 @@ class GatewayError(Exception):
         super().__init__(message)
 
 
+class GatewayValidationError(GatewayError):
+    def __init__(self, message: str, errors: list[dict]):
+        super().__init__(message, 400)
+        self.errors = errors
+
+
 def get_agents() -> list[dict]:
     try:
         resp = _client().get("/agents")
@@ -237,3 +243,102 @@ def get_session_log(agent_name: str, session_id: str) -> list[dict]:
         return events
     except (httpx.ConnectError, httpx.HTTPStatusError):
         return []
+
+
+# --- Agent Builder ---
+
+
+def get_agent_schema() -> dict:
+    try:
+        resp = _client().get("/agents/schema")
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: GET /agents/schema")
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        logger.warning("Gateway error: GET /agents/schema → %d", e.response.status_code)
+        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+
+
+def get_agent_definition(name: str) -> dict:
+    try:
+        resp = _client().get(f"/agents/{name}/definition")
+        resp.raise_for_status()
+        return resp.json()
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: GET /agents/%s/definition", name)
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise GatewayError(f"Agent '{name}' not found", 404)
+        logger.warning("Gateway error: GET /agents/%s/definition → %d", name, e.response.status_code)
+        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+
+
+def get_agent_context(name: str) -> str:
+    try:
+        resp = _client().get(f"/agents/{name}/context")
+        resp.raise_for_status()
+        return resp.json().get("context", "")
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: GET /agents/%s/context", name)
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            raise GatewayError(f"Agent '{name}' not found", 404)
+        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+
+
+def create_agent(data: dict) -> dict:
+    try:
+        resp = _client().post("/agents", json=data)
+        resp.raise_for_status()
+        logger.info("Created agent %s", data.get("name", "?"))
+        return resp.json()
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: POST /agents")
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
+        if e.response.status_code == 400 and "details" in body:
+            raise GatewayValidationError(body.get("error", "Validation failed"), body["details"])
+        if e.response.status_code == 409:
+            raise GatewayError(body.get("message", "Agent already exists"), 409)
+        raise GatewayError(f"Failed to create agent: {e.response.status_code}", e.response.status_code)
+
+
+def update_agent(name: str, data: dict) -> dict:
+    try:
+        resp = _client().put(f"/agents/{name}", json=data)
+        resp.raise_for_status()
+        logger.info("Updated agent %s", name)
+        return resp.json()
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: PUT /agents/%s", name)
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
+        if e.response.status_code == 400 and "details" in body:
+            raise GatewayValidationError(body.get("error", "Validation failed"), body["details"])
+        if e.response.status_code == 404:
+            raise GatewayError(f"Agent '{name}' not found", 404)
+        raise GatewayError(f"Failed to update agent: {e.response.status_code}", e.response.status_code)
+
+
+def delete_agent(name: str) -> dict:
+    try:
+        resp = _client().delete(f"/agents/{name}")
+        resp.raise_for_status()
+        logger.info("Deleted agent %s", name)
+        return resp.json()
+    except httpx.ConnectError:
+        logger.error("Gateway unreachable: DELETE /agents/%s", name)
+        raise GatewayError("Gateway unreachable")
+    except httpx.HTTPStatusError as e:
+        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
+        if e.response.status_code == 404:
+            raise GatewayError(f"Agent '{name}' not found", 404)
+        if e.response.status_code == 409:
+            raise GatewayError(body.get("message", "Agent has active sessions"), 409)
+        raise GatewayError(f"Failed to delete agent: {e.response.status_code}", e.response.status_code)

@@ -5,6 +5,11 @@
     {% if agent.effective_risk %}
       <span class="risk-badge {{ agent.effective_risk }}">{{ agent.effective_risk }}</span>
     {% endif %}
+    <span class="edit-btn" onclick="event.preventDefault();event.stopPropagation();window.location.href='/builder/{{ agent.name }}/';" aria-label="Edit {{ agent.name }}" title="Edit agent">
+      <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M11.013 1.427a1.75 1.75 0 0 1 2.474 0l1.086 1.086a1.75 1.75 0 0 1 0 2.474l-8.61 8.61c-.21.21-.47.364-.756.445l-3.251.93a.75.75 0 0 1-.927-.928l.929-3.25c.081-.286.235-.547.445-.758l8.61-8.61zm1.414 1.06a.25.25 0 0 0-.354 0L3.463 11.098l-.53 1.856 1.856-.53 8.61-8.61a.25.25 0 0 0 0-.354L12.427 2.487z"/>
+      </svg>
+    </span>
     <button class="star-btn" onclick="toggleStar(event, '{{ agent.name }}')" aria-label="Star {{ agent.name }}" aria-pressed="false">
       <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
         <path class="star-outline" d="M8 .25a.75.75 0 0 1 .673.418l1.882 3.815 4.21.612a.75.75 0 0 1 .416 1.279l-3.046 2.97.719 4.192a.75.75 0 0 1-1.088.791L8 12.347l-3.766 1.98a.75.75 0 0 1-1.088-.79l.72-4.194L.818 6.374a.75.75 0 0 1 .416-1.28l4.21-.611L7.327.668A.75.75 0 0 1 8 .25zm0 2.445L6.615 5.5a.75.75 0 0 1-.564.41l-3.097.45 2.24 2.184a.75.75 0 0 1 .216.664l-.528 3.084 2.769-1.456a.75.75 0 0 1 .698 0l2.77 1.456-.53-3.084a.75.75 0 0 1 .216-.664l2.24-2.183-3.096-.45a.75.75 0 0 1-.564-.41L8 2.694z"/>
