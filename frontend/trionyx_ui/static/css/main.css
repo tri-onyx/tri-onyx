@@ -387,7 +387,7 @@ a:hover { text-decoration: underline; }
   border: none;
   cursor: pointer;
   padding: 2px;
-  color: var(--border);
+  color: var(--muted);
   transition: color 0.15s;
   flex-shrink: 0;
   display: flex;
