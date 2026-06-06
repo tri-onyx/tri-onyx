@@ -3,7 +3,30 @@
 // that appear clean to human reviewers but are parsed by LLMs.
 package sanitize
 
-import "unicode/utf8"
+import (
+	"path/filepath"
+	"strings"
+	"unicode/utf8"
+)
+
+var binaryExtensions = map[string]bool{
+	".png": true, ".jpg": true, ".jpeg": true, ".gif": true, ".webp": true,
+	".bmp": true, ".ico": true, ".tiff": true, ".tif": true, ".svg": true,
+	".pdf": true, ".zip": true, ".gz": true, ".tar": true, ".bz2": true,
+	".xz": true, ".7z": true, ".rar": true, ".zst": true,
+	".wasm": true, ".so": true, ".dylib": true, ".dll": true, ".exe": true,
+	".o": true, ".a": true, ".pyc": true, ".class": true,
+	".mp3": true, ".mp4": true, ".wav": true, ".ogg": true, ".flac": true,
+	".avi": true, ".mkv": true, ".mov": true, ".webm": true,
+	".ttf": true, ".otf": true, ".woff": true, ".woff2": true, ".eot": true,
+	".sqlite": true, ".db": true,
+}
+
+// IsBinaryPath reports whether the file at path is likely binary based on its
+// extension. Binary files must not be sanitized — stripping bytes corrupts them.
+func IsBinaryPath(path string) bool {
+	return binaryExtensions[strings.ToLower(filepath.Ext(path))]
+}
 
 // blocked reports whether a rune should be stripped from read data.
 func blocked(r rune) bool {

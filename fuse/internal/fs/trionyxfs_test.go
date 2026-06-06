@@ -172,6 +172,40 @@ func TestReadPreservesCleanContent(t *testing.T) {
 	}
 }
 
+func TestReadBinaryFileUnsanitized(t *testing.T) {
+	src := t.TempDir()
+
+	// Minimal PNG-like binary with bytes that would be corrupted by sanitization.
+	// 0xAD = soft hyphen (U+00AD in Latin-1, blocked by sanitizer when decoded as UTF-8 multi-byte).
+	// The key point: binary data must pass through byte-for-byte.
+	binaryData := []byte{0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, // PNG magic
+		0xC2, 0xAD, // UTF-8 encoding of U+00AD (soft hyphen) — sanitizer would strip this
+		0xE2, 0x80, 0x8B, // UTF-8 encoding of U+200B (zero-width space) — sanitizer would strip this
+		0xFF, 0xFE, 0x00, 0x42}
+
+	abs := filepath.Join(src, "agents", "finn", "screenshot.png")
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(abs, binaryData, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := pathtrie.New()
+	tr.Insert("/agents/finn/screenshot.png", pathtrie.ReadAccess, true)
+
+	mnt, cleanup := testMount(t, src, tr, nil)
+	defer cleanup()
+
+	data, err := os.ReadFile(filepath.Join(mnt, "agents/finn/screenshot.png"))
+	if err != nil {
+		t.Fatalf("reading binary file: %v", err)
+	}
+	if !bytes.Equal(data, binaryData) {
+		t.Errorf("binary file corrupted:\n  got:  %x\n  want: %x", data, binaryData)
+	}
+}
+
 func TestAllowedWrite(t *testing.T) {
 	src := setupTestSource(t)
 

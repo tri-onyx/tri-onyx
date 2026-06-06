@@ -168,3 +168,33 @@ func TestMultipleBlockedInSequence(t *testing.T) {
 		t.Errorf("sequence not fully stripped: got %q", out)
 	}
 }
+
+func TestIsBinaryPath(t *testing.T) {
+	binary := []string{
+		"/agents/finn/screenshot.png",
+		"/repo/image.JPG",
+		"/data/archive.tar.gz",
+		"/build/output.wasm",
+		"/fonts/mono.woff2",
+		"/db/state.sqlite",
+	}
+	for _, p := range binary {
+		if !IsBinaryPath(p) {
+			t.Errorf("expected binary: %s", p)
+		}
+	}
+
+	text := []string{
+		"/agents/finn/NOTES.md",
+		"/repo/main.py",
+		"/config.yaml",
+		"/data.json",
+		"/Makefile",
+		"",
+	}
+	for _, p := range text {
+		if IsBinaryPath(p) {
+			t.Errorf("expected text: %s", p)
+		}
+	}
+}

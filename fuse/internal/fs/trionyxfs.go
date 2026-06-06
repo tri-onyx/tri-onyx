@@ -520,6 +520,9 @@ func (n *SecureNode) Read(ctx context.Context, f gofusefs.FileHandle, dest []byt
 	if errno != gofusefs.OK || res == nil {
 		return res, errno
 	}
+	if sanitize.IsBinaryPath(n.mountPath()) {
+		return res, gofusefs.OK
+	}
 	buf := make([]byte, res.Size())
 	data, status := res.Bytes(buf)
 	if status != fuse.OK {
