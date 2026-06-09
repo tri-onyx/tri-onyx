@@ -45,6 +45,7 @@ defmodule TriOnyx.AgentPort do
           | {:result, map()}
           | {:error, String.t()}
           | {:fuse_write, String.t(), String.t()}
+          | {:fuse_read, String.t(), String.t()}
           | {:send_message_request, String.t(), String.t(), String.t(), map()}
           | {:bcp_query_request, String.t(), String.t(), integer(), map()}
           | {:bcp_response, String.t(), map()}
@@ -884,6 +885,9 @@ defmodule TriOnyx.AgentPort do
       # FUSE filesystem events use "event" key instead of "type"
       {:ok, %{"event" => "write", "op" => op, "path" => path}} ->
         {:ok, {:fuse_write, op, path}}
+
+      {:ok, %{"event" => "read", "op" => op, "path" => path}} ->
+        {:ok, {:fuse_read, op, path}}
 
       {:ok, %{"event" => _}} ->
         :skip

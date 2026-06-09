@@ -101,17 +101,21 @@ Capability is derived from `(tools, network_policy)` per agent and does not prop
 
 Each agent definition may declare a `base_taint` level (`:low`, `:medium`, or `:high`, default `:low`) that captures model-level risk — training data provenance, alignment quality, known vulnerability classes. The effective taint for a session is `max(base_taint, session_taint)`, ensuring that a model with poor alignment cannot be treated as low-taint simply because it has not yet encountered adversarial input.
 
-When effective risk reaches a threshold defined in the agent's policy, the gateway terminates the session.
+### Kill on threshold
+
+Each agent definition may declare a `max_effective_risk` ceiling (`low`, `moderate`, `high`, or `critical`; default `critical`). When a session's effective risk escalates **above** this level, the gateway kills the session immediately — mid-turn, no grace period — and refuses to start sessions whose initial classification already exceeds it. The default of `critical` can never be exceeded, so enforcement is opt-in per agent: tighten the ceiling on agents whose blast radius warrants it.
 
 ## Information Propagation
 
 Risk spreads between agents through two channels. Taint and sensitivity propagate independently — a message from a high-taint, low-sensitivity agent raises the receiver's taint but not its sensitivity.
 
-**Sensitivity decays per hop — in worst-case analysis only.** The static graph analysis (see Graph Analysis below) reduces sensitivity by one level (via `step_down`) at every hop when projecting worst-case propagation. The rationale: unless an agent is already compromised, it will not willingly disclose secrets verbatim, so the likelihood of disclosure attenuates over multi-hop chains. This decay is a property of the analysis model in `GraphAnalyzer.propagate_levels/3`, not of runtime session state — runtime sensitivity propagation is currently coarser than the model (see the per-channel sections below).
+**Sensitivity decays per hop — in worst-case analysis only.** The static graph analysis (see Graph Analysis below) reduces sensitivity by one level (via `step_down`) at every hop when projecting worst-case propagation. The rationale: unless an agent is already compromised, it will not willingly disclose secrets verbatim, so the likelihood of disclosure attenuates over multi-hop chains. This decay is a property of the analysis model in `GraphAnalyzer.propagate_levels/3`, not of runtime session state — runtime propagation differs per channel (see below).
 
 ### File-based propagation
 
-When agent A writes a file and agent B reads it, B's taint escalates to match A's taint level. B's sensitivity escalates to `step_down(A's sensitivity)` — one level lower than A's. The file is tagged in the risk manifest with the writing agent's taint and sensitivity levels at the time of writing.
+Every write an agent makes through its FUSE mount is recorded in the risk manifest **as it happens**, tagged with the writing session's taint and sensitivity at that moment (point-in-time labels — a file written before the session's risk escalated keeps the lower label). Every read is reported by the FUSE driver, and the reading session's taint **and** sensitivity escalate to the file's recorded labels at full strength — reading raw file content is direct disclosure, so the per-hop decay rationale does not apply here.
+
+Reads are never blocked: an agent may read anything its glob policy allows, and the escalation (combined with the kill threshold above) is the enforcement. Reads of files with no manifest entry (predating provenance tracking, or operator-created) do not escalate risk; they are recorded in the audit log as `unclassified_read`.
 
 ### Inter-agent messages
 
@@ -162,26 +166,23 @@ An agent topology can have Biba violations without BLP violations and vice versa
 
 Every file written by an agent is tagged in `.tri-onyx/risk-manifest.json` with:
 
-- The **taint level** of the writing agent's session
-- The **sensitivity level** of the writing agent's session
+- The **taint level** of the writing agent's session at the time of the write
+- The **sensitivity level** of the writing agent's session at the time of the write
 - Which **agent** wrote it
 - **When** it was last updated
 - Whether a **human has reviewed** it (resets taint to low; sensitivity unchanged)
 
-Git commits include `Taint-Level:` and `Sensitivity-Level:` trailers so the full provenance history is preserved in version control.
+The manifest is updated synchronously per write event by `Workspace.Committer`, so concurrently running sessions resolve fresh labels on read. The committer batches the corresponding git commits on a short debounce; commits include `Taint-Level:` and `Sensitivity-Level:` trailers so the full provenance history is preserved in version control.
 
-## FUSE Enforcement
+## FUSE Role
 
-As defense-in-depth, the FUSE filesystem layer enforces both taint and sensitivity policies per agent:
-
-- **`max_read_taint`**: the maximum taint level of files this agent may read. Prevents clean agents from reading tainted files (Biba enforcement at the filesystem level).
-- **`max_read_sensitivity`**: the maximum sensitivity level of files this agent may read. Prevents low-privilege agents from accessing sensitive data (BLP enforcement at the filesystem level).
-
-These checks use the risk manifest. Even if an agent's glob pattern would allow access to a file, the FUSE layer denies the read if the file's tagged risk exceeds the agent's policy.
+The FUSE filesystem layer enforces **path access** (glob-based read/write policy, symlink denial) and provides **observation**: it reports every write and every read (deduplicated per path per mount) to the gateway. It does not filter reads by risk level — there is deliberately no limit on the taint or sensitivity an agent may read. Tracking what was read, escalating the reader's risk, and killing sessions that exceed their permitted ceiling is the enforcement mechanism (see Kill on threshold above).
 
 ## Graph Analysis
 
 The graph analyzer computes transitive risk propagation across the full agent topology. Given agent A → B → C (where → means "writes files read by"), it traces how taint and sensitivity flow through the chain and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently. Taint propagates at full strength (except across BCP edges, where it is stepped down). Sensitivity is stepped down by one level at every hop, reflecting the decay principle described above.
+
+> **Known modeling discrepancy:** runtime file-read escalation inherits sensitivity at full strength, while the analyzer's filesystem edges apply the per-hop step-down — so the static projection can slightly *understate* sensitivity propagation relative to runtime behavior on filesystem chains.
 
 This powers the graph visualization in the web frontend, which renders agents as nodes (colored by taint level, bordered by sensitivity level, sized by effective risk) connected by directed edges showing information flow. The Biba and Bell-LaPadula toggles highlight violations in real time.
 

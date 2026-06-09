@@ -367,6 +367,16 @@ defmodule TriOnyx.Workspace do
   end
 
   @doc """
+  Detects atomic-write temp files created by Claude SDK's Write tool.
+  These have patterns like "SOUL.md.tmp.50.1771023878427".
+  """
+  @spec temp_file?(String.t()) :: boolean()
+  def temp_file?(path) do
+    basename = Path.basename(path)
+    Regex.match?(~r/\.tmp\.\d+\.\d+$/, basename)
+  end
+
+  @doc """
   Marks the given artifact paths as reviewed by a human.
 
   Reads the current risk manifest, resets each path's taint to `"low"` but

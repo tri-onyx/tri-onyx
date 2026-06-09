@@ -49,44 +49,23 @@ func TestLoadValid(t *testing.T) {
 	}
 }
 
-func TestLoadTwoAxisFields(t *testing.T) {
-	f := writePolicy(t, `{
-		"fs_read":["/a"],
-		"max_read_risk":"high",
-		"max_read_taint":"medium",
-		"max_read_sensitivity":"low"
-	}`)
+func TestLoadLogReads(t *testing.T) {
+	f := writePolicy(t, `{"fs_read":["/a"],"log_reads":true}`)
 	raw, err := Load(f)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if raw.MaxReadRisk != "high" {
-		t.Errorf("MaxReadRisk = %q, want high", raw.MaxReadRisk)
+	if !raw.LogReads {
+		t.Error("LogReads should be true")
 	}
-	if raw.MaxReadTaint != "medium" {
-		t.Errorf("MaxReadTaint = %q, want medium", raw.MaxReadTaint)
-	}
-	if raw.MaxReadSensitivity != "low" {
-		t.Errorf("MaxReadSensitivity = %q, want low", raw.MaxReadSensitivity)
-	}
-}
 
-func TestExpandPreservesTwoAxisFields(t *testing.T) {
 	src := t.TempDir()
-	raw := &RawPolicy{
-		FsRead:         []string{"/a"},
-		MaxReadTaint:   "medium",
-		MaxReadSensitivity: "low",
-	}
 	pol, err := Expand(raw, src)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if pol.MaxReadTaint != "medium" {
-		t.Errorf("Policy.MaxReadTaint = %q, want medium", pol.MaxReadTaint)
-	}
-	if pol.MaxReadSensitivity != "low" {
-		t.Errorf("Policy.MaxReadSensitivity = %q, want low", pol.MaxReadSensitivity)
+	if !pol.LogReads {
+		t.Error("Policy.LogReads should be true")
 	}
 }
 

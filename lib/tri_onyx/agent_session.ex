@@ -203,6 +203,43 @@ defmodule TriOnyx.AgentSession do
       mode: mode
     }
 
+    # Refuse to start if the session already exceeds its permitted risk —
+    # e.g. a tainting trigger plus base_taint/mount floors on a tightly
+    # capped agent. Killing before the port spawns means the container
+    # never runs.
+    start_risk =
+      RiskScorer.effective_risk(effective_taint, effective_sensitivity, capability_level)
+
+    over_limit =
+      Enum.find([effective_risk, start_risk], fn risk ->
+        RiskScorer.exceeds?(risk, definition.max_effective_risk)
+      end)
+
+    if over_limit do
+      Logger.error(
+        "AgentSession refusing to start: agent=#{definition.name} " <>
+          "initial effective risk #{RiskScorer.format_risk(over_limit)} exceeds " <>
+          "permitted #{RiskScorer.format_risk(definition.max_effective_risk)}"
+      )
+
+      AuditLog.log_event(%{
+        type: "session_refused",
+        session_id: session_id,
+        agent: definition.name,
+        effective_risk: to_string(over_limit),
+        max_effective_risk: to_string(definition.max_effective_risk),
+        trigger_type: to_string(trigger_type)
+      })
+
+      {:stop, {:risk_exceeded, over_limit, definition.max_effective_risk}}
+    else
+      init_continue(state, definition, session_id, trigger_type, input_risk, capability_level, effective_risk, effective_taint, effective_sensitivity, mode)
+    end
+  end
+
+  # Second half of init/1, split out so the risk-ceiling check above can
+  # refuse before any session-start logging happens.
+  defp init_continue(state, definition, session_id, trigger_type, input_risk, capability_level, effective_risk, effective_taint, effective_sensitivity, mode) do
     # Log session start
     SessionLogger.log(session_id, definition.name, %{
       "type" => "session_start",
@@ -391,6 +428,37 @@ defmodule TriOnyx.AgentSession do
     {:noreply, %{state | port: nil, status: :stopped}}
   end
 
+  def handle_info({:kill_risk_exceeded, risk, max_risk, source}, state) do
+    Logger.error(
+      "AgentSession #{state.id}: effective risk #{RiskScorer.format_risk(risk)} exceeds " <>
+        "permitted #{RiskScorer.format_risk(max_risk)} — killing session (source: #{source})"
+    )
+
+    AuditLog.log_event(%{
+      type: "session_killed",
+      session_id: state.id,
+      agent: state.definition.name,
+      effective_risk: to_string(risk),
+      max_effective_risk: to_string(max_risk),
+      source: source
+    })
+
+    kill_event = %{
+      "type" => "session_killed",
+      "agent_name" => state.definition.name,
+      "reason" => "risk_exceeded",
+      "effective_risk" => RiskScorer.format_risk(risk),
+      "max_effective_risk" => RiskScorer.format_risk(max_risk),
+      "source" => source
+    }
+
+    broadcast_event(state, kill_event)
+    TriOnyx.ConnectorHandler.broadcast_to_connectors(Jason.encode!(kill_event))
+
+    {:stop, {:shutdown, :risk_exceeded},
+     %{state | status: :stopped, shutdown_reason: "risk exceeded (#{source})"}}
+  end
+
   def handle_info(msg, state) do
     Logger.warning("AgentSession: unexpected message: #{inspect(msg)}")
     {:noreply, state}
@@ -537,11 +605,6 @@ defmodule TriOnyx.AgentSession do
           tool_meta = ToolRegistry.tool_meta(tool_name)
           classification = InformationClassifier.classify_tool_result(tool_name, tool_input, tool_meta)
           state = elevate_risk(state, classification)
-
-          # Record git provenance for write tools (async, non-blocking)
-          if is_error != true and tool_name in ["Write", "Edit", "NotebookEdit"] do
-            maybe_record_provenance(tool_name, tool_input, state)
-          end
 
           {state, nil}
 
@@ -1272,10 +1335,45 @@ defmodule TriOnyx.AgentSession do
   end
 
   defp handle_agent_event({:fuse_write, _op, path}, state) do
-    # Strip leading slash and track the written path for session commit
+    # Strip leading slash and report the write with the session's current
+    # labels. The committer updates the risk manifest immediately (so
+    # concurrent readers resolve fresh labels) and batches the git commit.
     clean_path = String.trim_leading(path, "/")
     Logger.debug("AgentSession #{state.id}: fuse write: #{clean_path}")
+
+    Workspace.Committer.record_write(
+      state.definition.name,
+      state.id,
+      clean_path,
+      state.taint_level,
+      state.sensitivity_level
+    )
+
     {:noreply, %{state | workspace_writes: MapSet.put(state.workspace_writes, clean_path)}}
+  end
+
+  defp handle_agent_event({:fuse_read, _op, path}, state) do
+    # Reads are unrestricted by design — the agent may read anything its
+    # glob policy allows. What a read does is escalate the reader's risk
+    # to the file's recorded labels, so the session carries the risk of
+    # everything it has seen. The FUSE driver dedupes read events per
+    # path, so each unique path is resolved at most once per session.
+    case InformationClassifier.classify_fuse_read(path) do
+      {:ok, classification} ->
+        {:noreply, elevate_risk(state, classification)}
+
+      :unclassified ->
+        # Unlabeled file (predates provenance tracking, or operator-created):
+        # no escalation, but record the read so the gap is auditable.
+        AuditLog.log_event(%{
+          type: "unclassified_read",
+          session_id: state.id,
+          agent: state.definition.name,
+          path: String.trim_leading(path, "/")
+        })
+
+        {:noreply, state}
+    end
   end
 
   defp handle_agent_event({:result, metadata}, state) do
@@ -1516,6 +1614,17 @@ defmodule TriOnyx.AgentSession do
         TriOnyx.ConnectorHandler.broadcast_to_connectors(Jason.encode!(escalation_event))
       end
 
+      # Kill, don't downgrade: when the escalated risk exceeds the
+      # definition's permitted ceiling, terminate the session immediately.
+      # Self-send rather than stopping inline because elevate_risk is
+      # called from many handlers (and from unit tests with bare maps);
+      # the message is processed before any further agent events.
+      max_risk = permitted_risk(state)
+
+      if RiskScorer.exceeds?(new_effective, max_risk) do
+        send(self(), {:kill_risk_exceeded, new_effective, max_risk, source})
+      end
+
       state
     else
       # No escalation needed, just record the source if it's non-trivial
@@ -1536,51 +1645,6 @@ defmodule TriOnyx.AgentSession do
   @spec elevate_information(t(), InformationClassifier.information_level(), String.t()) :: t()
   def elevate_information(state, new_level, source) do
     elevate_risk(state, %{taint: new_level, sensitivity: :low, reason: source})
-  end
-
-  # --- Git Provenance ---
-
-  @write_tools ["Write", "Edit", "NotebookEdit"]
-
-  @spec maybe_record_provenance(String.t(), map(), t()) :: :ok
-  defp maybe_record_provenance(tool_name, tool_input, state)
-       when tool_name in @write_tools do
-    raw_path = Map.get(tool_input, "file_path", "")
-
-    if raw_path != "" do
-      workspace_path = TriOnyx.Workspace.workspace_dir()
-
-      # The agent container sees files at /workspace/..., but the gateway
-      # workspace is a local directory. Strip the container prefix so git
-      # gets a path relative to the workspace root.
-      file_path = raw_path |> String.replace_leading("/workspace/", "")
-      agent_name = state.definition.name
-      taint = state.taint_level
-      sensitivity = state.sensitivity_level
-
-      Task.start(fn ->
-        case TriOnyx.GitProvenance.record_write(
-               workspace_path,
-               file_path,
-               agent_name,
-               taint,
-               sensitivity
-             ) do
-          :ok ->
-            Logger.info(
-              "AgentSession #{state.id}: recorded provenance for #{file_path} " <>
-                "(taint: #{taint}, sensitivity: #{sensitivity})"
-            )
-
-          {:error, reason} ->
-            Logger.warning(
-              "AgentSession #{state.id}: failed to record provenance for #{file_path}: #{inspect(reason)}"
-            )
-        end
-      end)
-    end
-
-    :ok
   end
 
   # --- Private Helpers ---
@@ -1747,41 +1811,22 @@ defmodule TriOnyx.AgentSession do
 
   @spec commit_workspace_writes(t()) :: t()
   defp commit_workspace_writes(state) do
-    # Filter out atomic-write temp files (e.g., .SOUL.md.tmp.50.123456) —
-    # only commit the final renamed paths.
-    commit_paths =
-      state.workspace_writes
-      |> MapSet.to_list()
-      |> Enum.reject(&temp_file?/1)
-
-    if commit_paths != [] do
-      # Update risk manifest with both taint and sensitivity levels
-      Workspace.update_risk_manifest(
+    # The committer already saw every write as it happened; re-submitting
+    # is a cheap idempotent safety net in case it restarted mid-session.
+    # The labels here are the session's final (highest) levels, which can
+    # only confirm or escalate what was recorded at write time.
+    Enum.each(state.workspace_writes, fn path ->
+      Workspace.Committer.record_write(
         state.definition.name,
-        commit_paths,
+        state.id,
+        path,
         state.taint_level,
         state.sensitivity_level
       )
+    end)
 
-      # Include the manifest in committed paths
-      all_paths = [".tri-onyx/risk-manifest.json" | commit_paths]
-
-      case Workspace.commit_session(
-             state.definition.name,
-             state.id,
-             all_paths,
-             state.taint_level,
-             state.sensitivity_level
-           ) do
-        {:ok, hash} when is_binary(hash) ->
-          Logger.info("AgentSession #{state.id}: workspace committed #{hash}")
-
-        {:ok, :no_changes} ->
-          Logger.debug("AgentSession #{state.id}: no workspace changes to commit")
-
-        {:error, reason} ->
-          Logger.error("AgentSession #{state.id}: workspace commit failed: #{inspect(reason)}")
-      end
+    if MapSet.size(state.workspace_writes) > 0 do
+      Workspace.Committer.flush()
     end
 
     %{state | workspace_writes: MapSet.new()}
@@ -1794,14 +1839,15 @@ defmodule TriOnyx.AgentSession do
     :ok
   end
 
-  # Detects atomic-write temp files created by Claude SDK's Write tool.
-  # These have patterns like "SOUL.md.tmp.50.1771023878427" (no leading dot).
   @doc false
   @spec temp_file?(String.t()) :: boolean()
-  def temp_file?(path) do
-    basename = Path.basename(path)
-    Regex.match?(~r/\.tmp\.\d+\.\d+$/, basename)
-  end
+  defdelegate temp_file?(path), to: Workspace
+
+  # The definition's permitted risk ceiling, defaulting to :critical
+  # (never exceedable) for bare state maps used in unit tests.
+  @spec permitted_risk(map()) :: RiskScorer.risk_level()
+  defp permitted_risk(%{definition: %{max_effective_risk: max}}) when not is_nil(max), do: max
+  defp permitted_risk(_state), do: :critical
 
   defp format_bcp_error({:agent_not_found, name}),
     do: "Agent '#{name}' not found. It may not be configured."

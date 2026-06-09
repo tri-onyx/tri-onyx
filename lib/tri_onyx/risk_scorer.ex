@@ -205,6 +205,21 @@ defmodule TriOnyx.RiskScorer do
   def format_risk(:high), do: "high"
   def format_risk(:critical), do: "critical \u26A0"
 
+  @risk_rank %{low: 0, moderate: 1, high: 2, critical: 3}
+
+  @doc """
+  Returns true if `risk` exceeds the permitted maximum level.
+
+  Used for kill-on-threshold enforcement: a session whose effective risk
+  exceeds its definition's `max_effective_risk` is terminated. With the
+  default maximum of `:critical` nothing can exceed it \u2014 enforcement is
+  opt-in per agent.
+  """
+  @spec exceeds?(risk_level(), risk_level()) :: boolean()
+  def exceeds?(risk, max_level) do
+    Map.fetch!(@risk_rank, risk) > Map.fetch!(@risk_rank, max_level)
+  end
+
   # --- Private ---
 
   @spec tool_data_access_risk([String.t()]) :: atom()

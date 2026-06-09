@@ -73,10 +73,13 @@ defmodule TriOnyx.Application do
       # 9. Unified approval queue — human approval for BCP and action tools
       TriOnyx.BCP.ApprovalQueue,
 
-      # 10. Workspace sweeper — periodic commit of non-FUSE changes
+      # 10. Workspace committer — incremental provenance (manifest + debounced commits)
+      TriOnyx.Workspace.Committer,
+
+      # 11. Workspace sweeper — periodic commit of non-FUSE changes
       TriOnyx.Workspace.Sweeper,
 
-      # 11. HTTP server
+      # 12. HTTP server
       {Bandit, plug: TriOnyx.Router, port: port}
     ]
     |> Enum.reject(&is_nil/1)

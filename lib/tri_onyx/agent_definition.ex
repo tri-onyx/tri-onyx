@@ -25,6 +25,10 @@ defmodule TriOnyx.AgentDefinition do
   - `skills` — list of Claude Code skill names to load (from `.claude/skills/<name>/SKILL.md`)
   - `plugins` — list of workspace plugin names (auto-injects FUSE read paths for `/plugins/<name>/**`)
   - `base_taint` — inherent taint floor from model provenance: "low", "medium", or "high" (default: "low")
+  - `max_effective_risk` — permitted effective risk ceiling: "low", "moderate", "high", or
+    "critical" (default: "critical"). The session is killed immediately when its effective
+    risk exceeds this level. The default of "critical" can never be exceeded, so enforcement
+    is opt-in per agent.
   - `exclude_from_personalization` — if true, skip this agent's logs when generating the user profile (default: false)
   - `reflection` — cron expression for a daily self-reflection run in an isolated
     container mode (e.g. `"0 23 * * *"`). The reflection run receives only the
@@ -82,6 +86,7 @@ defmodule TriOnyx.AgentDefinition do
           skills: [String.t()],
           plugins: [String.t()],
           base_taint: :low | :medium | :high,
+          max_effective_risk: :low | :moderate | :high | :critical,
           input_sources: [atom()],
           browser: boolean(),
           docker_socket: boolean(),
@@ -110,6 +115,7 @@ defmodule TriOnyx.AgentDefinition do
     skills: [],
     plugins: [],
     base_taint: :low,
+    max_effective_risk: :critical,
     input_sources: [],
     browser: false,
     docker_socket: false,
@@ -261,6 +267,10 @@ defmodule TriOnyx.AgentDefinition do
     %{field: "base_taint", message: hint}
   end
 
+  def format_error({:invalid_max_effective_risk, _value, hint}) do
+    %{field: "max_effective_risk", message: hint}
+  end
+
   def format_error({:invalid_input_sources, invalid, valid}) do
     %{field: "input_sources", message: "Invalid sources: #{Enum.join(invalid, ", ")}. Valid: #{Enum.join(valid, ", ")}"}
   end
@@ -402,8 +412,18 @@ defmodule TriOnyx.AgentDefinition do
           %{value: "high", label: "High"}
         ],
         group: "advanced", order: 0, hint: "Inherent taint floor from model provenance"},
+      %{key: "max_effective_risk", label: "Max Effective Risk", type: "enum", required: false,
+        default: "critical",
+        options: [
+          %{value: "low", label: "Low"},
+          %{value: "moderate", label: "Moderate"},
+          %{value: "high", label: "High"},
+          %{value: "critical", label: "Critical (never killed)"}
+        ],
+        group: "advanced", order: 1,
+        hint: "Session is killed immediately when effective risk exceeds this level"},
       %{key: "exclude_from_personalization", label: "Exclude from Personalization", type: "boolean",
-        required: false, default: false, options: nil, group: "advanced", order: 1,
+        required: false, default: false, options: nil, group: "advanced", order: 2,
         hint: "Skip this agent's logs when generating user profile"}
   ]
 
@@ -421,7 +441,7 @@ defmodule TriOnyx.AgentDefinition do
     ~w(name description model tools network fs_read fs_write send_to receive_from
        restart_targets browser docker_socket trionyx_repo skills plugins
        input_sources heartbeat_every idle_timeout cron_schedules reflection
-       bcp_channels base_taint exclude_from_personalization)
+       bcp_channels base_taint max_effective_risk exclude_from_personalization)
   end
 
   @spec serialize_yaml_field(String.t(), term()) :: [String.t()] | [nil]
@@ -620,6 +640,7 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, skills} <- parse_string_list(yaml, "skills"),
          {:ok, plugins} <- parse_string_list(yaml, "plugins"),
          {:ok, base_taint} <- parse_base_taint(yaml),
+         {:ok, max_effective_risk} <- parse_max_effective_risk(yaml),
          {:ok, input_sources} <- parse_input_sources(yaml),
          {:ok, browser} <- parse_optional_boolean(yaml, "browser"),
          {:ok, docker_socket} <- parse_optional_boolean(yaml, "docker_socket"),
@@ -674,6 +695,7 @@ defmodule TriOnyx.AgentDefinition do
          skills: skills,
          plugins: plugins,
          base_taint: base_taint,
+         max_effective_risk: max_effective_risk,
          input_sources: auto_include_cron(input_sources, cron_schedules),
          browser: browser,
          docker_socket: docker_socket,
@@ -739,6 +761,18 @@ defmodule TriOnyx.AgentDefinition do
       "medium" -> {:ok, :medium}
       "high" -> {:ok, :high}
       other -> {:error, {:invalid_base_taint, other, "expected \"low\", \"medium\", or \"high\""}}
+    end
+  end
+
+  @spec parse_max_effective_risk(map()) ::
+          {:ok, :low | :moderate | :high | :critical} | {:error, term()}
+  defp parse_max_effective_risk(yaml) do
+    case Map.get(yaml, "max_effective_risk", "critical") do
+      "low" -> {:ok, :low}
+      "moderate" -> {:ok, :moderate}
+      "high" -> {:ok, :high}
+      "critical" -> {:ok, :critical}
+      other -> {:error, {:invalid_max_effective_risk, other, "expected \"low\", \"moderate\", \"high\", or \"critical\""}}
     end
   end
 

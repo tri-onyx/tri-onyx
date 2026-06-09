@@ -127,7 +127,7 @@ defmodule TriOnyx.Sandbox do
       "fs_write" => fs_write,
       "log_denials" => true,
       "log_writes" => true,
-      "max_read_risk" => Map.get(definition, :max_read_risk, "")
+      "log_reads" => true
     }
 
     Jason.encode!(policy)

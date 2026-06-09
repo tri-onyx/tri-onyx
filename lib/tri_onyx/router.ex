@@ -1854,7 +1854,7 @@ defmodule TriOnyx.Router do
     end)
   end
 
-  @agent_name_re ~r/^[a-z0-9]([a-z0-9-]*[a-z0-9])?$/
+  @agent_name_re ~r/^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$/
 
   defp valid_agent_name?(name) when is_binary(name) do
     byte_size(name) > 0 and byte_size(name) <= 64 and Regex.match?(@agent_name_re, name)
@@ -1865,7 +1865,7 @@ defmodule TriOnyx.Router do
     |> put_resp_content_type("application/json")
     |> send_resp(400, Jason.encode!(%{
       "error" => "invalid_name",
-      "message" => "Agent name must be 1-64 lowercase alphanumeric characters or hyphens"
+      "message" => "Agent name must be 1-64 alphanumeric characters, hyphens, or underscores"
     }))
   end
 

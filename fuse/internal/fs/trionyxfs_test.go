@@ -617,188 +617,72 @@ func TestNonRootWrite(t *testing.T) {
 	}
 }
 
-// testMountWithRisk sets up a mount with risk manifest and two-axis thresholds.
-func testMountWithRisk(t *testing.T, sourceDir string, trie *pathtrie.Trie, writePatterns []string, manifest map[string]RiskEntry, maxTaint, maxSensitivity string) (mountDir string, cleanup func()) {
-	t.Helper()
+func TestReadLoggerDedup(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	logger := &ReadLogger{
+		enc:  json.NewEncoder(w),
+		seen: make(map[string]struct{}),
+	}
+	logger.Log("open", "/data/report.md")
+	logger.Log("open", "/data/report.md") // duplicate — must be suppressed
+	logger.Log("open", "/data/other.md")
+	w.Close()
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	dec := json.NewDecoder(&buf)
+	var events []ReadEvent
+	for dec.More() {
+		var ev ReadEvent
+		if err := dec.Decode(&ev); err != nil {
+			t.Fatalf("parse read log: %v", err)
+		}
+		events = append(events, ev)
+	}
+
+	if len(events) != 2 {
+		t.Fatalf("expected 2 events (dedup), got %d: %+v", len(events), events)
+	}
+	if events[0].Event != "read" || events[0].Op != "open" || events[0].Path != "/data/report.md" {
+		t.Errorf("unexpected first event: %+v", events[0])
+	}
+	if events[1].Path != "/data/other.md" {
+		t.Errorf("unexpected second event: %+v", events[1])
+	}
+}
+
+func TestReadEventOnOpen(t *testing.T) {
+	src := setupTestSource(t)
+
+	tr := pathtrie.New()
+	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
+	tr.Insert("/repo/README.md", pathtrie.ReadAccess, true)
+	tr.Insert("/repo/out/result.json", pathtrie.WriteAccess, true)
 
 	if _, err := os.Stat("/dev/fuse"); err != nil {
 		t.Skip("FUSE not available (/dev/fuse missing)")
 	}
 
-	mountDir = t.TempDir()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	rd := &RootData{
-		SourceDir:      sourceDir,
-		Trie:           trie,
-		WritePatterns:  writePatterns,
-		LogDenials:     true,
-		Logger:         NewDenialLogger(),
-		MaxReadTaint:   maxTaint,
-		MaxReadSensitivity: maxSensitivity,
-		RiskManifest:   manifest,
-	}
-
-	root := &SecureNode{RootData: rd}
-	oneSec := time.Second
-	opts := &gofusefs.Options{
-		EntryTimeout: &oneSec,
-		AttrTimeout:  &oneSec,
-	}
-
-	server, err := gofusefs.Mount(mountDir, root, opts)
-	if err != nil {
-		t.Fatalf("mount: %v", err)
-	}
-
-	return mountDir, func() {
-		server.Unmount()
-	}
-}
-
-func TestTwoAxisRiskDenyHighTaint(t *testing.T) {
-	src := setupTestSource(t)
-
-	tr := pathtrie.New()
-	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
-
-	manifest := map[string]RiskEntry{
-		"/repo/src/main.py": {
-			TaintLevel:   "high",
-			SensitivityLevel: "low",
-			RiskLevel:    "high",
-			Agent:        "scraper",
-			UpdatedAt:    "now",
+		SourceDir:  src,
+		Trie:       tr,
+		LogDenials: true,
+		Logger:     NewDenialLogger(),
+		LogReads:   true,
+		ReadLogger: &ReadLogger{
+			enc:  json.NewEncoder(w),
+			seen: make(map[string]struct{}),
 		},
-	}
-
-	// Agent only allows low taint reads
-	mnt, cleanup := testMountWithRisk(t, src, tr, nil, manifest, "low", "")
-	defer cleanup()
-
-	_, err := os.ReadFile(filepath.Join(mnt, "repo/src/main.py"))
-	if err == nil {
-		t.Fatal("expected error reading high-taint file with low-taint threshold")
-	}
-	if !os.IsPermission(err) {
-		t.Errorf("expected EACCES, got: %v", err)
-	}
-}
-
-func TestTwoAxisRiskDenyHighSensitivity(t *testing.T) {
-	src := setupTestSource(t)
-
-	tr := pathtrie.New()
-	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
-
-	manifest := map[string]RiskEntry{
-		"/repo/src/main.py": {
-			TaintLevel:   "low",
-			SensitivityLevel: "high",
-			RiskLevel:    "high",
-			Agent:        "secret-handler",
-			UpdatedAt:    "now",
-		},
-	}
-
-	// Agent only allows low sensitivity reads
-	mnt, cleanup := testMountWithRisk(t, src, tr, nil, manifest, "", "low")
-	defer cleanup()
-
-	_, err := os.ReadFile(filepath.Join(mnt, "repo/src/main.py"))
-	if err == nil {
-		t.Fatal("expected error reading high-sensitivity file with low-sensitivity threshold")
-	}
-	if !os.IsPermission(err) {
-		t.Errorf("expected EACCES, got: %v", err)
-	}
-}
-
-func TestTwoAxisRiskAllowLowBoth(t *testing.T) {
-	src := setupTestSource(t)
-
-	tr := pathtrie.New()
-	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
-
-	manifest := map[string]RiskEntry{
-		"/repo/src/main.py": {
-			TaintLevel:   "low",
-			SensitivityLevel: "low",
-			RiskLevel:    "low",
-			Agent:        "safe-agent",
-			UpdatedAt:    "now",
-		},
-	}
-
-	// Agent allows medium on both axes — low file should be readable
-	mnt, cleanup := testMountWithRisk(t, src, tr, nil, manifest, "medium", "medium")
-	defer cleanup()
-
-	data, err := os.ReadFile(filepath.Join(mnt, "repo/src/main.py"))
-	if err != nil {
-		t.Fatalf("reading low-risk file should succeed: %v", err)
-	}
-	if !bytes.Contains(data, []byte("hello")) {
-		t.Errorf("unexpected content: %s", data)
-	}
-}
-
-func TestTwoAxisRiskIndependentEnforcement(t *testing.T) {
-	src := setupTestSource(t)
-
-	tr := pathtrie.New()
-	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
-
-	manifest := map[string]RiskEntry{
-		"/repo/src/main.py": {
-			TaintLevel:   "low",
-			SensitivityLevel: "high",
-			RiskLevel:    "high",
-			Agent:        "secret-handler",
-			UpdatedAt:    "now",
-		},
-	}
-
-	// Agent allows high taint but only low sensitivity — sensitivity should block
-	mnt, cleanup := testMountWithRisk(t, src, tr, nil, manifest, "high", "low")
-	defer cleanup()
-
-	_, err := os.ReadFile(filepath.Join(mnt, "repo/src/main.py"))
-	if err == nil {
-		t.Fatal("expected error: file sensitivity exceeds agent's sensitivity threshold")
-	}
-	if !os.IsPermission(err) {
-		t.Errorf("expected EACCES, got: %v", err)
-	}
-}
-
-func TestBackwardCompatMaxReadRisk(t *testing.T) {
-	src := setupTestSource(t)
-
-	tr := pathtrie.New()
-	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
-
-	manifest := map[string]RiskEntry{
-		"/repo/src/main.py": {
-			TaintLevel:   "",
-			SensitivityLevel: "",
-			RiskLevel:    "high",
-			Agent:        "legacy-agent",
-			UpdatedAt:    "now",
-		},
-	}
-
-	// No axis-specific thresholds, use legacy MaxReadRisk
-	rd := &RootData{
-		SourceDir:    src,
-		Trie:         tr,
-		LogDenials:   true,
-		Logger:       NewDenialLogger(),
-		MaxReadRisk:  "low",
-		RiskManifest: manifest,
-	}
-
-	if _, err := os.Stat("/dev/fuse"); err != nil {
-		t.Skip("FUSE not available")
 	}
 
 	mountDir := t.TempDir()
@@ -812,14 +696,51 @@ func TestBackwardCompatMaxReadRisk(t *testing.T) {
 	if err != nil {
 		t.Fatalf("mount: %v", err)
 	}
-	defer server.Unmount()
 
-	_, err = os.ReadFile(filepath.Join(mountDir, "repo/src/main.py"))
-	if err == nil {
-		t.Fatal("expected error: legacy risk exceeds MaxReadRisk threshold")
+	// Read the same file twice — only one event expected.
+	for i := 0; i < 2; i++ {
+		if _, err := os.ReadFile(filepath.Join(mountDir, "repo/src/main.py")); err != nil {
+			t.Fatalf("read %d: %v", i, err)
+		}
 	}
-	if !os.IsPermission(err) {
-		t.Errorf("expected EACCES, got: %v", err)
+	// Read a second file.
+	if _, err := os.ReadFile(filepath.Join(mountDir, "repo/README.md")); err != nil {
+		t.Fatalf("read README: %v", err)
+	}
+	// Write-only open of an existing file must NOT produce a read event.
+	f, err := os.OpenFile(filepath.Join(mountDir, "repo/out/result.json"), os.O_WRONLY, 0o644)
+	if err != nil {
+		t.Fatalf("write-only open: %v", err)
+	}
+	f.Close()
+
+	server.Unmount()
+	w.Close()
+
+	var buf bytes.Buffer
+	buf.ReadFrom(r)
+
+	dec := json.NewDecoder(&buf)
+	paths := make(map[string]int)
+	for dec.More() {
+		var ev ReadEvent
+		if err := dec.Decode(&ev); err != nil {
+			t.Fatalf("parse read log: %v (raw: %s)", err, buf.String())
+		}
+		if ev.Event != "read" {
+			t.Errorf("unexpected event type: %+v", ev)
+		}
+		paths[ev.Path]++
+	}
+
+	if paths["/repo/src/main.py"] != 1 {
+		t.Errorf("main.py read events = %d, want 1 (deduped)", paths["/repo/src/main.py"])
+	}
+	if paths["/repo/README.md"] != 1 {
+		t.Errorf("README.md read events = %d, want 1", paths["/repo/README.md"])
+	}
+	if paths["/repo/out/result.json"] != 0 {
+		t.Errorf("write-only open produced a read event: %+v", paths)
 	}
 }
 

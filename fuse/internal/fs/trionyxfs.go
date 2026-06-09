@@ -37,15 +37,6 @@ var _ = (gofusefs.NodeRmdirer)((*SecureNode)(nil))
 var _ = (gofusefs.NodeSymlinker)((*SecureNode)(nil))
 var _ = (gofusefs.NodeLinker)((*SecureNode)(nil))
 
-// RiskEntry represents a single file's risk metadata from the risk manifest.
-type RiskEntry struct {
-	TaintLevel   string `json:"taint_level"`
-	SensitivityLevel string `json:"sensitivity_level"`
-	RiskLevel    string `json:"risk_level"` // max(taint, sensitivity) — backward compat
-	Agent        string `json:"agent"`
-	UpdatedAt    string `json:"updated_at"`
-}
-
 // RootData holds shared state for the entire mounted filesystem.
 type RootData struct {
 	SourceDir      string
@@ -56,11 +47,8 @@ type RootData struct {
 	Logger         *DenialLogger
 	LogWrites      bool
 	WriteLogger    *WriteLogger
-	MaxReadRisk        string // backward compat: max(taint, sensitivity) threshold
-	MaxReadTaint       string // independent taint threshold for reads
-	MaxReadSensitivity string // independent sensitivity threshold for reads
-	RiskManifest   map[string]RiskEntry
-	ManifestMu     sync.RWMutex
+	LogReads       bool
+	ReadLogger     *ReadLogger
 }
 
 // DenialLogger writes structured JSON denial events to stderr.
@@ -131,43 +119,46 @@ func (w *WriteLogger) Log(op, path string) {
 	})
 }
 
-// LoadManifest reads the risk manifest from .tri-onyx/risk-manifest.json
-// in the source directory and populates rd.RiskManifest. The manifest maps
-// relative paths to their risk metadata. This method is safe for concurrent
-// use; it acquires ManifestMu for writing.
-func (rd *RootData) LoadManifest() error {
-	manifestPath := filepath.Join(rd.SourceDir, ".tri-onyx", "risk-manifest.json")
-	data, err := os.ReadFile(manifestPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return nil // no manifest is not an error
-		}
-		return err
-	}
-
-	var manifest map[string]RiskEntry
-	if err := json.Unmarshal(data, &manifest); err != nil {
-		return err
-	}
-
-	rd.ManifestMu.Lock()
-	rd.RiskManifest = manifest
-	rd.ManifestMu.Unlock()
-	return nil
+// ReadLogger writes structured JSON read events to stderr. Each unique
+// path is logged at most once per mount: the gateway's risk escalation
+// is monotonic, so repeat reads of the same path carry no new
+// information, and deduplication keeps event volume bounded.
+type ReadLogger struct {
+	mu   sync.Mutex
+	enc  *json.Encoder
+	seen map[string]struct{}
 }
 
-// riskRank maps a risk level string to a numeric rank for comparison.
-func riskRank(level string) int {
-	switch level {
-	case "low":
-		return 0
-	case "medium":
-		return 1
-	case "high":
-		return 2
-	default:
-		return 0
+// ReadEvent is the structured log entry for read operations.
+type ReadEvent struct {
+	Event string `json:"event"`
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Time  string `json:"time"`
+}
+
+// NewReadLogger creates a logger that writes to stderr.
+func NewReadLogger() *ReadLogger {
+	return &ReadLogger{
+		enc:  json.NewEncoder(os.Stderr),
+		seen: make(map[string]struct{}),
 	}
+}
+
+// Log writes a read event unless the path was already logged.
+func (r *ReadLogger) Log(op, path string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, ok := r.seen[path]; ok {
+		return
+	}
+	r.seen[path] = struct{}{}
+	r.enc.Encode(ReadEvent{
+		Event: "read",
+		Op:    op,
+		Path:  path,
+		Time:  time.Now().UTC().Format(time.RFC3339),
+	})
 }
 
 // SecureNode is a single node in the FUSE tree. Each node holds a pointer
@@ -213,6 +204,13 @@ func (n *SecureNode) deny(op, path, mode string) syscall.Errno {
 func (n *SecureNode) logWrite(op, path string) {
 	if n.RootData.LogWrites {
 		n.RootData.WriteLogger.Log(op, path)
+	}
+}
+
+// logRead logs a read event if read logging is enabled.
+func (n *SecureNode) logRead(op, path string) {
+	if n.RootData.LogReads {
+		n.RootData.ReadLogger.Log(op, path)
 	}
 }
 
@@ -471,31 +469,6 @@ func (n *SecureNode) Open(ctx context.Context, flags uint32) (gofusefs.FileHandl
 		if !n.checkReadDynamic(mp) {
 			return nil, 0, n.deny("open", mp, "read")
 		}
-
-		// Risk-based read filtering: deny reads on files whose risk level
-		// exceeds the agent's maximum allowed thresholds.
-		// Two-axis enforcement: check taint and sensitivity independently.
-		n.RootData.ManifestMu.RLock()
-		entry, found := n.RootData.RiskManifest[mp]
-		n.RootData.ManifestMu.RUnlock()
-		if found {
-			if n.RootData.MaxReadTaint != "" {
-				if riskRank(entry.TaintLevel) > riskRank(n.RootData.MaxReadTaint) {
-					return nil, 0, n.deny("open", mp, "read:taint")
-				}
-			}
-			if n.RootData.MaxReadSensitivity != "" {
-				if riskRank(entry.SensitivityLevel) > riskRank(n.RootData.MaxReadSensitivity) {
-					return nil, 0, n.deny("open", mp, "read:sensitivity")
-				}
-			}
-			// Backward compat: fall back to MaxReadRisk if no axis-specific thresholds
-			if n.RootData.MaxReadTaint == "" && n.RootData.MaxReadSensitivity == "" && n.RootData.MaxReadRisk != "" {
-				if riskRank(entry.RiskLevel) > riskRank(n.RootData.MaxReadRisk) {
-					return nil, 0, n.deny("open", mp, "read:risk")
-				}
-			}
-		}
 	}
 
 	p := n.sourcePath()
@@ -505,6 +478,11 @@ func (n *SecureNode) Open(ctx context.Context, flags uint32) (gofusefs.FileHandl
 	}
 	if isWrite {
 		n.logWrite("open", mp)
+	}
+	// Any open whose access mode permits reading exposes the file's
+	// content to the agent — including O_RDWR write-opens.
+	if flags&syscall.O_ACCMODE != uint32(syscall.O_WRONLY) {
+		n.logRead("open", mp)
 	}
 	return gofusefs.NewLoopbackFile(fd), 0, gofusefs.OK
 }

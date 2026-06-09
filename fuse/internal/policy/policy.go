@@ -17,13 +17,11 @@ import (
 
 // RawPolicy is the on-disk JSON format.
 type RawPolicy struct {
-	FsRead         []string `json:"fs_read"`
-	FsWrite        []string `json:"fs_write"`
-	LogDenials     bool     `json:"log_denials"`
-	LogWrites      bool     `json:"log_writes"`
-	MaxReadRisk    string   `json:"max_read_risk"`              // backward compat
-	MaxReadTaint   string   `json:"max_read_taint,omitempty"`   // independent taint threshold
-	MaxReadSensitivity string `json:"max_read_sensitivity,omitempty"` // independent sensitivity threshold
+	FsRead     []string `json:"fs_read"`
+	FsWrite    []string `json:"fs_write"`
+	LogDenials bool     `json:"log_denials"`
+	LogWrites  bool     `json:"log_writes"`
+	LogReads   bool     `json:"log_reads"`
 }
 
 // Policy contains the expanded, ready-to-use path lists.
@@ -34,9 +32,7 @@ type Policy struct {
 	RawWritePatterns []string // Original write globs (for dynamic create checks)
 	LogDenials       bool
 	LogWrites        bool
-	MaxReadRisk        string // backward compat: max(taint, sensitivity) threshold
-	MaxReadTaint       string // independent taint threshold for reads
-	MaxReadSensitivity string // independent sensitivity threshold for reads
+	LogReads         bool
 }
 
 // Load reads and parses a JSON policy file. Returns an error on missing
@@ -97,9 +93,7 @@ func Expand(raw *RawPolicy, sourceDir string) (*Policy, error) {
 		RawWritePatterns: expandWritePatterns(raw.FsWrite),
 		LogDenials:       raw.LogDenials,
 		LogWrites:        raw.LogWrites,
-		MaxReadRisk:      raw.MaxReadRisk,
-		MaxReadTaint:     raw.MaxReadTaint,
-		MaxReadSensitivity: raw.MaxReadSensitivity,
+		LogReads:         raw.LogReads,
 	}
 	return pol, nil
 }

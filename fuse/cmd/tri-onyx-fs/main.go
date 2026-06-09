@@ -66,20 +66,13 @@ func main() {
 		LogDenials:    pol.LogDenials,
 		Logger:        logger,
 		LogWrites:     pol.LogWrites,
-		MaxReadRisk:   pol.MaxReadRisk,
+		LogReads:      pol.LogReads,
 	}
 	if pol.LogWrites {
 		rootData.WriteLogger = trionyxfs.NewWriteLogger()
 	}
-	// Load risk manifest for risk-based read filtering (Phase 4).
-	// Missing manifest is not fatal — filtering is simply inactive.
-	if rootData.MaxReadRisk != "" {
-		if err := rootData.LoadManifest(); err != nil {
-			logEvent("warn", map[string]interface{}{
-				"msg":   "failed to load risk manifest",
-				"error": err.Error(),
-			})
-		}
+	if pol.LogReads {
+		rootData.ReadLogger = trionyxfs.NewReadLogger()
 	}
 	root := &trionyxfs.SecureNode{RootData: rootData}
 
@@ -104,6 +97,7 @@ func main() {
 		"write_paths": len(pol.WritePaths),
 		"log_denials": pol.LogDenials,
 		"log_writes":  pol.LogWrites,
+		"log_reads":   pol.LogReads,
 	})
 
 	// 7. Signal handler: clean unmount on SIGTERM/SIGINT.

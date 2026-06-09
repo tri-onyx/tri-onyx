@@ -126,6 +126,34 @@ defmodule TriOnyx.InformationClassifier do
   end
 
   @doc """
+  Classifies a FUSE-observed file read from the workspace risk manifest.
+
+  Returns `{:ok, classification}` carrying the labels recorded when the
+  file was written, or `:unclassified` when the file has no manifest
+  entry (it predates provenance tracking or was operator-created).
+  Reads of unclassified files do not escalate risk by design.
+  """
+  @spec classify_fuse_read(String.t()) :: {:ok, classification()} | :unclassified
+  def classify_fuse_read(path) when is_binary(path) do
+    clean_path = String.trim_leading(path, "/")
+
+    case TriOnyx.Workspace.read_risk_manifest() do
+      %{^clean_path => entry} ->
+        writer = Map.get(entry, "agent", "unknown")
+
+        {:ok,
+         %{
+           taint: parse_manifest_level(entry["taint_level"]),
+           sensitivity: parse_manifest_level(entry["sensitivity_level"]),
+           reason: "fs_read: #{clean_path} (written by #{writer})"
+         }}
+
+      _ ->
+        :unclassified
+    end
+  end
+
+  @doc """
   Returns the element-wise max of two classification maps.
   """
   @spec higher_levels(classification(), classification()) :: classification()
@@ -203,9 +231,19 @@ defmodule TriOnyx.InformationClassifier do
     path = Map.get(input, "file_path", "")
 
     if controlled_path?(path) do
-      workspace_path = TriOnyx.Workspace.workspace_dir()
       rel_path = path |> String.replace_leading("/workspace/", "")
-      TriOnyx.GitProvenance.file_sensitivity(workspace_path, rel_path)
+
+      # The risk manifest is updated on every FUSE-observed write, so it
+      # is fresher than git history. Fall back to the Sc-Sensitivity git
+      # trailer for files predating the manifest.
+      case TriOnyx.Workspace.read_risk_manifest() do
+        %{^rel_path => %{"sensitivity_level" => level}} when level in ~w(low medium high) ->
+          String.to_existing_atom(level)
+
+        _ ->
+          workspace_path = TriOnyx.Workspace.workspace_dir()
+          TriOnyx.GitProvenance.file_sensitivity(workspace_path, rel_path)
+      end
     else
       :low
     end
@@ -286,4 +324,12 @@ defmodule TriOnyx.InformationClassifier do
   defp level_rank(:low), do: 0
   defp level_rank(:medium), do: 1
   defp level_rank(:high), do: 2
+
+  # Parses a level string from a risk-manifest entry, defaulting to :low
+  # for missing or malformed values.
+  @spec parse_manifest_level(term()) :: information_level()
+  defp parse_manifest_level(level) when level in ~w(low medium high),
+    do: String.to_existing_atom(level)
+
+  defp parse_manifest_level(_), do: :low
 end
