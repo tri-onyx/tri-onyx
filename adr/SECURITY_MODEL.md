@@ -107,7 +107,7 @@ When effective risk reaches a threshold defined in the agent's policy, the gatew
 
 Risk spreads between agents through two channels. Taint and sensitivity propagate independently — a message from a high-taint, low-sensitivity agent raises the receiver's taint but not its sensitivity.
 
-**Sensitivity decays per hop.** Unlike taint, sensitivity is always reduced by one level when propagating from one agent to the next (via `step_down`). The rationale: unless an agent is already compromised, it will not willingly disclose secrets. An agent receiving high-sensitivity data produces medium-sensitivity output; medium decays to low. This means sensitivity attenuates over multi-hop chains, reflecting the decreasing likelihood of verbatim secret disclosure at each stage.
+**Sensitivity decays per hop — in worst-case analysis only.** The static graph analysis (see Graph Analysis below) reduces sensitivity by one level (via `step_down`) at every hop when projecting worst-case propagation. The rationale: unless an agent is already compromised, it will not willingly disclose secrets verbatim, so the likelihood of disclosure attenuates over multi-hop chains. This decay is a property of the analysis model in `GraphAnalyzer.propagate_levels/3`, not of runtime session state — runtime sensitivity propagation is currently coarser than the model (see the per-channel sections below).
 
 ### File-based propagation
 
@@ -115,7 +115,9 @@ When agent A writes a file and agent B reads it, B's taint escalates to match A'
 
 ### Inter-agent messages
 
-When agents send messages to each other, the message carries the sender's taint level directly. Sensitivity is stepped down by one level — the receiver's sensitivity escalates to at most `step_down(sender's sensitivity)`.
+When agents send messages to each other, the routing metadata carries the sender's taint level at full strength, and the receiver's taint escalates to match (`InterAgent.route/2` sets `information_level` in the trigger metadata).
+
+> **Implementation divergence:** the model calls for the receiver's sensitivity to escalate to `step_down(sender's sensitivity)`, but message routing metadata currently carries no sensitivity level at all — the receiver's runtime sensitivity is unchanged by incoming messages. Only the worst-case graph analysis applies the step-down rule to messaging edges. (`InformationClassifier.classify_message/3`, which implements full-strength sensitivity inheritance, is not called from any production path.)
 
 ### Sanitization
 

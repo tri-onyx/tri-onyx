@@ -5,11 +5,11 @@
 **Status:** Open
 **Found:** 2026-03-15
 
-### Bug: `commit_session` fails when FUSE-tracked files are deleted before session end
+### Bug (FIXED): `commit_session` fails when FUSE-tracked files are deleted before session end
 
-`commit_workspace_writes` passes all FUSE-tracked paths to a single `git add` call. If any file was created and deleted during the session (e.g., news agent's incoming article review pipeline: fetch → `/incoming/` → review → delete), `git add` fails with exit 128 (`pathspec did not match any files`) and **zero files get committed**. This is the root cause of 2,168 untracked files in the workspace.
+**Fixed 2026-03-15** in `8d2d57f`: `commit_session` filters out paths that no longer exist on disk (and ignored paths) before `git add` — see `lib/tri_onyx/workspace.ex:141-151`. The periodic workspace sweeper additionally catches strays with `git add -A`.
 
-**Fix:** Filter out nonexistent paths before `git add`, or use `git add --ignore-missing`, or add files individually. See `lib/tri_onyx/workspace.ex:145`.
+Original issue: `commit_workspace_writes` passed all FUSE-tracked paths to a single `git add` call; any file created and deleted during the session made `git add` fail with exit 128 and zero files committed.
 
 ### Design issue: provenance window between FUSE write and session commit
 

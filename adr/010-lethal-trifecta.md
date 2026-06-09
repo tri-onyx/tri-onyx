@@ -102,6 +102,8 @@ In multi-agent pipelines, labels propagate across stages:
 - **Sensitivity decays forward** through data flow. Agent B reading Agent A's output inherits `step_down(A's sensitivity)` — one level lower. An uncompromised agent won't willingly disclose secrets, so sensitivity attenuates per hop.
 - **Capability is not inherited.** Each agent has its own capability level determined by its tool access. A high-capability agent receiving a message from a low-capability agent does not reduce its own capability.
 
+> **Correction (2026-06-09):** two claims above were superseded or never implemented as written. (1) Sanitization does **not** step taint down — structural validation cannot remove prompt injection from free text, so the receiver inherits the sender's full taint; taint step-down happens only through BCP (see ADR-005 and SECURITY_MODEL.md § Sanitization). (2) Per-hop sensitivity decay exists only in the worst-case graph analysis (`GraphAnalyzer.propagate_levels/3`); runtime session state does not apply it (see SECURITY_MODEL.md § Information Propagation).
+
 The trifecta check applies per-stage: at each agent in the pipeline, verify that the combination of its accumulated taint, accumulated sensitivity, and its own capability does not reach critical. Pipeline design should ensure that agents with high capability receive only low-taint inputs (through sanitization) or only low-sensitivity data (through redaction), breaking at least one leg of the trifecta.
 
 ### Design heuristic
