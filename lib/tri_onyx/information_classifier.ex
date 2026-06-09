@@ -137,8 +137,8 @@ defmodule TriOnyx.InformationClassifier do
   def classify_fuse_read(path) when is_binary(path) do
     clean_path = String.trim_leading(path, "/")
 
-    case TriOnyx.Workspace.read_risk_manifest() do
-      %{^clean_path => entry} ->
+    case TriOnyx.RiskManifest.lookup(clean_path) do
+      {:ok, entry} ->
         writer = Map.get(entry, "agent", "unknown")
 
         {:ok,
@@ -148,7 +148,7 @@ defmodule TriOnyx.InformationClassifier do
            reason: "fs_read: #{clean_path} (written by #{writer})"
          }}
 
-      _ ->
+      :error ->
         :unclassified
     end
   end
@@ -236,8 +236,8 @@ defmodule TriOnyx.InformationClassifier do
       # The risk manifest is updated on every FUSE-observed write, so it
       # is fresher than git history. Fall back to the Sc-Sensitivity git
       # trailer for files predating the manifest.
-      case TriOnyx.Workspace.read_risk_manifest() do
-        %{^rel_path => %{"sensitivity_level" => level}} when level in ~w(low medium high) ->
+      case TriOnyx.RiskManifest.lookup(rel_path) do
+        {:ok, %{"sensitivity_level" => level}} when level in ~w(low medium high) ->
           String.to_existing_atom(level)
 
         _ ->

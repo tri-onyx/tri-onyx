@@ -24,9 +24,9 @@ defmodule TriOnyx.Workspace.Committer do
 
   require Logger
 
+  alias TriOnyx.RiskManifest
   alias TriOnyx.Workspace
 
-  @manifest_path ".tri-onyx/risk-manifest.json"
   @default_debounce_ms 5_000
 
   # --- Client API ---
@@ -80,7 +80,7 @@ defmodule TriOnyx.Workspace.Committer do
           # Repeat write with unchanged labels — manifest already current.
           state
         else
-          Workspace.update_risk_manifest(agent_name, [path], taint, sensitivity)
+          RiskManifest.put(agent_name, [path], taint, sensitivity)
           %{state | dirty: Map.put(state.dirty, path, entry)}
         end
 
@@ -122,7 +122,7 @@ defmodule TriOnyx.Workspace.Committer do
         case Workspace.commit_session(
                agent,
                session_id,
-               [@manifest_path | paths],
+               paths,
                taint,
                sensitivity
              ) do

@@ -1,7 +1,7 @@
 defmodule TriOnyx.Workspace.CommitterTest do
   use ExUnit.Case, async: false
 
-  alias TriOnyx.Workspace
+  alias TriOnyx.RiskManifest
   alias TriOnyx.Workspace.Committer
 
   @moduletag :tmp_dir
@@ -24,6 +24,10 @@ defmodule TriOnyx.Workspace.CommitterTest do
         Application.delete_env(:tri_onyx, :workspace_dir)
       end
     end)
+
+    # The committer writes into the globally named RiskManifest instance.
+    RiskManifest.clear()
+    on_exit(fn -> RiskManifest.clear() end)
 
     name = :"committer_#{System.unique_integer([:positive])}"
     start_supervised!({Committer, name: name, debounce_ms: 60_000})
@@ -58,7 +62,7 @@ defmodule TriOnyx.Workspace.CommitterTest do
     # Cast is async — sync on the server before asserting.
     _ = :sys.get_state(committer)
 
-    manifest = Workspace.read_risk_manifest()
+    manifest = RiskManifest.snapshot()
     entry = manifest["agents/news/notes.md"]
     assert entry["taint_level"] == "high"
     assert entry["sensitivity_level"] == "medium"
@@ -81,7 +85,8 @@ defmodule TriOnyx.Workspace.CommitterTest do
     assert message =~ "Taint-Level: medium"
     assert message =~ "Sensitivity-Level: low"
 
-    # The manifest is committed alongside the written file.
+    # Only the written file is committed — the risk manifest lives in
+    # memory and is rebuilt from these commit trailers.
     {out, 0} =
       System.cmd("git", ["show", "--name-only", "--format=", "HEAD"],
         cd: repo,
@@ -89,7 +94,7 @@ defmodule TriOnyx.Workspace.CommitterTest do
       )
 
     assert out =~ "agents/news/notes.md"
-    assert out =~ ".tri-onyx/risk-manifest.json"
+    refute out =~ ".tri-onyx"
   end
 
   test "atomic-write temp files are ignored", %{repo: repo, committer: committer} do
@@ -107,7 +112,7 @@ defmodule TriOnyx.Workspace.CommitterTest do
     :ok = Committer.flush(committer)
 
     assert commit_count(repo) == 0
-    assert Workspace.read_risk_manifest() == %{}
+    assert RiskManifest.snapshot() == %{}
   end
 
   test "created-then-deleted paths do not block other commits",
@@ -145,7 +150,7 @@ defmodule TriOnyx.Workspace.CommitterTest do
 
     :ok = Committer.flush(committer)
 
-    manifest = Workspace.read_risk_manifest()
+    manifest = RiskManifest.snapshot()
     assert manifest["agents/news/early.md"]["taint_level"] == "low"
     assert manifest["agents/news/late.md"]["taint_level"] == "high"
 

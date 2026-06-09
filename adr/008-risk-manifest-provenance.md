@@ -1,6 +1,6 @@
 # ADR-008: Risk Manifest for File-Level Provenance Tracking
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-06-09 (manifest moved in-memory — see Amendment below)
 - **Date:** 2026-02-17
 - **Deciders:** Falense
 
@@ -122,3 +122,38 @@ Use the writing agent's worst-case taint and sensitivity (from its definition) r
 - **Negative:** The JSON manifest is a single file modified by every session completion. Concurrent sessions writing to the same workspace could race on manifest updates. Mitigated by the gateway serializing workspace commits per workspace.
 - **Negative:** The manifest grows linearly with the number of unique file paths written across all sessions. For long-lived workspaces with many files, the manifest becomes large. Mitigated by periodic pruning of entries for deleted files.
 - **Accepted trade-off:** The manifest records session-level taint/sensitivity per file, not per-line or per-block. An agent that is high-taint due to one tool call has all its file writes tagged as high-taint, even files unrelated to the tainted data. This is the conservative consequence of total taint propagation within LLM contexts — there is no way to know which outputs were influenced by which inputs.
+
+## Amendment (2026-06-09): the manifest is in-memory, derived from Git history
+
+The JSON file (`.tri-onyx/risk-manifest.json`) is retired. Two assumptions in the
+original decision did not hold up:
+
+1. **No consumer outside the gateway ever read the file.** The FUSE driver enforces
+   path policy only; read classification happens in the gateway. The "FUSE driver
+   reads it from the source directory" rationale was aspirational and never
+   implemented.
+2. **The file duplicated Git.** Every provenance commit already carries
+   `Taint-Level:`/`Sensitivity-Level:` trailers, so the manifest was a derived
+   cache — stored as a multi-megabyte pretty-printed JSON file that was re-read
+   and fully re-parsed on every FUSE read event and rewritten on every label
+   change. At ~70k entries this made each agent event cost hundreds of
+   milliseconds and starved the session process.
+
+The replacement (`TriOnyx.RiskManifest`):
+
+- **Git history is the durable record.** Provenance commits are unchanged. Human
+  reviews are now recorded as empty commits carrying one `Reviewed-Path:` trailer
+  per reviewed path (plus `Reviewed-By:`), instead of committing a manifest diff.
+- **Live state is an ETS table** owned by a gateway GenServer, rebuilt at boot
+  from one `git log --name-status` pass (newest first, first commit per path
+  wins, deletions drop the path, reviews overlay taint-low onto the underlying
+  write). Lookups on the agent-event hot path are O(1) and lock-free.
+- **Writers update both:** the `Workspace.Committer` (FUSE-observed writes) and
+  the email/calendar connectors put entries into ETS synchronously and queue
+  trailer-carrying commits, so the table and history stay consistent.
+- **Pruning is automatic:** a rebuild only reflects files that still exist in
+  history, eliminating the unbounded-growth negative above.
+- **Crash window:** label updates between a write observation and its debounced
+  commit are lost if the gateway dies; the `Workspace.Sweeper` still commits the
+  orphaned files (untrailered → unclassified). This replaces the previous
+  behaviour where the file could be ahead of Git.

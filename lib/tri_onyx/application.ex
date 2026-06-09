@@ -48,6 +48,10 @@ defmodule TriOnyx.Application do
       # 4b. BCP rate limiter — must start before Router
       TriOnyx.BCP.RateLimiter,
 
+      # 4c. Risk manifest — in-memory provenance store, rebuilt from
+      # workspace git history; must start before sessions and Committer
+      TriOnyx.RiskManifest,
+
       # 5. Agent session supervisor
       TriOnyx.AgentSupervisor,
 
@@ -73,7 +77,7 @@ defmodule TriOnyx.Application do
       # 9. Unified approval queue — human approval for BCP and action tools
       TriOnyx.BCP.ApprovalQueue,
 
-      # 10. Workspace committer — incremental provenance (manifest + debounced commits)
+      # 10. Workspace committer — incremental provenance (risk manifest + debounced commits)
       TriOnyx.Workspace.Committer,
 
       # 11. Workspace sweeper — periodic commit of non-FUSE changes

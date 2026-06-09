@@ -117,8 +117,6 @@ defmodule TriOnyx.Workspace do
     Map.put(context, :daily_memory, read_file_or_nil(daily_path))
   end
 
-  @manifest_path ".tri-onyx/risk-manifest.json"
-
   @doc """
   Commits modified workspace files after an agent session completes.
 
@@ -295,78 +293,6 @@ defmodule TriOnyx.Workspace do
   end
 
   @doc """
-  Updates the risk manifest with entries for the given paths.
-
-  The manifest lives at `.tri-onyx/risk-manifest.json` in the workspace and
-  maps file paths to `%{taint_level, sensitivity_level, risk_level, agent, updated_at}`.
-  Existing entries are merged (newer entries overwrite older ones for the same path).
-
-  The `risk_level` field is `max(taint, sensitivity)` for backward compatibility with
-  the FUSE driver during migration.
-
-  Returns `:ok` on success or `{:error, reason}` on failure.
-  """
-  @spec update_risk_manifest(String.t(), [String.t()], atom(), atom()) :: :ok | {:error, term()}
-  def update_risk_manifest(agent_name, paths, taint_level, sensitivity_level \\ :low) do
-    dir = workspace_dir()
-    manifest_abs = Path.join(dir, @manifest_path)
-
-    # Ensure .tri-onyx directory exists
-    File.mkdir_p!(Path.dirname(manifest_abs))
-
-    # Read existing manifest
-    existing = read_risk_manifest()
-
-    # Merge in new entries
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
-    risk_level = higher_of(taint_level, sensitivity_level)
-
-    updated =
-      Enum.reduce(paths, existing, fn path, acc ->
-        Map.put(acc, path, %{
-          "taint_level" => to_string(taint_level),
-          "sensitivity_level" => to_string(sensitivity_level),
-          "risk_level" => to_string(risk_level),
-          "agent" => agent_name,
-          "updated_at" => now
-        })
-      end)
-
-    # Write back
-    case Jason.encode(updated, pretty: true) do
-      {:ok, json} ->
-        File.write(manifest_abs, json)
-
-      {:error, reason} ->
-        Logger.error("Workspace: failed to encode risk manifest: #{inspect(reason)}")
-        {:error, {:encode_failed, reason}}
-    end
-  end
-
-  @doc """
-  Reads and parses the risk manifest from the workspace.
-
-  Returns a map of `%{path => %{taint_level, sensitivity_level, risk_level, agent, updated_at}}`,
-  or an empty map if the manifest does not exist.
-  """
-  @spec read_risk_manifest() :: map()
-  def read_risk_manifest do
-    dir = workspace_dir()
-    manifest_abs = Path.join(dir, @manifest_path)
-
-    case File.read(manifest_abs) do
-      {:ok, content} ->
-        case Jason.decode(content) do
-          {:ok, manifest} when is_map(manifest) -> manifest
-          _ -> %{}
-        end
-
-      {:error, _} ->
-        %{}
-    end
-  end
-
-  @doc """
   Detects atomic-write temp files created by Claude SDK's Write tool.
   These have patterns like "SOUL.md.tmp.50.1771023878427".
   """
@@ -379,82 +305,46 @@ defmodule TriOnyx.Workspace do
   @doc """
   Marks the given artifact paths as reviewed by a human.
 
-  Reads the current risk manifest, resets each path's taint to `"low"` but
-  leaves sensitivity unchanged, writes the manifest back, and commits the change
-  with appropriate trailers.
+  Resets each path's taint to `"low"` in the live risk manifest but leaves
+  sensitivity unchanged, then records the review in workspace git history
+  as an empty commit carrying one `Reviewed-Path` trailer per path — the
+  durable record `TriOnyx.RiskManifest` replays when rebuilding from
+  history.
 
   Returns `{:ok, paths}` on success or `{:error, reason}` on failure.
   """
   @spec review_artifacts([String.t()], String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def review_artifacts(paths, reviewer) when is_list(paths) and is_binary(reviewer) do
-    dir = workspace_dir()
-    safe = git_safe_args(dir)
-    clear_stale_index_lock(dir)
-    manifest_abs = Path.join(dir, @manifest_path)
+    if Enum.any?(paths, &(String.contains?(&1, "\n") or &1 == "")) do
+      {:error, :invalid_path}
+    else
+      dir = workspace_dir()
+      safe = git_safe_args(dir)
+      clear_stale_index_lock(dir)
 
-    # Ensure .tri-onyx directory exists
-    File.mkdir_p!(Path.dirname(manifest_abs))
+      :ok = TriOnyx.RiskManifest.review(paths, reviewer)
 
-    # Read existing manifest and update reviewed paths
-    existing = read_risk_manifest()
-    now = DateTime.utc_now() |> DateTime.to_iso8601()
+      trailers =
+        ["Taint-Level: low", "Reviewed-By: #{reviewer}"] ++
+          Enum.map(paths, &"Reviewed-Path: #{&1}")
 
-    updated =
-      Enum.reduce(paths, existing, fn path, acc ->
-        entry = Map.get(acc, path, %{})
-        # Reset taint to low, keep sensitivity unchanged
-        sensitivity = Map.get(entry, "sensitivity_level", "low")
-        risk_level = sensitivity
+      commit_msg = "review by #{reviewer}\n\n" <> Enum.join(trailers, "\n")
+      author = "#{reviewer} <#{reviewer}@tri_onyx>"
 
-        Map.put(acc, path, Map.merge(entry, %{
-          "taint_level" => "low",
-          "sensitivity_level" => sensitivity,
-          "risk_level" => risk_level,
-          "reviewed_by" => reviewer,
-          "reviewed_at" => now
-        }))
-      end)
+      case System.cmd(
+             "git",
+             safe ++ ["commit", "--allow-empty", "--author=#{author}", "-m", commit_msg],
+             cd: dir,
+             stderr_to_stdout: true,
+             env: committer_env()
+           ) do
+        {_, 0} ->
+          {:ok, paths}
 
-    # Write manifest
-    case Jason.encode(updated, pretty: true) do
-      {:ok, json} ->
-        :ok = File.write(manifest_abs, json)
-
-        # Stage and commit
-        add_args = safe ++ ["add", @manifest_path]
-
-        case System.cmd("git", add_args, cd: dir, stderr_to_stdout: true) do
-          {_, 0} ->
-            commit_msg = "review by #{reviewer}\n\nTaint-Level: low"
-            author = "#{reviewer} <#{reviewer}@tri_onyx>"
-
-            case System.cmd(
-                   "git",
-                   safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
-                   cd: dir,
-                   stderr_to_stdout: true,
-                   env: committer_env()
-                 ) do
-              {_, 0} ->
-                {:ok, paths}
-
-              {_, 1} ->
-                # No changes to commit (manifest unchanged)
-                {:ok, paths}
-
-              {output, _} ->
-                Logger.error("Workspace: review commit failed: #{output}")
-                {:error, {:commit_failed, output}}
-            end
-
-          {output, _} ->
-            Logger.error("Workspace: review git add failed: #{output}")
-            {:error, {:add_failed, output}}
-        end
-
-      {:error, reason} ->
-        Logger.error("Workspace: failed to encode risk manifest: #{inspect(reason)}")
-        {:error, {:encode_failed, reason}}
+        {output, _} ->
+          Logger.error("Workspace: review commit failed: #{output}")
+          {:error, {:commit_failed, output}}
+      end
     end
   end
 
@@ -631,12 +521,6 @@ defmodule TriOnyx.Workspace do
 
   defp build_commit_message(agent_name, session_id, taint_level, sensitivity_level) do
     "#{agent_name} session #{session_id}\n\nTaint-Level: #{taint_level}\nSensitivity-Level: #{sensitivity_level}"
-  end
-
-  @spec higher_of(atom(), atom()) :: atom()
-  defp higher_of(a, b) do
-    rank = %{low: 0, medium: 1, high: 2}
-    if (rank[a] || 0) >= (rank[b] || 0), do: a, else: b
   end
 
   @spec do_initialize(String.t()) :: :ok | {:error, term()}

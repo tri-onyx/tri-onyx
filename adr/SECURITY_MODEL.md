@@ -164,7 +164,7 @@ An agent topology can have Biba violations without BLP violations and vice versa
 
 ## Risk Manifest
 
-Every file written by an agent is tagged in `.tri-onyx/risk-manifest.json` with:
+Every file written by an agent is tagged in the risk manifest (`TriOnyx.RiskManifest`, an in-memory ETS store in the gateway) with:
 
 - The **taint level** of the writing agent's session at the time of the write
 - The **sensitivity level** of the writing agent's session at the time of the write
@@ -172,7 +172,7 @@ Every file written by an agent is tagged in `.tri-onyx/risk-manifest.json` with:
 - **When** it was last updated
 - Whether a **human has reviewed** it (resets taint to low; sensitivity unchanged)
 
-The manifest is updated synchronously per write event by `Workspace.Committer`, so concurrently running sessions resolve fresh labels on read. The committer batches the corresponding git commits on a short debounce; commits include `Taint-Level:` and `Sensitivity-Level:` trailers so the full provenance history is preserved in version control.
+Workspace git history is the durable record: provenance commits carry `Taint-Level:` and `Sensitivity-Level:` trailers, and human reviews are recorded as empty commits with `Reviewed-Path:` trailers. The in-memory store is rebuilt from that history at gateway boot and kept current at runtime — `Workspace.Committer` updates it synchronously per write event (so concurrently running sessions resolve fresh labels on read) and batches the corresponding trailer-carrying git commits on a short debounce. See ADR-008 (amended).
 
 ## FUSE Role
 

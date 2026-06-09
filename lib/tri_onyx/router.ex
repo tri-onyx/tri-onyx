@@ -48,6 +48,7 @@ defmodule TriOnyx.Router do
   alias TriOnyx.ConnectorHandler
   alias TriOnyx.EventBus
   alias TriOnyx.GraphAnalyzer
+  alias TriOnyx.RiskManifest
   alias TriOnyx.RiskScorer
   alias TriOnyx.SessionLogger
   alias TriOnyx.TriggerRouter
@@ -993,7 +994,7 @@ defmodule TriOnyx.Router do
 
   get "/graph/analysis" do
     definitions = TriggerRouter.list_agents()
-    manifest = Workspace.read_risk_manifest()
+    manifest = RiskManifest.snapshot()
 
     # Build two-axis worst-case levels, override with live session data
     all_defs = Map.new(definitions, fn d -> {d.name, d} end)
@@ -1351,7 +1352,7 @@ defmodule TriOnyx.Router do
   get "/api/workspace/tree" do
     dir = Workspace.workspace_dir()
     safe = Workspace.git_safe_args(dir)
-    manifest = Workspace.read_risk_manifest()
+    manifest = RiskManifest.snapshot()
 
     # Get git status (porcelain format, NUL-delimited to avoid quoted paths)
     git_status_map =
@@ -1411,7 +1412,7 @@ defmodule TriOnyx.Router do
     else
       dir = Workspace.workspace_dir()
       safe = Workspace.git_safe_args(dir)
-      manifest = Workspace.read_risk_manifest()
+      manifest = RiskManifest.snapshot()
       entry = Map.get(manifest, path, %{})
 
       # Git status for this file
