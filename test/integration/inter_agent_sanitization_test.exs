@@ -9,8 +9,9 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
   - Messages with oversized strings are rejected
   - Schema validation strips unknown fields
   - Self-messages are rejected
-  - Invalid message structures are rejected
-  - The Sanitizer enforces all structural limits
+
+  The Sanitizer's structural limits and message validation edge cases are
+  covered by the unit tests (sanitizer_test.exs, inter_agent_test.exs).
   """
   use ExUnit.Case
 
@@ -105,12 +106,6 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
       assert {:error, :sanitization_failed} = InterAgent.sanitize(message.payload)
     end
 
-    test "rejects deeply nested payload" do
-      deep = %{"a" => %{"b" => %{"c" => %{"d" => %{"e" => %{"f" => "too deep"}}}}}}
-
-      assert {:error, _} = Sanitizer.sanitize(deep)
-    end
-
     test "rejects self-messages" do
       message = %{
         from: "sender-agent",
@@ -120,15 +115,6 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
       }
 
       assert {:error, :self_message} = InterAgent.validate_message(message)
-    end
-
-    test "rejects messages with empty agent names" do
-      message = %{from: "", to: "receiver-agent", message_type: "test", payload: %{}}
-      assert {:error, {:invalid_field, :from, _}} = InterAgent.validate_message(message)
-    end
-
-    test "rejects invalid message structure" do
-      assert {:error, :invalid_message_structure} = InterAgent.validate_message(%{only: "partial"})
     end
   end
 
@@ -165,51 +151,6 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
 
       assert {:ok, result} = Sanitizer.sanitize_with_schema(payload, schema)
       assert result == %{"required" => "present"}
-    end
-  end
-
-  describe "sanitizer structural limits" do
-    test "list length limit enforced" do
-      long_list = Enum.to_list(1..101)
-      assert {:error, {:list_too_long, _}} = Sanitizer.sanitize(%{"items" => long_list})
-    end
-
-    test "map key count limit enforced" do
-      big_map = 1..51 |> Enum.map(fn i -> {"k#{i}", i} end) |> Map.new()
-      assert {:error, {:too_many_keys, _}} = Sanitizer.sanitize(big_map)
-    end
-
-    test "key length limit enforced" do
-      long_key = String.duplicate("x", 129)
-      assert {:error, {:key_too_long, _}} = Sanitizer.sanitize(%{long_key => "v"})
-    end
-
-    test "string length limit enforced" do
-      long_str = String.duplicate("a", 1025)
-      assert {:error, {:string_too_long, _}} = Sanitizer.sanitize(%{"data" => long_str})
-    end
-
-    test "depth limit enforced" do
-      deep = %{"a" => %{"b" => %{"c" => %{"d" => %{"e" => %{"f" => "deep"}}}}}}
-      assert {:error, {:depth_exceeded, _}} = Sanitizer.sanitize(deep)
-    end
-
-    test "values at exact limits pass" do
-      # Exactly 1024 bytes
-      max_str = String.duplicate("x", 1024)
-      assert {:ok, _} = Sanitizer.sanitize(%{"data" => max_str})
-
-      # Exactly 100 items
-      max_list = Enum.to_list(1..100)
-      assert {:ok, _} = Sanitizer.sanitize(%{"items" => max_list})
-
-      # Exactly 50 keys
-      max_map = 1..50 |> Enum.map(fn i -> {"k#{i}", i} end) |> Map.new()
-      assert {:ok, _} = Sanitizer.sanitize(max_map)
-
-      # Exactly 5 levels deep
-      max_depth = %{"a" => %{"b" => %{"c" => %{"d" => %{"e" => "ok"}}}}}
-      assert {:ok, _} = Sanitizer.sanitize(max_depth)
     end
   end
 end

@@ -90,45 +90,9 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     end
   end
 
-  # ── Free-text taint propagation (no step-down) ────────────────────────
-
-  describe "free-text taint propagation (no step-down)" do
-    test "sanitized inter-agent message from high-taint sender stays high" do
-      result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: :high, sensitivity: :low})
-      assert %{taint: :high} = result
-    end
-
-    test "sanitized inter-agent message from medium-taint sender stays medium" do
-      result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: :medium, sensitivity: :low})
-      assert %{taint: :medium} = result
-    end
-
-    test "sanitized inter-agent message from low-taint sender stays low" do
-      result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: :low, sensitivity: :low})
-      assert %{taint: :low} = result
-    end
-
-    test "raw inter-agent message from high-taint sender stays high" do
-      result = InformationClassifier.classify_inter_agent(:raw, %{taint: :high, sensitivity: :low})
-      assert %{taint: :high} = result
-    end
-
-    test "sanitization does NOT step down taint -- all levels preserved" do
-      for level <- [:low, :medium, :high] do
-        result = InformationClassifier.classify_inter_agent(:sanitized, %{taint: level, sensitivity: :low})
-
-        assert result.taint == level,
-               "expected taint #{level} to pass through sanitized, got #{result.taint}"
-      end
-    end
-
-    test "classify_inter_agent with full sender map preserves both axes" do
-      sender = %{taint: :high, sensitivity: :medium}
-      result = InformationClassifier.classify_inter_agent(:sanitized, sender)
-      assert result.taint == :high
-      assert result.sensitivity == :medium
-    end
-  end
+  # Free-text (inter-agent) taint propagation is covered by the unit tests
+  # in information_classifier_test.exs; the BCP vs free-text contrast section
+  # below keeps the integration-level comparison.
 
   # ── Context field ────────────────────────────────────────────────────
 
@@ -445,13 +409,6 @@ defmodule TriOnyx.Integration.BCPTaintTest do
         InformationClassifier.classify_inter_agent(:sanitized, %{taint: :medium, sensitivity: :low})
 
       assert freetext_result.taint == :medium
-    end
-
-    test "higher_level correctly compares taint levels" do
-      assert InformationClassifier.higher_level(:low, :high) == :high
-      assert InformationClassifier.higher_level(:high, :low) == :high
-      assert InformationClassifier.higher_level(:medium, :medium) == :medium
-      assert InformationClassifier.higher_level(:low, :low) == :low
     end
 
     test "BCP taint is always strictly lower than free-text for same sender" do
