@@ -183,7 +183,7 @@ These checks use the risk manifest. Even if an agent's glob pattern would allow 
 
 The graph analyzer computes transitive risk propagation across the full agent topology. Given agent A → B → C (where → means "writes files read by"), it traces how taint and sensitivity flow through the chain and identifies the **maximum input risk** each agent faces from all upstream sources on each axis independently. Taint propagates at full strength (except across BCP edges, where it is stepped down). Sensitivity is stepped down by one level at every hop, reflecting the decay principle described above.
 
-This powers the visualization in `graph.html`, which renders agents as nodes (colored by taint level, bordered by sensitivity level, sized by effective risk) connected by directed edges showing information flow. The Biba and Bell-LaPadula toggles highlight violations in real time.
+This powers the graph visualization in the web frontend, which renders agents as nodes (colored by taint level, bordered by sensitivity level, sized by effective risk) connected by directed edges showing information flow. The Biba and Bell-LaPadula toggles highlight violations in real time.
 
 ## Gateway as Secret Holder
 

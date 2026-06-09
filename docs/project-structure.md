@@ -72,11 +72,11 @@ connector/                    Chat platform bridge (Python)
     base.py                         Abstract adapter interface
     matrix.py                       Matrix (Element) adapter
 
-webgui/                       Web dashboard (static HTML)
-  frontend.html                 Agent overview and control panel
-  graph.html                    Agent topology visualization
-  matrix.html                   Classification matrix view
-  log-viewer.html               Session log browser
+frontend/                     Web dashboard (Django)
+  trionyx_ui/gateway.py         HTTP client for the gateway API
+  trionyx_ui/views/             Dashboard, chat, graph, builder, approvals views
+  trionyx_ui/templates/         HTML templates
+  trionyx_ui/static/            CSS and JS assets
 
 scripts/                      Utility scripts
   test-agent.py                 End-to-end test harness
