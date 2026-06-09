@@ -84,8 +84,7 @@ defmodule TriOnyx.Router do
       end
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(response))
+    |> send_json(status, response)
   end
 
   # --- Legacy Webhook Trigger (deprecated — use /hooks/:endpoint_id) ---
@@ -96,8 +95,7 @@ defmodule TriOnyx.Router do
     {status, response} = Webhook.handle(agent_name, body)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(response))
+    |> send_json(status, response)
   end
 
   # --- External Message Trigger ---
@@ -108,8 +106,7 @@ defmodule TriOnyx.Router do
     {status, response} = ExternalMessage.handle(body, api_key)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(response))
+    |> send_json(status, response)
   end
 
   # --- Agent Management ---
@@ -136,14 +133,13 @@ defmodule TriOnyx.Router do
       |> Enum.sort()
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{
+    |> send_json(200, %{
       "fields" => schema.fields,
       "groups" => schema.groups,
       "tool_groups" => tool_groups,
       "known_tools" => TriOnyx.ToolRegistry.known_tools(),
       "known_agents" => known_agents
-    }))
+    })
   end
 
   get "/agents" do
@@ -157,45 +153,23 @@ defmodule TriOnyx.Router do
         active_count = Enum.count(sessions, fn s -> s.definition.name == definition.name end)
         logged_sessions = SessionLogger.list_sessions(definition.name)
 
-        base = %{
-          "name" => definition.name,
-          "description" => definition.description,
-          "model" => definition.model,
-          "tools" => definition.tools,
-          "network" => format_network(definition.network),
-          "session_count" => length(logged_sessions),
-          "active_session_count" => active_count
-        }
+        base =
+          definition
+          |> serialize_definition_summary()
+          |> Map.merge(%{
+            "session_count" => length(logged_sessions),
+            "active_session_count" => active_count
+          })
 
         if session do
-          Map.merge(base, %{
-            "session_id" => session.id,
-            "status" => to_string(session.status),
-            "taint_level" => to_string(session.taint_level),
-            "sensitivity_level" => to_string(session.sensitivity_level),
-            "information_level" => to_string(session.information_level),
-            "taint_status" => deprecated_taint_status(session.taint_level),
-            "input_risk" => to_string(session.input_risk),
-            "effective_risk" => RiskScorer.format_risk(session.effective_risk),
-            "started_at" => DateTime.to_iso8601(session.started_at)
-          })
+          Map.merge(base, session_risk_fields(session))
         else
-          wc_taint = GraphAnalyzer.worst_case_taint(definition, all_defs)
-          wc_sensitivity = GraphAnalyzer.worst_case_sensitivity(definition)
-
-          Map.merge(base, %{
-            "status" => "inactive",
-            "taint_level" => to_string(wc_taint),
-            "sensitivity_level" => to_string(wc_sensitivity),
-            "information_level" =>
-              to_string(InformationClassifier.higher_level(wc_taint, wc_sensitivity))
-          })
+          Map.merge(base, inactive_risk_fields(definition, all_defs))
         end
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"agents" => agent_list}))
+    |> send_json(200, %{"agents" => agent_list})
   end
 
   get "/agents/:name" do
@@ -206,19 +180,17 @@ defmodule TriOnyx.Router do
         session = List.first(agent_sessions)
         all_defs = Map.new(TriggerRouter.list_agents(), fn d -> {d.name, d} end)
 
-        detail = %{
-          "name" => definition.name,
-          "description" => definition.description,
-          "model" => definition.model,
-          "tools" => definition.tools,
-          "network" => format_network(definition.network),
-          "fs_read" => definition.fs_read,
-          "fs_write" => definition.fs_write,
-          "send_to" => definition.send_to,
-          "receive_from" => definition.receive_from,
-          "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
-          "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network, definition))
-        }
+        detail =
+          definition
+          |> serialize_definition_summary()
+          |> Map.merge(%{
+            "fs_read" => definition.fs_read,
+            "fs_write" => definition.fs_write,
+            "send_to" => definition.send_to,
+            "receive_from" => definition.receive_from,
+            "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
+            "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network, definition))
+          })
 
         active_sessions =
           Enum.map(agent_sessions, fn s ->
@@ -236,39 +208,19 @@ defmodule TriOnyx.Router do
 
         detail =
           if session do
-            Map.merge(detail, %{
-              "session_id" => session.id,
-              "status" => to_string(session.status),
-              "taint_level" => to_string(session.taint_level),
-              "sensitivity_level" => to_string(session.sensitivity_level),
-              "information_level" => to_string(session.information_level),
-              "information_sources" => session.information_sources,
-              "taint_status" => deprecated_taint_status(session.taint_level),
-              "input_risk" => to_string(session.input_risk),
-              "effective_risk" => RiskScorer.format_risk(session.effective_risk),
-              "started_at" => DateTime.to_iso8601(session.started_at)
-            })
+            detail
+            |> Map.merge(session_risk_fields(session))
+            |> Map.put("information_sources", session.information_sources)
           else
-            wc_taint = GraphAnalyzer.worst_case_taint(definition, all_defs)
-            wc_sensitivity = GraphAnalyzer.worst_case_sensitivity(definition)
-
-            Map.merge(detail, %{
-              "status" => "inactive",
-              "taint_level" => to_string(wc_taint),
-              "sensitivity_level" => to_string(wc_sensitivity),
-              "information_level" =>
-                to_string(InformationClassifier.higher_level(wc_taint, wc_sensitivity))
-            })
+            Map.merge(detail, inactive_risk_fields(definition, all_defs))
           end
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(detail))
+        |> send_json(200, detail)
 
       :error ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        |> send_json(404, %{"error" => "agent_not_found", "name" => name})
     end
   end
 
@@ -276,7 +228,7 @@ defmodule TriOnyx.Router do
     if not valid_agent_name?(name) do
       send_invalid_name(conn)
     else
-      agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+      agents_dir = TriOnyx.agents_dir()
       file_path = Path.join(agents_dir, "#{name}.md")
 
       if File.regular?(file_path) do
@@ -311,24 +263,21 @@ defmodule TriOnyx.Router do
             }
 
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(200, Jason.encode!(%{
+            |> send_json(200, %{
               "frontmatter" => frontmatter,
               "system_prompt" => definition.system_prompt
-            }))
+            })
 
           {:error, reason} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(500, Jason.encode!(%{
+            |> send_json(500, %{
               "error" => "parse_failed",
               "message" => "Definition file exists but failed to parse: #{inspect(reason)}"
-            }))
+            })
         end
       else
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        |> send_json(404, %{"error" => "agent_not_found", "name" => name})
       end
     end
   end
@@ -340,13 +289,11 @@ defmodule TriOnyx.Router do
         assembled = TriOnyx.Workspace.PromptAssembler.assemble(definition, workspace_context)
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"context" => assembled}))
+        |> send_json(200, %{"context" => assembled})
 
       :error ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        |> send_json(404, %{"error" => "agent_not_found", "name" => name})
     end
   end
 
@@ -359,44 +306,37 @@ defmodule TriOnyx.Router do
 
         case AgentDefinition.parse(markdown) do
           {:ok, definition} ->
-            agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+            agents_dir = TriOnyx.agents_dir()
             file_path = Path.join(agents_dir, "#{definition.name}.md")
 
             if File.regular?(file_path) do
               conn
-              |> put_resp_content_type("application/json")
-              |> send_resp(409, Jason.encode!(%{
+              |> send_json(409, %{
                 "error" => "already_exists",
                 "message" => "Agent '#{definition.name}' already exists"
-              }))
+              })
             else
               File.write!(file_path, markdown)
               TriggerRouter.load_agents()
 
               conn
-              |> put_resp_content_type("application/json")
-              |> send_resp(201, Jason.encode!(%{
+              |> send_json(201, %{
                 "status" => "created",
                 "name" => definition.name
-              }))
+              })
             end
 
           {:error, reason} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(400, Jason.encode!(%{
+            |> send_json(400, %{
               "error" => "validation_failed",
               "details" => [AgentDefinition.format_error(reason)]
-            }))
+            })
         end
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{
-          "error" => "invalid_body",
-          "message" => "Expected JSON object"
-        }))
+        |> bad_request("Expected JSON object")
     end
   end
 
@@ -408,13 +348,12 @@ defmodule TriOnyx.Router do
 
       case Jason.decode(body) do
         {:ok, params} when is_map(params) ->
-          agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+          agents_dir = TriOnyx.agents_dir()
           file_path = Path.join(agents_dir, "#{name}.md")
 
           if not File.regular?(file_path) do
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+            |> send_json(404, %{"error" => "agent_not_found", "name" => name})
           else
             params = Map.put(params, "name", name)
             markdown = AgentDefinition.to_markdown(params)
@@ -425,29 +364,23 @@ defmodule TriOnyx.Router do
                 TriggerRouter.load_agents()
 
                 conn
-                |> put_resp_content_type("application/json")
-                |> send_resp(200, Jason.encode!(%{
+                |> send_json(200, %{
                   "status" => "updated",
                   "name" => name
-                }))
+                })
 
               {:error, reason} ->
                 conn
-                |> put_resp_content_type("application/json")
-                |> send_resp(400, Jason.encode!(%{
+                |> send_json(400, %{
                   "error" => "validation_failed",
                   "details" => [AgentDefinition.format_error(reason)]
-                }))
+                })
             end
           end
 
         _ ->
           conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(400, Jason.encode!(%{
-            "error" => "invalid_body",
-            "message" => "Expected JSON object"
-          }))
+          |> bad_request("Expected JSON object")
       end
     end
   end
@@ -456,31 +389,28 @@ defmodule TriOnyx.Router do
     if not valid_agent_name?(name) do
       send_invalid_name(conn)
     else
-      agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+      agents_dir = TriOnyx.agents_dir()
       file_path = Path.join(agents_dir, "#{name}.md")
 
       if not File.regular?(file_path) do
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        |> send_json(404, %{"error" => "agent_not_found", "name" => name})
       else
         sessions = AgentSupervisor.list_sessions()
         active = Enum.any?(sessions, fn s -> s.definition.name == name end)
 
         if active do
           conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(409, Jason.encode!(%{
+          |> send_json(409, %{
             "error" => "agent_has_active_sessions",
             "message" => "Stop all sessions before deleting"
-          }))
+          })
         else
           File.rm!(file_path)
           TriggerRouter.load_agents()
 
           conn
-          |> put_resp_content_type("application/json")
-          |> send_resp(200, Jason.encode!(%{"status" => "deleted", "name" => name}))
+          |> send_json(200, %{"status" => "deleted", "name" => name})
         end
       end
     end
@@ -497,32 +427,29 @@ defmodule TriOnyx.Router do
              ) do
           {:ok, pid} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(
+            |> send_json(
               201,
-              Jason.encode!(%{
+              %{
                 "status" => "started",
                 "agent" => name,
                 "pid" => inspect(pid)
-              })
+              }
             )
 
           {:error, reason} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(
+            |> send_json(
               500,
-              Jason.encode!(%{
+              %{
                 "error" => "start_failed",
                 "reason" => inspect(reason)
-              })
+              }
             )
         end
 
       :error ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "agent_not_found", "name" => name}))
+        |> send_json(404, %{"error" => "agent_not_found", "name" => name})
     end
   end
 
@@ -547,18 +474,16 @@ defmodule TriOnyx.Router do
         AgentSupervisor.stop_session(AgentSupervisor, pid, reason)
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"status" => "stopped", "agent" => name}))
+        |> send_json(200, %{"status" => "stopped", "agent" => name})
 
       :error ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           404,
-          Jason.encode!(%{
+          %{
             "error" => "no_active_session",
             "agent" => name
-          })
+          }
         )
     end
   end
@@ -584,43 +509,33 @@ defmodule TriOnyx.Router do
             case AgentSession.send_prompt(pid, content) do
               :ok ->
                 conn
-                |> put_resp_content_type("application/json")
-                |> send_resp(200, Jason.encode!(%{"status" => "sent", "agent" => name}))
+                |> send_json(200, %{"status" => "sent", "agent" => name})
 
               {:error, :not_ready} ->
                 conn
-                |> put_resp_content_type("application/json")
-                |> send_resp(
+                |> send_json(
                   409,
-                  Jason.encode!(%{
+                  %{
                     "error" => "not_ready",
                     "message" => "Agent session is not in ready state"
-                  })
+                  }
                 )
             end
 
           :error ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(
+            |> send_json(
               404,
-              Jason.encode!(%{
+              %{
                 "error" => "no_active_session",
                 "agent" => name
-              })
+              }
             )
         end
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          400,
-          Jason.encode!(%{
-            "error" => "invalid_body",
-            "message" => "Expected JSON with \"content\" field"
-          })
-        )
+        |> bad_request("Expected JSON with \"content\" field")
     end
   end
 
@@ -687,13 +602,11 @@ defmodule TriOnyx.Router do
         {:ok, entries} = AuditLog.read_entries(since_date)
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"entries" => entries, "count" => length(entries)}))
+        |> send_json(200, %{"entries" => entries, "count" => length(entries)})
 
       {:error, message} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{"error" => "invalid_date", "message" => message}))
+        |> send_json(400, %{"error" => "invalid_date", "message" => message})
     end
   end
 
@@ -710,31 +623,22 @@ defmodule TriOnyx.Router do
             AuditLog.log_human_review(reviewer, updated_paths)
 
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(200, Jason.encode!(%{"status" => "reviewed", "paths" => updated_paths}))
+            |> send_json(200, %{"status" => "reviewed", "paths" => updated_paths})
 
           {:error, reason} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(
+            |> send_json(
               500,
-              Jason.encode!(%{
+              %{
                 "error" => "review_failed",
                 "reason" => inspect(reason)
-              })
+              }
             )
         end
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          400,
-          Jason.encode!(%{
-            "error" => "invalid_body",
-            "message" => "Expected JSON with \"paths\" (list) and \"reviewer\" (string) fields"
-          })
-        )
+        |> bad_request("Expected JSON with \"paths\" (list) and \"reviewer\" (string) fields")
     end
   end
 
@@ -745,13 +649,12 @@ defmodule TriOnyx.Router do
     enabled = Scheduler.enabled?()
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    |> send_json(
       200,
-      Jason.encode!(%{
+      %{
         "heartbeats" => heartbeats,
         "enabled" => enabled
-      })
+      }
     )
   end
 
@@ -763,19 +666,11 @@ defmodule TriOnyx.Router do
         :ok = Scheduler.set_enabled(enabled)
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"enabled" => enabled}))
+        |> send_json(200, %{"enabled" => enabled})
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          400,
-          Jason.encode!(%{
-            "error" => "invalid_body",
-            "message" => "Expected JSON with boolean \"enabled\" field"
-          })
-        )
+        |> bad_request("Expected JSON with boolean \"enabled\" field")
     end
   end
 
@@ -788,26 +683,18 @@ defmodule TriOnyx.Router do
         :ok = Scheduler.schedule_heartbeat(agent_name, interval_ms)
 
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "status" => "scheduled",
             "agent_name" => agent_name,
             "interval_ms" => interval_ms
-          })
+          }
         )
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
-          400,
-          Jason.encode!(%{
-            "error" => "invalid_body",
-            "message" => "Expected JSON with positive integer \"interval_ms\" field"
-          })
-        )
+        |> bad_request("Expected JSON with positive integer \"interval_ms\" field")
     end
   end
 
@@ -815,18 +702,16 @@ defmodule TriOnyx.Router do
     case Scheduler.trigger_heartbeat(agent_name) do
       {:ok, _pid} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"status" => "triggered", "agent_name" => agent_name}))
+        |> send_json(200, %{"status" => "triggered", "agent_name" => agent_name})
 
       {:error, reason} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           500,
-          Jason.encode!(%{
+          %{
             "error" => "trigger_failed",
             "reason" => inspect(reason)
-          })
+          }
         )
     end
   end
@@ -835,18 +720,16 @@ defmodule TriOnyx.Router do
     case Scheduler.cancel_heartbeat(agent_name) do
       :ok ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"status" => "cancelled", "agent_name" => agent_name}))
+        |> send_json(200, %{"status" => "cancelled", "agent_name" => agent_name})
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           404,
-          Jason.encode!(%{
+          %{
             "error" => "not_found",
             "agent_name" => agent_name
-          })
+          }
         )
     end
   end
@@ -869,29 +752,26 @@ defmodule TriOnyx.Router do
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"approvals" => serialized}))
+    |> send_json(200, %{"approvals" => serialized})
   end
 
   post "/bcp/approvals/:id/approve" do
     case ApprovalQueue.approve(id) do
       {:ok, item} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "status" => "approved",
             "id" => item.id,
             "from_agent" => item.from_agent,
             "to_agent" => item.to_agent
-          })
+          }
         )
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -907,22 +787,20 @@ defmodule TriOnyx.Router do
     case ApprovalQueue.reject(id, reason) do
       {:ok, item} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "status" => "rejected",
             "id" => item.id,
             "reason" => reason,
             "from_agent" => item.from_agent,
             "to_agent" => item.to_agent
-          })
+          }
         )
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -947,29 +825,26 @@ defmodule TriOnyx.Router do
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"approvals" => serialized}))
+    |> send_json(200, %{"approvals" => serialized})
   end
 
   post "/actions/approvals/:id/approve" do
     case ApprovalQueue.approve(id) do
       {:ok, item} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "status" => "approved",
             "id" => item.id,
             "agent_name" => Map.get(item, :agent_name, ""),
             "tool_name" => Map.get(item, :tool_name, "")
-          })
+          }
         )
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -985,22 +860,20 @@ defmodule TriOnyx.Router do
     case ApprovalQueue.reject(id, reason) do
       {:ok, item} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "status" => "rejected",
             "id" => item.id,
             "reason" => reason,
             "agent_name" => Map.get(item, :agent_name, ""),
             "tool_name" => Map.get(item, :tool_name, "")
-          })
+          }
         )
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -1016,8 +889,7 @@ defmodule TriOnyx.Router do
     connectors = ConnectorHandler.list_connectors()
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"connectors" => connectors}))
+    |> send_json(200, %{"connectors" => connectors})
   end
 
   # --- Classification Matrix ---
@@ -1107,14 +979,13 @@ defmodule TriOnyx.Router do
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    |> send_json(
       200,
-      Jason.encode!(%{
+      %{
         "tools" => tools,
         "triggers" => triggers,
         "risk_matrix" => risk_matrix
-      })
+      }
     )
   end
 
@@ -1251,15 +1122,14 @@ defmodule TriOnyx.Router do
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    |> send_json(
       200,
-      Jason.encode!(%{
+      %{
         "agents" => enriched_analysis,
         "edges" => flat_edges,
         "biba_violations" => biba,
         "blp_violations" => blp
-      })
+      }
     )
   end
 
@@ -1269,13 +1139,12 @@ defmodule TriOnyx.Router do
     endpoints = WebhookRegistry.list()
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    |> send_json(
       200,
-      Jason.encode!(%{
+      %{
         "endpoints" => Enum.map(endpoints, &WebhookEndpoint.to_public_map/1),
         "count" => length(endpoints)
-      })
+      }
     )
   end
 
@@ -1292,25 +1161,22 @@ defmodule TriOnyx.Router do
               |> Map.put("signing_secret", endpoint.signing_secret)
 
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(201, Jason.encode!(response))
+            |> send_json(201, response)
 
           {:error, reason} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(
+            |> send_json(
               400,
-              Jason.encode!(%{
+              %{
                 "error" => "validation_failed",
                 "reason" => inspect(reason)
-              })
+              }
             )
         end
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{"error" => "invalid_json"}))
+        |> send_json(400, %{"error" => "invalid_json"})
     end
   end
 
@@ -1318,13 +1184,11 @@ defmodule TriOnyx.Router do
     case WebhookRegistry.lookup(id) do
       {:ok, endpoint} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(WebhookEndpoint.to_public_map(endpoint)))
+        |> send_json(200, WebhookEndpoint.to_public_map(endpoint))
 
       :error ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -1336,19 +1200,16 @@ defmodule TriOnyx.Router do
         case WebhookRegistry.update(id, params) do
           {:ok, endpoint} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(200, Jason.encode!(WebhookEndpoint.to_public_map(endpoint)))
+            |> send_json(200, WebhookEndpoint.to_public_map(endpoint))
 
           {:error, :not_found} ->
             conn
-            |> put_resp_content_type("application/json")
-            |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+            |> send_json(404, %{"error" => "not_found", "id" => id})
         end
 
       _ ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(400, Jason.encode!(%{"error" => "invalid_json"}))
+        |> send_json(400, %{"error" => "invalid_json"})
     end
   end
 
@@ -1356,13 +1217,11 @@ defmodule TriOnyx.Router do
     case WebhookRegistry.delete(id) do
       :ok ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(200, Jason.encode!(%{"status" => "deleted", "id" => id}))
+        |> send_json(200, %{"status" => "deleted", "id" => id})
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -1370,23 +1229,21 @@ defmodule TriOnyx.Router do
     case WebhookRegistry.rotate_secret(id) do
       {:ok, endpoint} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           200,
-          Jason.encode!(%{
+          %{
             "new_secret" => endpoint.signing_secret,
             "previous_secret_valid_until" =>
               endpoint.rotated_at
               |> DateTime.add(3600, :second)
               |> DateTime.to_iso8601(),
             "message" => "Both old and new secrets will be accepted for 1 hour"
-          })
+          }
         )
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(404, Jason.encode!(%{"error" => "not_found", "id" => id}))
+        |> send_json(404, %{"error" => "not_found", "id" => id})
     end
   end
 
@@ -1396,16 +1253,14 @@ defmodule TriOnyx.Router do
     agents = SessionLogger.list_agents()
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"agents" => agents}))
+    |> send_json(200, %{"agents" => agents})
   end
 
   get "/logs/:agent_name" do
     sessions = SessionLogger.list_sessions(agent_name)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"sessions" => sessions}))
+    |> send_json(200, %{"sessions" => sessions})
   end
 
   get "/logs/:agent_name/:session_id" do
@@ -1417,14 +1272,13 @@ defmodule TriOnyx.Router do
 
       {:error, :not_found} ->
         conn
-        |> put_resp_content_type("application/json")
-        |> send_resp(
+        |> send_json(
           404,
-          Jason.encode!(%{
+          %{
             "error" => "not_found",
             "agent_name" => agent_name,
             "session_id" => session_id
-          })
+          }
         )
     end
   end
@@ -1496,7 +1350,7 @@ defmodule TriOnyx.Router do
 
   get "/api/workspace/tree" do
     dir = Workspace.workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = Workspace.git_safe_args(dir)
     manifest = Workspace.read_risk_manifest()
 
     # Get git status (porcelain format, NUL-delimited to avoid quoted paths)
@@ -1544,8 +1398,7 @@ defmodule TriOnyx.Router do
       end)
 
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(200, Jason.encode!(%{"files" => files}))
+    |> send_json(200, %{"files" => files})
   end
 
   get "/api/workspace/file" do
@@ -1554,11 +1407,10 @@ defmodule TriOnyx.Router do
 
     if is_nil(path) or path == "" do
       conn
-      |> put_resp_content_type("application/json")
-      |> send_resp(400, Jason.encode!(%{"error" => "missing path parameter"}))
+      |> send_json(400, %{"error" => "missing path parameter"})
     else
       dir = Workspace.workspace_dir()
-      safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+      safe = Workspace.git_safe_args(dir)
       manifest = Workspace.read_risk_manifest()
       entry = Map.get(manifest, path, %{})
 
@@ -1628,8 +1480,7 @@ defmodule TriOnyx.Router do
         }
 
       conn
-      |> put_resp_content_type("application/json")
-      |> send_resp(200, Jason.encode!(response))
+      |> send_json(200, response)
     end
   end
 
@@ -1637,13 +1488,12 @@ defmodule TriOnyx.Router do
 
   get "/health" do
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(
+    |> send_json(
       200,
-      Jason.encode!(%{
+      %{
         "status" => "ok",
         "active_sessions" => AgentSupervisor.count_sessions()
-      })
+      }
     )
   end
 
@@ -1651,8 +1501,7 @@ defmodule TriOnyx.Router do
 
   match _ do
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(404, Jason.encode!(%{"error" => "not_found"}))
+    |> send_json(404, %{"error" => "not_found"})
   end
 
   # --- Body Reading Plug ---
@@ -1725,6 +1574,18 @@ defmodule TriOnyx.Router do
     end
   end
 
+  @spec send_json(Plug.Conn.t(), pos_integer(), term()) :: Plug.Conn.t()
+  defp send_json(conn, status, payload) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(payload))
+  end
+
+  @spec bad_request(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
+  defp bad_request(conn, message) do
+    send_json(conn, 400, %{"error" => "invalid_body", "message" => message})
+  end
+
   @spec parse_date(String.t() | nil) :: {:ok, Date.t()} | {:error, String.t()}
   defp parse_date(nil) do
     # Default to today if no since param
@@ -1760,16 +1621,61 @@ defmodule TriOnyx.Router do
     end)
   end
 
+  @spec serialize_definition_summary(TriOnyx.AgentDefinition.t()) :: map()
+  defp serialize_definition_summary(definition) do
+    %{
+      "name" => definition.name,
+      "description" => definition.description,
+      "model" => definition.model,
+      "tools" => definition.tools,
+      "network" => format_network(definition.network)
+    }
+  end
+
+  # Risk/status fields shared by every endpoint that reports an active session.
+  @spec session_risk_fields(map()) :: map()
+  defp session_risk_fields(session) do
+    %{
+      "session_id" => session.id,
+      "status" => to_string(session.status),
+      "taint_level" => to_string(session.taint_level),
+      "sensitivity_level" => to_string(session.sensitivity_level),
+      "information_level" => to_string(session.information_level),
+      "taint_status" => deprecated_taint_status(session.taint_level),
+      "input_risk" => to_string(session.input_risk),
+      "effective_risk" => RiskScorer.format_risk(session.effective_risk),
+      "started_at" => DateTime.to_iso8601(session.started_at)
+    }
+  end
+
+  # Worst-case risk fields reported when an agent has no active session.
+  @spec inactive_risk_fields(TriOnyx.AgentDefinition.t(), map()) :: map()
+  defp inactive_risk_fields(definition, all_defs) do
+    wc_taint = GraphAnalyzer.worst_case_taint(definition, all_defs)
+    wc_sensitivity = GraphAnalyzer.worst_case_sensitivity(definition)
+
+    %{
+      "status" => "inactive",
+      "taint_level" => to_string(wc_taint),
+      "sensitivity_level" => to_string(wc_sensitivity),
+      "information_level" =>
+        to_string(InformationClassifier.higher_level(wc_taint, wc_sensitivity))
+    }
+  end
+
   @spec serialize_bcp_channels([TriOnyx.AgentDefinition.bcp_channel()]) :: [map()]
   defp serialize_bcp_channels(channels) do
     Enum.map(channels, fn ch ->
-      %{
-        "peer" => ch.peer,
-        "role" => to_string(ch.role),
-        "max_category" => ch.max_category,
-        "rates" => serialize_rates(ch.rates)
-      }
+      Map.put(serialize_bcp_channel_base(ch), "max_category", ch.max_category)
     end)
+  end
+
+  defp serialize_bcp_channel_base(ch) do
+    %{
+      "peer" => ch.peer,
+      "role" => to_string(ch.role),
+      "rates" => serialize_rates(ch.rates)
+    }
   end
 
   @spec serialize_rates(map() | nil) :: map() | nil
@@ -1807,11 +1713,7 @@ defmodule TriOnyx.Router do
 
   defp serialize_bcp_channels_for_edit(channels) do
     Enum.map(channels, fn ch ->
-      base = %{
-        "peer" => ch.peer,
-        "role" => to_string(ch.role),
-        "rates" => serialize_rates_for_edit(ch.rates)
-      }
+      base = serialize_bcp_channel_base(ch)
 
       case ch.subscriptions do
         [] -> base
@@ -1830,23 +1732,6 @@ defmodule TriOnyx.Router do
     end)
   end
 
-  defp serialize_rates_for_edit(rates) when is_map(rates) do
-    Map.new(rates, fn {key, value} ->
-      {to_string(key), serialize_single_rate_for_edit(value)}
-    end)
-  end
-
-  defp serialize_single_rate_for_edit(:denied), do: 0
-  defp serialize_single_rate_for_edit(%{limit: limit, window_ms: window_ms}) do
-    unit =
-      cond do
-        window_ms <= 1_000 -> "second"
-        window_ms <= 60_000 -> "minute"
-        true -> "hour"
-      end
-    "#{limit}/#{unit}"
-  end
-
   defp serialize_cron_schedules_for_edit(schedules) do
     Enum.map(schedules, fn s ->
       base = %{"schedule" => s.schedule, "message" => s.message}
@@ -1862,11 +1747,10 @@ defmodule TriOnyx.Router do
 
   defp send_invalid_name(conn) do
     conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(400, Jason.encode!(%{
+    |> send_json(400, %{
       "error" => "invalid_name",
       "message" => "Agent name must be 1-64 alphanumeric characters, hyphens, or underscores"
-    }))
+    })
   end
 
   @spec format_network(TriOnyx.AgentDefinition.network_policy()) :: String.t() | [String.t()]

@@ -75,4 +75,29 @@ defmodule TriOnyx.ToolRegistryTest do
       assert meta.requires_auth == false
     end
   end
+
+  describe "cross-matrix consistency" do
+    # The risk model is spread across ToolRegistry (capability/auth),
+    # TaintMatrix, SensitivityMatrix, and the display entries. A tool added
+    # to one module but forgotten in another would silently fall back to
+    # :low in the matrices, understating risk. These tests make that
+    # omission a build failure instead.
+    test "every known tool has an explicit taint entry" do
+      missing = ToolRegistry.known_tools() -- Map.keys(TriOnyx.TaintMatrix.all_tool_taints())
+      assert missing == []
+    end
+
+    test "every known tool has an explicit sensitivity entry" do
+      missing =
+        ToolRegistry.known_tools() -- Map.keys(TriOnyx.SensitivityMatrix.all_tool_sensitivities())
+
+      assert missing == []
+    end
+
+    test "every known tool has a display entry" do
+      displayed = ToolRegistry.display_entries() |> Enum.map(& &1.display) |> Enum.uniq()
+      missing = ToolRegistry.known_tools() -- displayed
+      assert missing == []
+    end
+  end
 end

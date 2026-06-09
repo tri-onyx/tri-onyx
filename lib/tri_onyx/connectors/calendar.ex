@@ -15,6 +15,8 @@ defmodule TriOnyx.Connectors.Calendar do
 
   require Logger
 
+  import TriOnyx.Connectors.Util
+
   @doc """
   Queries a calendar for events within a date range.
 
@@ -337,9 +339,6 @@ defmodule TriOnyx.Connectors.Calendar do
     {socket, :gen_tcp}
   end
 
-  defp send_data(socket, :ssl, data), do: :ssl.send(socket, data)
-  defp send_data(socket, :gen_tcp, data), do: :gen_tcp.send(socket, data)
-
   defp recv_full_response(socket, transport, acc) do
     case recv_data(socket, transport) do
       {:ok, data} ->
@@ -356,12 +355,6 @@ defmodule TriOnyx.Connectors.Calendar do
         end
     end
   end
-
-  defp recv_data(socket, :ssl), do: :ssl.recv(socket, 0, 30_000)
-  defp recv_data(socket, :gen_tcp), do: :gen_tcp.recv(socket, 0, 30_000)
-
-  defp transport_close(socket, :ssl), do: :ssl.close(socket)
-  defp transport_close(socket, :gen_tcp), do: :gen_tcp.close(socket)
 
   defp parse_http_response(raw, method) do
     case String.split(raw, "\r\n\r\n", parts: 2) do
@@ -613,14 +606,6 @@ defmodule TriOnyx.Connectors.Calendar do
 
   # --- Draft Validation ---
 
-  @spec read_draft(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp read_draft(path) do
-    case File.read(path) do
-      {:ok, contents} -> {:ok, contents}
-      {:error, reason} -> {:error, "cannot read draft: #{inspect(reason)}"}
-    end
-  end
-
   @spec parse_create_draft(String.t()) :: {:ok, map()} | {:error, String.t()}
   defp parse_create_draft(contents) do
     case Jason.decode(contents) do
@@ -652,23 +637,7 @@ defmodule TriOnyx.Connectors.Calendar do
     end
   end
 
-  @spec validate_field(map(), String.t()) :: :ok | {:error, String.t()}
-  defp validate_field(draft, field) do
-    case Map.get(draft, field) do
-      nil -> {:error, "missing required field: #{field}"}
-      "" -> {:error, "empty required field: #{field}"}
-      _ -> :ok
-    end
-  end
-
   # --- Utility ---
-
-  @spec sanitize_uid(String.t()) :: String.t()
-  defp sanitize_uid(uid) do
-    uid
-    |> String.replace(~r/[^\w.\-@]/, "_")
-    |> String.slice(0, 200)
-  end
 
   @spec generate_uid() :: String.t()
   defp generate_uid do
@@ -694,9 +663,11 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   require Logger
 
+  import TriOnyx.Connectors.Util, only: [sanitize_uid: 1]
+
   alias TriOnyx.Connectors.Calendar
   alias TriOnyx.TriggerRouter
-  alias TriOnyx.Workspace
+  alias TriOnyx.Workspace.Committer
 
   defstruct [
     :caldav_config,
@@ -778,12 +749,15 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
               old_etag = Map.get(etags, uid)
 
               if uid && (old_etag == nil or old_etag != etag) do
-                # Update risk manifest
+                # Record provenance: labels the event file in the risk
+                # manifest and queues a trailer-carrying commit so the
+                # labels survive a manifest rebuild from git history.
                 relative_path = "agents/#{state.agent_name}/events/#{calendar}/#{sanitize_uid(uid)}.json"
 
-                Workspace.update_risk_manifest(
+                Committer.record_write(
                   state.agent_name,
-                  [relative_path],
+                  "connector-calendar",
+                  relative_path,
                   :high,
                   :low
                 )
@@ -861,9 +835,4 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
     :ok
   end
 
-  defp sanitize_uid(uid) do
-    uid
-    |> String.replace(~r/[^\w.\-@]/, "_")
-    |> String.slice(0, 200)
-  end
 end

@@ -1174,15 +1174,7 @@ defmodule TriOnyx.AgentSession do
       Task.start(fn ->
         case TriOnyx.Connectors.Calendar.calendar_create(host_path) do
           {:ok, event} ->
-            # Write event file to agent workspace
-            calendar = event["calendar"]
-            uid = event["uid"]
-            events_dir = Path.join([agent_dir, "events", calendar])
-            File.mkdir_p!(events_dir)
-            safe_uid = String.replace(uid, ~r/[^\w.\-@]/, "_") |> String.slice(0, 200)
-            event_path = Path.join(events_dir, "#{safe_uid}.json")
-            File.write!(event_path, Jason.encode!(event, pretty: true))
-
+            write_calendar_event(agent_dir, event)
             AgentPort.send_calendar_create_response(port, req_id, true, "created", event)
 
           {:error, reason} ->
@@ -1223,15 +1215,8 @@ defmodule TriOnyx.AgentSession do
       Task.start(fn ->
         case TriOnyx.Connectors.Calendar.calendar_update(host_path) do
           {:ok, event} ->
-            # Write updated event file
-            calendar = event["calendar"]
-            uid = event["uid"]
-            if calendar != "" and uid do
-              events_dir = Path.join([agent_dir, "events", calendar])
-              File.mkdir_p!(events_dir)
-              safe_uid = String.replace(uid, ~r/[^\w.\-@]/, "_") |> String.slice(0, 200)
-              event_path = Path.join(events_dir, "#{safe_uid}.json")
-              File.write!(event_path, Jason.encode!(event, pretty: true))
+            if event["calendar"] != "" and event["uid"] do
+              write_calendar_event(agent_dir, event)
             end
 
             AgentPort.send_calendar_update_response(port, req_id, true, "updated", event)
@@ -1685,26 +1670,37 @@ defmodule TriOnyx.AgentSession do
 
   defp maybe_elevate_from_metadata(state, _metadata), do: state
 
+  # Writes a calendar event JSON file under the agent's events directory,
+  # with the externally-supplied UID sanitized for filesystem use.
+  @spec write_calendar_event(String.t(), map()) :: :ok
+  defp write_calendar_event(agent_dir, event) do
+    events_dir = Path.join([agent_dir, "events", event["calendar"]])
+    File.mkdir_p!(events_dir)
+    safe_uid = TriOnyx.Connectors.Util.sanitize_uid(event["uid"])
+    File.write!(Path.join(events_dir, "#{safe_uid}.json"), Jason.encode!(event, pretty: true))
+  end
+
   @spec build_agent_config(AgentDefinition.t(), map(), :normal | :reflection) :: map()
   defp build_agent_config(definition, workspace_context, mode) do
     # In reflection mode the Python harness substitutes its own hardcoded
-    # system prompt and tool allow-list; we send an empty system prompt and
-    # no skills/plugins so no persona or extensions leak through.
+    # system prompt; we send an empty system prompt, the restricted
+    # reflection tool allow-list, and no skills/plugins so no persona or
+    # extensions leak through.
     system_prompt =
       case mode do
         :reflection -> ""
         _ -> Workspace.PromptAssembler.assemble(definition, workspace_context)
       end
 
-    {skills, plugins} =
+    {tools, skills, plugins} =
       case mode do
-        :reflection -> {[], []}
-        _ -> {definition.skills, definition.plugins}
+        :reflection -> {reflection_tools(), [], []}
+        _ -> {definition.tools, definition.skills, definition.plugins}
       end
 
     base = %{
       "name" => definition.name,
-      "tools" => definition.tools,
+      "tools" => tools,
       "model" => definition.model,
       "system_prompt" => system_prompt,
       "max_turns" => 100,
@@ -1718,6 +1714,15 @@ defmodule TriOnyx.AgentSession do
       _ -> base
     end
   end
+
+  @doc """
+  Tools a reflection session is allowed to use. Deliberately minimal —
+  the model should read JSONL transcripts and write a single markdown
+  report, nothing else. The Python runtime applies this list verbatim
+  in reflection mode.
+  """
+  @spec reflection_tools() :: [String.t()]
+  def reflection_tools, do: ~w(Read Write Edit Glob Grep)
 
 
   @spec initial_classification(atom()) :: InformationClassifier.classification()

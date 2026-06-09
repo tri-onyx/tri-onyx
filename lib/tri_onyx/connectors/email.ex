@@ -14,6 +14,8 @@ defmodule TriOnyx.Connectors.Email do
 
   require Logger
 
+  import TriOnyx.Connectors.Util
+
   @doc """
   Sends an email from a draft JSON file.
 
@@ -176,21 +178,13 @@ defmodule TriOnyx.Connectors.Email do
 
   # --- Private Helpers ---
 
-  @spec read_draft(String.t()) :: {:ok, String.t()} | {:error, String.t()}
-  defp read_draft(path) do
-    case File.read(path) do
-      {:ok, contents} -> {:ok, contents}
-      {:error, reason} -> {:error, "cannot read draft: #{inspect(reason)}"}
-    end
-  end
-
   @spec parse_draft(String.t()) :: {:ok, map()} | {:error, String.t()}
   defp parse_draft(contents) do
     case Jason.decode(contents) do
       {:ok, draft} ->
-        with :ok <- validate_draft_field(draft, "to"),
-             :ok <- validate_draft_field(draft, "subject"),
-             :ok <- validate_draft_field(draft, "body"),
+        with :ok <- validate_field(draft, "to"),
+             :ok <- validate_field(draft, "subject"),
+             :ok <- validate_field(draft, "body"),
              :ok <- validate_email_address(draft["to"]) do
           if cc = draft["cc"] do
             case validate_email_address(cc) do
@@ -204,15 +198,6 @@ defmodule TriOnyx.Connectors.Email do
 
       {:error, _} ->
         {:error, "invalid JSON in draft file"}
-    end
-  end
-
-  @spec validate_draft_field(map(), String.t()) :: :ok | {:error, String.t()}
-  defp validate_draft_field(draft, field) do
-    case Map.get(draft, field) do
-      nil -> {:error, "missing required field: #{field}"}
-      "" -> {:error, "empty required field: #{field}"}
-      _ -> :ok
     end
   end
 
@@ -505,12 +490,10 @@ defmodule TriOnyx.Connectors.Email do
   end
 
   @doc false
-  def imap_send(socket, :ssl, command), do: :ssl.send(socket, command <> "\r\n")
-  def imap_send(socket, :gen_tcp, command), do: :gen_tcp.send(socket, command <> "\r\n")
+  def imap_send(socket, transport, command), do: send_data(socket, transport, command <> "\r\n")
 
   @doc false
-  def imap_recv_line(socket, :ssl), do: :ssl.recv(socket, 0, 30_000)
-  def imap_recv_line(socket, :gen_tcp), do: :gen_tcp.recv(socket, 0, 30_000)
+  def imap_recv_line(socket, transport), do: recv_data(socket, transport)
 
   @doc false
   def imap_recv_until_tagged(socket, transport, tag) do
@@ -683,7 +666,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
   alias TriOnyx.Connectors.Email
   alias TriOnyx.TriggerRouter
-  alias TriOnyx.Workspace
+  alias TriOnyx.Workspace.Committer
 
   defstruct [
     :imap_config,
@@ -827,13 +810,13 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
               case Email.write_email_dir(inbox_dir, uid, message, attachment_data) do
                 {:ok, _files} ->
-                  # Update risk manifest
-                  relative_paths =
-                    ["agents/#{state.agent_name}/inbox/#{uid}/message.json"]
-
-                  Workspace.update_risk_manifest(
+                  # Record provenance: labels the message file in the risk
+                  # manifest and queues a trailer-carrying commit so the
+                  # labels survive a manifest rebuild from git history.
+                  Committer.record_write(
                     state.agent_name,
-                    relative_paths,
+                    "connector-email",
+                    "agents/#{state.agent_name}/inbox/#{uid}/message.json",
                     :high,
                     :low
                   )

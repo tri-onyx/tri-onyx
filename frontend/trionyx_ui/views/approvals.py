@@ -3,6 +3,7 @@ import json
 from django.http import HttpResponse
 
 from trionyx_ui import gateway
+from trionyx_ui.views.helpers import escape as _esc, short_path as _short_path
 
 
 def approvals_badge(request):
@@ -132,20 +133,3 @@ def _tool_brief(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
-def _short_path(path: str) -> str:
-    if not path:
-        return ""
-    parts = path.replace("/workspace/", "").split("/")
-    if len(parts) > 3:
-        return f".../{'/'.join(parts[-2:])}"
-    return "/".join(parts)
-
-
-def _esc(text: str) -> str:
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-        .replace("'", "&#x27;")
-    )

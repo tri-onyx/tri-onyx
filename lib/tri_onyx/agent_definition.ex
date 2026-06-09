@@ -95,12 +95,18 @@ defmodule TriOnyx.AgentDefinition do
           reflection: String.t() | nil
         }
 
+  @default_model "claude-sonnet-4-20250514"
+
+  @doc "Default LLM model for agents that don't specify one."
+  @spec default_model() :: String.t()
+  def default_model, do: @default_model
+
   @enforce_keys [:name, :tools, :system_prompt]
   defstruct [
     :name,
     :description,
     :system_prompt,
-    model: "claude-sonnet-4-20250514",
+    model: @default_model,
     tools: [],
     network: :none,
     fs_read: [],
@@ -330,9 +336,9 @@ defmodule TriOnyx.AgentDefinition do
       %{key: "description", label: "Description", type: "string", required: false, default: nil,
         options: nil, group: "identity", order: 1, hint: "Human-readable purpose"},
       %{key: "model", label: "Model", type: "enum", required: false,
-        default: "claude-sonnet-4-20250514",
+        default: @default_model,
         options: [
-          %{value: "claude-sonnet-4-20250514", label: "Claude Sonnet 4 (2025-05-14)"},
+          %{value: @default_model, label: "Claude Sonnet 4 (2025-05-14)"},
           %{value: "claude-sonnet-4-6", label: "Claude Sonnet 4.6"},
           %{value: "claude-opus-4-20250514", label: "Claude Opus 4 (2025-05-14)"},
           %{value: "claude-opus-4-6", label: "Claude Opus 4.6"},
@@ -748,7 +754,7 @@ defmodule TriOnyx.AgentDefinition do
   @spec parse_model(map()) :: {:ok, String.t()} | {:error, term()}
   defp parse_model(yaml) do
     case Map.get(yaml, "model") do
-      nil -> {:ok, "claude-sonnet-4-20250514"}
+      nil -> {:ok, @default_model}
       "claude-" <> _ = model -> {:ok, model}
       other -> {:error, {:invalid_model, other, "model must start with \"claude-\""}}
     end

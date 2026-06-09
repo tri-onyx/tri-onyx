@@ -30,6 +30,8 @@ from datetime import datetime, timezone
 
 import httpx
 
+from _common import gateway_url
+
 # --- ANSI colors ---
 
 COLORS = {
@@ -309,7 +311,7 @@ def cmd_show_session(args):
 
 
 def main():
-    default_gateway = os.environ.get("TRI_ONYX_GATEWAY", "http://localhost:4000")
+    default_gateway = gateway_url()
 
     parser = argparse.ArgumentParser(
         description="Browse agent session logs from the TriOnyx gateway."

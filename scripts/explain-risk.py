@@ -22,6 +22,8 @@ import sys
 
 import httpx
 
+from _common import gateway_url
+
 LEVEL_RANK = {"low": 0, "medium": 1, "high": 2}
 RISK_RANK = {"low": 0, "moderate": 1, "high": 2, "critical": 3}
 LEVEL_SYMBOLS = {"low": "·", "medium": "▲", "high": "▲▲"}
@@ -141,7 +143,7 @@ def main():
     parser = argparse.ArgumentParser(description="Explain agent risk levels")
     parser.add_argument("agents", nargs="*", help="Agent names (default: all)")
     parser.add_argument(
-        "--gateway", default="http://localhost:4000",
+        "--gateway", default=gateway_url(),
         help="Gateway URL (default: http://localhost:4000)",
     )
     parser.add_argument("--no-color", action="store_true", help="Disable color output")

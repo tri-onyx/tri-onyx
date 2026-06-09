@@ -10,6 +10,11 @@ from django.utils.safestring import mark_safe
 from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
+from trionyx_ui.views.helpers import (
+    escape as _escape,
+    resolve_connected_agents as _resolve_connected_agents,
+    short_path as _short_path,
+)
 
 _md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
 
@@ -150,36 +155,6 @@ def _render_historical_session(request, agent, name, history_session_id):
         "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
         "connected_agents": connected_agents,
     })
-
-
-def _resolve_connected_agents(agent: dict) -> list[dict]:
-    send_to = set(agent.get("send_to") or [])
-    receive_from = set(agent.get("receive_from") or [])
-    all_names = send_to | receive_from
-    if not all_names:
-        return []
-
-    status_map = {}
-    try:
-        for a in gateway.get_agents():
-            if a["name"] in all_names:
-                status_map[a["name"]] = a.get("status", "inactive")
-    except gateway.GatewayError:
-        pass
-
-    result = []
-    for name in sorted(all_names):
-        directions = []
-        if name in send_to:
-            directions.append("send")
-        if name in receive_from:
-            directions.append("receive")
-        result.append({
-            "name": name,
-            "status": status_map.get(name, "inactive"),
-            "directions": directions,
-        })
-    return result
 
 
 def agent_sessions(request, name):
@@ -449,19 +424,3 @@ def _format_tool_brief(tool_name: str, tool_input: dict) -> str:
     return ""
 
 
-def _short_path(path: str) -> str:
-    if not path:
-        return ""
-    parts = path.replace("/workspace/", "").split("/")
-    if len(parts) > 3:
-        return f".../{'/'.join(parts[-2:])}"
-    return "/".join(parts)
-
-
-def _escape(text: str) -> str:
-    return (
-        text.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )

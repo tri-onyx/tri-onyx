@@ -135,7 +135,7 @@ defmodule TriOnyx.Workspace do
   def commit_session(agent_name, session_id, modified_paths, taint_level \\ nil, sensitivity_level \\ nil)
       when is_list(modified_paths) do
     dir = workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
 
     # Filter out paths that no longer exist on disk (files created then
@@ -213,7 +213,7 @@ defmodule TriOnyx.Workspace do
   @spec commit_page(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def commit_page(agent_name, path) do
     dir = workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
 
     full_path = Path.join(dir, path) |> Path.expand()
@@ -277,7 +277,7 @@ defmodule TriOnyx.Workspace do
   @spec read_file_at_commit(String.t(), String.t()) :: {:ok, binary()} | {:error, term()}
   def read_file_at_commit(commit, path) do
     dir = workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = git_safe_args(dir)
 
     # Validate commit SHA format (hex, 7-40 chars)
     unless Regex.match?(~r/\A[0-9a-f]{7,40}\z/, commit) do
@@ -388,7 +388,7 @@ defmodule TriOnyx.Workspace do
   @spec review_artifacts([String.t()], String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def review_artifacts(paths, reviewer) when is_list(paths) and is_binary(reviewer) do
     dir = workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
     manifest_abs = Path.join(dir, @manifest_path)
 
@@ -493,7 +493,7 @@ defmodule TriOnyx.Workspace do
   @spec sweep_uncommitted() :: {:ok, String.t()} | {:ok, :clean} | {:error, term()}
   def sweep_uncommitted do
     dir = workspace_dir()
-    safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+    safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
 
     # Check for any dirty state (untracked, modified, or deleted)
@@ -575,7 +575,7 @@ defmodule TriOnyx.Workspace do
 
     if File.exists?(old_soul) and not File.dir?(personality_dir) do
       Logger.info("Workspace: migrating to per-agent layout")
-      safe = ["-c", "safe.directory=#{Path.expand(dir)}"]
+      safe = git_safe_args(dir)
 
       # Create new directories
       File.mkdir_p!(personality_dir)
@@ -694,6 +694,16 @@ defmodule TriOnyx.Workspace do
       {:ok, content} -> content
       {:error, _} -> nil
     end
+  end
+
+  @doc """
+  Per-invocation `git -c safe.directory=...` arguments for running git
+  against a directory whose owner may not match the gateway user (e.g.
+  root-owned workspace dirs created inside Docker).
+  """
+  @spec git_safe_args(String.t()) :: [String.t()]
+  def git_safe_args(dir) do
+    ["-c", "safe.directory=#{Path.expand(dir)}"]
   end
 
   # Marks the workspace directory as safe for git operations regardless of

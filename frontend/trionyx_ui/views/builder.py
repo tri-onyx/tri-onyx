@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 
 from django.http import HttpResponse
 from django.shortcuts import render
@@ -7,8 +8,10 @@ from django.utils.safestring import mark_safe
 from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
+from trionyx_ui.views.helpers import resolve_connected_agents as _resolve_connected_agents
 
 _md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
+_xml_tag_re = re.compile(r"</?[a-z][a-z0-9_-]*\s*/?>", re.IGNORECASE)
 
 logger = logging.getLogger(__name__)
 
@@ -118,8 +121,9 @@ def builder_delete(request, name):
 def builder_context(request, name):
     try:
         context = gateway.get_agent_context(name)
+        clean = _xml_tag_re.sub("", context)
         return render(request, "partials/builder_context.html", {
-            "context_html": mark_safe(_md.render(context)),
+            "context_html": mark_safe(_md.render(clean)),
         })
     except gateway.GatewayError:
         return HttpResponse('<div class="builder-empty">Context unavailable</div>')
@@ -135,33 +139,3 @@ def builder_overview(request, name):
         })
     except gateway.GatewayError:
         return HttpResponse('<div class="builder-empty">Agent overview unavailable</div>')
-
-
-def _resolve_connected_agents(agent: dict) -> list[dict]:
-    send_to = set(agent.get("send_to") or [])
-    receive_from = set(agent.get("receive_from") or [])
-    all_names = send_to | receive_from
-    if not all_names:
-        return []
-
-    status_map = {}
-    try:
-        for a in gateway.get_agents():
-            if a["name"] in all_names:
-                status_map[a["name"]] = a.get("status", "inactive")
-    except gateway.GatewayError:
-        pass
-
-    result = []
-    for name in sorted(all_names):
-        directions = []
-        if name in send_to:
-            directions.append("send")
-        if name in receive_from:
-            directions.append("receive")
-        result.append({
-            "name": name,
-            "status": status_map.get(name, "inactive"),
-            "directions": directions,
-        })
-    return result

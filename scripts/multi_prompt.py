@@ -27,6 +27,8 @@ from typing import Any
 
 import httpx
 
+from _common import gateway_url
+
 
 def parse_sse_stream(
     response: httpx.Response,
@@ -157,7 +159,7 @@ def main() -> None:
     parser.add_argument("prompts", nargs="+", help="Prompts to send in order")
     parser.add_argument(
         "--base-url",
-        default="http://localhost:4000",
+        default=gateway_url(),
         help="Gateway URL (default: http://localhost:4000)",
     )
     args = parser.parse_args()

@@ -32,77 +32,84 @@ class GatewayValidationError(GatewayError):
         self.errors = errors
 
 
-def get_agents() -> list[dict]:
+def _request(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    not_found: str | None = None,
+    conflict: str | None = None,
+    check_validation: bool = False,
+    error_prefix: str = "Gateway error",
+) -> httpx.Response:
+    """Issue a gateway request, translating httpx errors into GatewayError.
+
+    - `not_found`: message for a 404 response (otherwise falls through to generic).
+    - `conflict`: default message for a 409 response (gateway "message" field wins).
+    - `check_validation`: raise GatewayValidationError on 400 with "details".
+    - `error_prefix`: prefix for the generic error message and warning log.
+    """
     try:
-        resp = _client().get("/agents")
+        resp = _client().request(method, path, json=json_body)
         resp.raise_for_status()
-        return resp.json().get("agents", [])
+        return resp
     except httpx.ConnectError:
-        logger.error("Gateway unreachable: GET /agents")
+        logger.error("Gateway unreachable: %s %s", method, path)
         raise GatewayError("Gateway unreachable")
     except httpx.HTTPStatusError as e:
-        logger.warning("Gateway error: GET /agents → %d", e.response.status_code)
-        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+        status = e.response.status_code
+        body = {}
+        if e.response.headers.get("content-type", "").startswith("application/json"):
+            body = e.response.json()
+        if check_validation and status == 400 and "details" in body:
+            raise GatewayValidationError(body.get("error", "Validation failed"), body["details"])
+        if not_found is not None and status == 404:
+            raise GatewayError(not_found, 404)
+        if conflict is not None and status == 409:
+            raise GatewayError(body.get("message", conflict), 409)
+        logger.warning("%s: %s %s → %d", error_prefix, method, path, status)
+        raise GatewayError(f"{error_prefix}: {status}", status)
+
+
+def _try_get_json(path: str, fallback):
+    """GET a JSON endpoint, returning `fallback` if the gateway is unreachable
+    or responds with an error. For endpoints where the UI degrades gracefully."""
+    try:
+        resp = _client().get(path)
+        resp.raise_for_status()
+        return resp.json()
+    except (httpx.ConnectError, httpx.HTTPStatusError):
+        return fallback
+
+
+def get_agents() -> list[dict]:
+    return _request("GET", "/agents").json().get("agents", [])
 
 
 def get_agent(name: str) -> dict:
-    try:
-        resp = _client().get(f"/agents/{name}")
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: GET /agents/%s", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        logger.warning("Gateway error: GET /agents/%s → %d", name, e.response.status_code)
-        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+    return _request("GET", f"/agents/{name}", not_found=f"Agent '{name}' not found").json()
 
 
 def get_health() -> dict:
-    try:
-        resp = _client().get("/health")
-        resp.raise_for_status()
-        return resp.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        return {"status": "unreachable", "active_sessions": 0}
+    return _try_get_json("/health", {"status": "unreachable", "active_sessions": 0})
 
 
 def get_approval_count() -> int:
-    try:
-        bcp = _client().get("/bcp/approvals")
-        bcp.raise_for_status()
-        bcp_count = len(bcp.json().get("approvals", []))
-
-        actions = _client().get("/actions/approvals")
-        actions.raise_for_status()
-        action_count = len(actions.json().get("approvals", []))
-
-        return bcp_count + action_count
-    except (httpx.ConnectError, httpx.HTTPStatusError):
+    bcp = _try_get_json("/bcp/approvals", None)
+    if bcp is None:
         return 0
+    actions = _try_get_json("/actions/approvals", None)
+    if actions is None:
+        return 0
+    return len(bcp.get("approvals", [])) + len(actions.get("approvals", []))
 
 
 def get_approvals() -> list[dict]:
     items = []
-    try:
-        bcp = _client().get("/bcp/approvals")
-        bcp.raise_for_status()
-        for a in bcp.json().get("approvals", []):
-            a["kind"] = "bcp"
+    for kind, path in (("bcp", "/bcp/approvals"), ("action", "/actions/approvals")):
+        for a in _try_get_json(path, {}).get("approvals", []):
+            a["kind"] = kind
             items.append(a)
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        pass
-
-    try:
-        actions = _client().get("/actions/approvals")
-        actions.raise_for_status()
-        for a in actions.json().get("approvals", []):
-            a["kind"] = "action"
-            items.append(a)
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        pass
 
     items.sort(key=lambda x: x.get("submitted_at", ""))
     return items
@@ -126,83 +133,55 @@ def reject_item(item_id: str, kind: str, reason: str = "") -> dict:
 
 
 def get_heartbeat_status() -> dict:
-    try:
-        resp = _client().get("/heartbeats")
-        resp.raise_for_status()
-        return resp.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        return {"enabled": False, "heartbeats": []}
+    return _try_get_json("/heartbeats", {"enabled": False, "heartbeats": []})
 
 
 def start_agent(name: str) -> dict:
-    try:
-        resp = _client().post(
-            f"/agents/{name}/start",
-            json={"trigger_type": "verified_input"},
-        )
-        resp.raise_for_status()
-        logger.info("Started agent %s", name)
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: POST /agents/%s/start", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        logger.warning("Failed to start agent %s: %d", name, e.response.status_code)
-        raise GatewayError(f"Failed to start agent: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "POST",
+        f"/agents/{name}/start",
+        json_body={"trigger_type": "verified_input"},
+        not_found=f"Agent '{name}' not found",
+        error_prefix="Failed to start agent",
+    )
+    logger.info("Started agent %s", name)
+    return resp.json()
 
 
 def stop_agent(name: str, session_id: str | None = None) -> dict:
     body: dict = {}
     if session_id:
         body["session_id"] = session_id
-    try:
-        resp = _client().post(f"/agents/{name}/stop", json=body)
-        resp.raise_for_status()
-        logger.info("Stopped agent %s", name)
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: POST /agents/%s/stop", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        logger.warning("Failed to stop agent %s: %d", name, e.response.status_code)
-        raise GatewayError(f"Failed to stop agent: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "POST",
+        f"/agents/{name}/stop",
+        json_body=body,
+        error_prefix="Failed to stop agent",
+    )
+    logger.info("Stopped agent %s", name)
+    return resp.json()
 
 
 def send_prompt(name: str, content: str, session_id: str | None = None) -> dict:
     body: dict = {"content": content}
     if session_id:
         body["session_id"] = session_id
-    try:
-        resp = _client().post(f"/agents/{name}/prompt", json=body)
-        resp.raise_for_status()
-        logger.info("Sent prompt to %s (%d chars)", name, len(content))
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: POST /agents/%s/prompt", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        logger.warning("Failed to send prompt to %s: %d", name, e.response.status_code)
-        raise GatewayError(f"Failed to send prompt: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "POST",
+        f"/agents/{name}/prompt",
+        json_body=body,
+        error_prefix="Failed to send prompt",
+    )
+    logger.info("Sent prompt to %s (%d chars)", name, len(content))
+    return resp.json()
 
 
 def list_agent_sessions(agent_name: str) -> list[dict]:
-    try:
-        resp = _client().get(f"/logs/{agent_name}")
-        resp.raise_for_status()
-        return resp.json().get("sessions", [])
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        return []
+    return _try_get_json(f"/logs/{agent_name}", {}).get("sessions", [])
 
 
 def get_graph_analysis() -> dict:
-    try:
-        resp = _client().get("/graph/analysis")
-        resp.raise_for_status()
-        return resp.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError):
-        return {}
+    return _try_get_json("/graph/analysis", {})
 
 
 def get_session_image(agent_name: str, session_id: str, image_id: str):
@@ -249,96 +228,62 @@ def get_session_log(agent_name: str, session_id: str) -> list[dict]:
 
 
 def get_agent_schema() -> dict:
-    try:
-        resp = _client().get("/agents/schema")
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: GET /agents/schema")
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        logger.warning("Gateway error: GET /agents/schema → %d", e.response.status_code)
-        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+    return _request("GET", "/agents/schema").json()
 
 
 def get_agent_definition(name: str) -> dict:
-    try:
-        resp = _client().get(f"/agents/{name}/definition")
-        resp.raise_for_status()
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: GET /agents/%s/definition", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        logger.warning("Gateway error: GET /agents/%s/definition → %d", name, e.response.status_code)
-        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+    return _request(
+        "GET",
+        f"/agents/{name}/definition",
+        not_found=f"Agent '{name}' not found",
+    ).json()
 
 
 def get_agent_context(name: str) -> str:
-    try:
-        resp = _client().get(f"/agents/{name}/context")
-        resp.raise_for_status()
-        return resp.json().get("context", "")
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: GET /agents/%s/context", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        raise GatewayError(f"Gateway error: {e.response.status_code}", e.response.status_code)
+    return (
+        _request(
+            "GET",
+            f"/agents/{name}/context",
+            not_found=f"Agent '{name}' not found",
+        )
+        .json()
+        .get("context", "")
+    )
 
 
 def create_agent(data: dict) -> dict:
-    try:
-        resp = _client().post("/agents", json=data)
-        resp.raise_for_status()
-        logger.info("Created agent %s", data.get("name", "?"))
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: POST /agents")
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
-        if e.response.status_code == 400 and "details" in body:
-            raise GatewayValidationError(body.get("error", "Validation failed"), body["details"])
-        if e.response.status_code == 409:
-            raise GatewayError(body.get("message", "Agent already exists"), 409)
-        raise GatewayError(f"Failed to create agent: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "POST",
+        "/agents",
+        json_body=data,
+        conflict="Agent already exists",
+        check_validation=True,
+        error_prefix="Failed to create agent",
+    )
+    logger.info("Created agent %s", data.get("name", "?"))
+    return resp.json()
 
 
 def update_agent(name: str, data: dict) -> dict:
-    try:
-        resp = _client().put(f"/agents/{name}", json=data)
-        resp.raise_for_status()
-        logger.info("Updated agent %s", name)
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: PUT /agents/%s", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
-        if e.response.status_code == 400 and "details" in body:
-            raise GatewayValidationError(body.get("error", "Validation failed"), body["details"])
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        raise GatewayError(f"Failed to update agent: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "PUT",
+        f"/agents/{name}",
+        json_body=data,
+        not_found=f"Agent '{name}' not found",
+        check_validation=True,
+        error_prefix="Failed to update agent",
+    )
+    logger.info("Updated agent %s", name)
+    return resp.json()
 
 
 def delete_agent(name: str) -> dict:
-    try:
-        resp = _client().delete(f"/agents/{name}")
-        resp.raise_for_status()
-        logger.info("Deleted agent %s", name)
-        return resp.json()
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: DELETE /agents/%s", name)
-        raise GatewayError("Gateway unreachable")
-    except httpx.HTTPStatusError as e:
-        body = e.response.json() if e.response.headers.get("content-type", "").startswith("application/json") else {}
-        if e.response.status_code == 404:
-            raise GatewayError(f"Agent '{name}' not found", 404)
-        if e.response.status_code == 409:
-            raise GatewayError(body.get("message", "Agent has active sessions"), 409)
-        raise GatewayError(f"Failed to delete agent: {e.response.status_code}", e.response.status_code)
+    resp = _request(
+        "DELETE",
+        f"/agents/{name}",
+        not_found=f"Agent '{name}' not found",
+        conflict="Agent has active sessions",
+        error_prefix="Failed to delete agent",
+    )
+    logger.info("Deleted agent %s", name)
+    return resp.json()

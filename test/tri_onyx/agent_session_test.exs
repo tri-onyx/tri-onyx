@@ -210,6 +210,15 @@ defmodule TriOnyx.AgentSessionTest do
     end
   end
 
+  describe "reflection_tools/0" do
+    test "is restricted to file-IO primitives" do
+      # Reflection sessions must not be able to run commands, reach the
+      # network, or message other agents. The Python runtime applies this
+      # list verbatim, so this is the security guarantee for reflection mode.
+      assert AgentSession.reflection_tools() == ~w(Read Write Edit Glob Grep)
+    end
+  end
+
   describe "temp_file?/1" do
     test "detects SDK temp files without leading dot" do
       assert AgentSession.temp_file?("HEARTBEAT.md.tmp.57.1771398374731")

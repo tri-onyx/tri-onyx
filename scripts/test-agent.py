@@ -89,6 +89,8 @@ from typing import Any
 
 import websockets
 
+from _common import gateway_url
+
 _TERMINAL_TYPES = {"agent_result", "agent_error"}
 
 
@@ -381,7 +383,7 @@ def main() -> None:
     else:
         parser.error("provide either a prompt argument or --turns JSON")
 
-    gateway = os.environ.get("TRI_ONYX_GATEWAY", "ws://localhost:4000")
+    gateway = gateway_url("ws")
     token = os.environ.get("TRI_ONYX_CONNECTOR_TOKEN") or _detect_token()
     if not token:
         print(

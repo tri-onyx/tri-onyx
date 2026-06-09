@@ -36,12 +36,12 @@ defmodule Mix.Tasks.TriOnyx.Status do
       {:ok, []} ->
         Mix.shell().info("TriOnyx Gateway — no agents found")
         Mix.shell().info("")
-        agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+        agents_dir = TriOnyx.agents_dir()
         Mix.shell().info("  Agents directory: #{Path.expand(agents_dir)}")
         Mix.shell().info("  Add .md agent definition files to get started.")
 
       {:error, :directory_not_found} ->
-        agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+        agents_dir = TriOnyx.agents_dir()
         Mix.shell().error("Agents directory not found: #{Path.expand(agents_dir)}")
         Mix.shell().info("Set TRI_ONYX_AGENTS_DIR or create the directory.")
     end

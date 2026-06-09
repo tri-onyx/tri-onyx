@@ -14,4 +14,14 @@ defmodule TriOnyx do
   The gateway computes and displays risk to the human operator, who remains
   the final authority. Transparency over restriction.
   """
+
+  @doc """
+  Directory containing agent definition files.
+
+  Reads `:agents_dir` from application config (`:tri_onyx`).
+  """
+  @spec agents_dir() :: String.t()
+  def agents_dir do
+    Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+  end
 end

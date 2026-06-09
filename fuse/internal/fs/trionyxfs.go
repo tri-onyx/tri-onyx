@@ -194,10 +194,15 @@ func (n *SecureNode) childSourcePath(name string) string {
 
 // deny logs a denial (if enabled) and returns EACCES.
 func (n *SecureNode) deny(op, path, mode string) syscall.Errno {
+	return n.denyWith(op, path, mode, syscall.EACCES)
+}
+
+// denyWith logs a denial (if enabled) and returns the given errno.
+func (n *SecureNode) denyWith(op, path, mode string, errno syscall.Errno) syscall.Errno {
 	if n.RootData.LogDenials {
 		n.RootData.Logger.Log(op, path, mode)
 	}
-	return syscall.EACCES
+	return errno
 }
 
 // logWrite logs a write event if write logging is enabled.
@@ -219,6 +224,16 @@ func (n *SecureNode) checkAccess(path string, required pathtrie.AccessLevel) boo
 	return n.RootData.Trie.Check(path) >= required
 }
 
+// matchPatterns reports whether the path matches any of the raw globs.
+func matchPatterns(path string, patterns []string) bool {
+	for _, pattern := range patterns {
+		if matched, _ := doublestar.Match(pattern, path); matched {
+			return true
+		}
+	}
+	return false
+}
+
 // checkWriteDynamic checks write access for paths that may not exist in
 // the trie (new files/dirs). Falls back to glob matching against raw
 // write patterns.
@@ -227,12 +242,7 @@ func (n *SecureNode) checkWriteDynamic(path string) bool {
 		return true
 	}
 	// Fall back to glob matching for files not in the trie at startup.
-	for _, pattern := range n.RootData.WritePatterns {
-		if matched, _ := doublestar.Match(pattern, path); matched {
-			return true
-		}
-	}
-	return false
+	return matchPatterns(path, n.RootData.WritePatterns)
 }
 
 // checkReadDynamic checks read access for paths that may not exist in
@@ -242,12 +252,29 @@ func (n *SecureNode) checkReadDynamic(path string) bool {
 	if n.RootData.Trie.Check(path) >= pathtrie.ReadAccess {
 		return true
 	}
-	for _, pattern := range n.RootData.ReadPatterns {
-		if matched, _ := doublestar.Match(pattern, path); matched {
-			return true
-		}
+	return matchPatterns(path, n.RootData.ReadPatterns)
+}
+
+// canTraverse reports whether the path is visible at all: reachable via
+// the static trie (at least Traverse) or via a dynamic read/write glob.
+// Every metadata operation (Lookup, Getattr, Access, Opendir, Readdir)
+// must use this single check so visibility stays consistent.
+func (n *SecureNode) canTraverse(path string) bool {
+	return n.checkAccess(path, pathtrie.Traverse) ||
+		n.checkReadDynamic(path) ||
+		n.checkWriteDynamic(path)
+}
+
+// sanitizeMode overrides the permission bits of a stat mode so the kernel
+// doesn't pre-check against the host's UID/GID (which won't match the
+// container's non-root agent user). Type bits are preserved; real access
+// control is enforced by the trie-based checks in each operation handler
+// and the Access handler.
+func sanitizeMode(mode uint32) uint32 {
+	if mode&syscall.S_IFDIR != 0 {
+		return (mode & 0xFFFFF000) | 0777
 	}
-	return false
+	return (mode & 0xFFFFF000) | 0666
 }
 
 // newChild creates a new SecureNode inode for a child.
@@ -257,14 +284,8 @@ func (n *SecureNode) checkReadDynamic(path string) bool {
 // enforced by the trie in each operation handler and the Access handler.
 func (n *SecureNode) newChild(ctx context.Context, st *syscall.Stat_t) *gofusefs.Inode {
 	child := &SecureNode{RootData: n.RootData}
-	mode := uint32(st.Mode)
-	if mode&syscall.S_IFDIR != 0 {
-		mode = (mode & 0xFFFFF000) | 0777
-	} else {
-		mode = (mode & 0xFFFFF000) | 0666
-	}
 	stable := gofusefs.StableAttr{
-		Mode: mode,
+		Mode: sanitizeMode(uint32(st.Mode)),
 		Ino:  st.Ino,
 	}
 	return n.NewInode(ctx, child, stable)
@@ -285,18 +306,12 @@ func (n *SecureNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 	// File exists — check if trie allows at least traversal, or if the
 	// path matches a read/write pattern (dynamically created files won't
 	// be in the trie).
-	if !n.checkAccess(childMount, pathtrie.Traverse) && !n.checkReadDynamic(childMount) && !n.checkWriteDynamic(childMount) {
+	if !n.canTraverse(childMount) {
 		return nil, n.deny("lookup", childMount, "traverse")
 	}
 
 	out.Attr.FromStat(&st)
-
-	// Present permissive mode bits (see Getattr comment).
-	if st.Mode&syscall.S_IFDIR != 0 {
-		out.Attr.Mode = (out.Attr.Mode & 0xFFFFF000) | 0777
-	} else {
-		out.Attr.Mode = (out.Attr.Mode & 0xFFFFF000) | 0666
-	}
+	out.Attr.Mode = sanitizeMode(out.Attr.Mode)
 
 	return n.newChild(ctx, &st), gofusefs.OK
 }
@@ -327,16 +342,9 @@ func (n *SecureNode) Access(ctx context.Context, mask uint32) syscall.Errno {
 		}
 	}
 
-	// R_OK (0x4)
-	if mask&0x4 != 0 {
-		if !n.checkAccess(mp, pathtrie.Traverse) && !n.checkReadDynamic(mp) && !n.checkWriteDynamic(mp) {
-			return syscall.EACCES
-		}
-	}
-
-	// X_OK (0x1)
-	if mask&0x1 != 0 {
-		if !n.checkAccess(mp, pathtrie.Traverse) && !n.checkReadDynamic(mp) && !n.checkWriteDynamic(mp) {
+	// R_OK (0x4) and X_OK (0x1) both require visibility.
+	if mask&(0x4|0x1) != 0 {
+		if !n.canTraverse(mp) {
 			return syscall.EACCES
 		}
 	}
@@ -355,7 +363,7 @@ func (n *SecureNode) Getattr(ctx context.Context, f gofusefs.FileHandle, out *fu
 	}
 
 	mp := n.mountPath()
-	if !n.checkAccess(mp, pathtrie.Traverse) && !n.checkReadDynamic(mp) && !n.checkWriteDynamic(mp) {
+	if !n.canTraverse(mp) {
 		return n.deny("getattr", mp, "traverse")
 	}
 
@@ -371,17 +379,7 @@ func (n *SecureNode) Getattr(ctx context.Context, f gofusefs.FileHandle, out *fu
 		return gofusefs.ToErrno(err)
 	}
 	out.FromStat(&st)
-
-	// Present permissive mode bits so the kernel doesn't pre-reject
-	// operations based on the host UID/GID (which won't match the
-	// container's non-root agent user). The real access control is
-	// enforced by the trie-based checks in each operation handler
-	// (Create, Mkdir, Open, etc.) and the Access handler.
-	if st.Mode&syscall.S_IFDIR != 0 {
-		out.Mode = (out.Mode & 0xFFFFF000) | 0777
-	} else {
-		out.Mode = (out.Mode & 0xFFFFF000) | 0666
-	}
+	out.Mode = sanitizeMode(out.Mode)
 
 	return gofusefs.OK
 }
@@ -390,7 +388,7 @@ func (n *SecureNode) Getattr(ctx context.Context, f gofusefs.FileHandle, out *fu
 
 func (n *SecureNode) Opendir(ctx context.Context) syscall.Errno {
 	mp := n.mountPath()
-	if !n.checkAccess(mp, pathtrie.Traverse) && !n.checkReadDynamic(mp) && !n.checkWriteDynamic(mp) {
+	if !n.canTraverse(mp) {
 		return n.deny("opendir", mp, "traverse")
 	}
 	return gofusefs.OK
@@ -400,7 +398,7 @@ func (n *SecureNode) Opendir(ctx context.Context) syscall.Errno {
 
 func (n *SecureNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscall.Errno) {
 	mp := n.mountPath()
-	if !n.checkAccess(mp, pathtrie.Traverse) && !n.checkReadDynamic(mp) && !n.checkWriteDynamic(mp) {
+	if !n.canTraverse(mp) {
 		return nil, n.deny("readdir", mp, "traverse")
 	}
 
@@ -436,7 +434,7 @@ func (n *SecureNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscall.E
 				continue // already in trie listing
 			}
 			childMount := n.childMountPath(name)
-			if n.checkReadDynamic(childMount) || n.checkWriteDynamic(childMount) || n.checkAccess(childMount, pathtrie.Traverse) {
+			if n.canTraverse(childMount) {
 				seen[name] = struct{}{}
 				childSource := n.childSourcePath(name)
 				var st syscall.Stat_t
@@ -689,11 +687,7 @@ func (n *SecureNode) Rmdir(ctx context.Context, name string) syscall.Errno {
 // anywhere on the underlying filesystem, including paths outside the
 // policy. Returning EPERM removes this attack surface entirely.
 func (n *SecureNode) Symlink(ctx context.Context, target, name string, out *fuse.EntryOut) (*gofusefs.Inode, syscall.Errno) {
-	childMount := n.childMountPath(name)
-	if n.RootData.LogDenials {
-		n.RootData.Logger.Log("symlink", childMount, "write")
-	}
-	return nil, syscall.EPERM
+	return nil, n.denyWith("symlink", n.childMountPath(name), "write", syscall.EPERM)
 }
 
 // --- NodeLinker ---

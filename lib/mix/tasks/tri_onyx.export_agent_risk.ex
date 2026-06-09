@@ -79,7 +79,8 @@ defmodule Mix.Tasks.TriOnyx.ExportAgentRisk do
       capability: Atom.to_string(capability),
       capability_drivers: capability_drivers,
       effective_risk: Atom.to_string(effective_risk),
-      input_sources: Enum.map(definition.input_sources, &Atom.to_string/1)
+      input_sources: Enum.map(definition.input_sources, &Atom.to_string/1),
+      model: definition.model
     }
   end
 

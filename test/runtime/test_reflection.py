@@ -27,9 +27,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "runtime"
 import agent_runner
 
 
-def test_reflection_tools_are_restricted() -> None:
-    """Reflection mode must not grant SendMessage, Bash, WebFetch, etc."""
-    assert agent_runner._REFLECTION_TOOLS == ["Read", "Write", "Edit", "Glob", "Grep"]
+# The restricted reflection tool allow-list lives in the gateway
+# (TriOnyx.AgentSession.reflection_tools/0) and is asserted by the Elixir
+# test suite; the runtime applies the start message's "tools" verbatim.
 
 
 def test_reflection_system_prompt_references_log_mount() -> None:

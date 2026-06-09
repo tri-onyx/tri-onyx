@@ -74,7 +74,7 @@ class TestStartMessage:
         assert msg.cwd == "/project"
 
     def test_parse_defaults(self):
-        msg = StartMessage.from_dict({"agent": {}})
+        msg = StartMessage.from_dict({"agent": {"model": "claude-sonnet-4-20250514"}})
         assert msg.name == "unnamed"
         assert msg.tools == []
         assert msg.model == "claude-sonnet-4-20250514"
@@ -82,9 +82,15 @@ class TestStartMessage:
         assert msg.max_turns == 200
         assert msg.cwd == "/workspace"
 
+    def test_parse_missing_model_rejected(self):
+        # The gateway owns the model default; a start message without a
+        # model is a protocol violation.
+        with pytest.raises(ValueError, match="model"):
+            StartMessage.from_dict({"agent": {}})
+
     def test_parse_missing_agent_key(self):
-        msg = StartMessage.from_dict({})
-        assert msg.name == "unnamed"
+        with pytest.raises(ValueError, match="model"):
+            StartMessage.from_dict({})
 
 
 class TestPromptMessage:

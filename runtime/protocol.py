@@ -70,10 +70,14 @@ class StartMessage:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> StartMessage:
         agent = data.get("agent", {})
+        # The gateway (the source of truth for the model default) always
+        # sends a model; a missing one is a protocol violation.
+        if "model" not in agent:
+            raise ValueError("start message missing required 'model'")
         return cls(
             name=agent.get("name", "unnamed"),
             tools=agent.get("tools", []),
-            model=agent.get("model", "claude-sonnet-4-20250514"),
+            model=agent["model"],
             system_prompt=agent.get("system_prompt", ""),
             max_turns=agent.get("max_turns", 200),
             cwd=agent.get("cwd", "/workspace"),

@@ -81,7 +81,10 @@ defmodule TriOnyx.SensitivityMatrix do
     "CalendarQuery" => :medium,
     "CalendarCreate" => :medium,
     "CalendarUpdate" => :medium,
-    "CalendarDelete" => :medium
+    "CalendarDelete" => :medium,
+    "SaveDraft" => :low,
+    "SubmitItem" => :low,
+    "SubmitPage" => :low
   }
 
   # Sensitivity levels for privileged mounts.

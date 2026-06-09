@@ -230,9 +230,7 @@ defmodule TriOnyx.GitProvenance do
   end
 
   @spec safe_dir_args(String.t()) :: [String.t()]
-  defp safe_dir_args(workspace_path) do
-    ["-c", "safe.directory=#{Path.expand(workspace_path)}"]
-  end
+  defp safe_dir_args(workspace_path), do: TriOnyx.Workspace.git_safe_args(workspace_path)
 
   @spec committer_env() :: [{String.t(), String.t()}]
   defp committer_env do

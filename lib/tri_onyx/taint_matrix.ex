@@ -74,7 +74,10 @@ defmodule TriOnyx.TaintMatrix do
     "CalendarQuery" => :low,
     "CalendarCreate" => :low,
     "CalendarUpdate" => :low,
-    "CalendarDelete" => :low
+    "CalendarDelete" => :low,
+    "SaveDraft" => :low,
+    "SubmitItem" => :low,
+    "SubmitPage" => :low
   }
 
   # Taint levels for the two Read path contexts.

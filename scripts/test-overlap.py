@@ -17,6 +17,8 @@ import sys
 
 import websockets
 
+from _common import gateway_url
+
 
 def _detect_token() -> str | None:
     try:
@@ -32,7 +34,7 @@ def _detect_token() -> str | None:
 
 
 async def main() -> None:
-    gateway = os.environ.get("TRI_ONYX_GATEWAY", "ws://localhost:4000")
+    gateway = gateway_url("ws")
     token = os.environ.get("TRI_ONYX_CONNECTOR_TOKEN") or _detect_token()
     if not token:
         print("Error: no connector token", file=sys.stderr)

@@ -36,6 +36,11 @@ OUTPUT_DIR = ROOT / "docs" / "agents"
 MKDOCS_YML = ROOT / "mkdocs.yml"
 RISK_JSON = ROOT / "tmp" / "agent_risk.json"
 
+# Mirrors TriOnyx.AgentDefinition.default_model/0. Only used as a fallback
+# when tmp/agent_risk.json (which carries the gateway-resolved model) is
+# absent, e.g. in CI runs without a gateway image.
+DEFAULT_MODEL = "claude-sonnet-4-20250514"
+
 
 def load_risk_data() -> dict:
     """Load risk profiles exported by mix tri_onyx.export_agent_risk."""
@@ -171,7 +176,7 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
     """Generate a docs page for a single agent."""
     name = meta["name"]
     description = meta.get("description", "")
-    model = meta.get("model", "claude-sonnet-4-20250514")
+    model = (risk or {}).get("model") or meta.get("model", DEFAULT_MODEL)
     tools = meta.get("tools", "")
     if isinstance(tools, str):
         tools = [t.strip() for t in tools.split(",")]
@@ -294,7 +299,7 @@ def generate_index(agents: list[dict], risk_data: dict | None = None) -> str:
     for a in sorted(agents, key=lambda x: x["name"]):
         name = a["name"]
         desc = a.get("description", "")
-        model = a.get("model", "claude-sonnet-4-20250514")
+        model = risk_data.get(name, {}).get("model") or a.get("model", DEFAULT_MODEL)
         short_model = model.replace("claude-", "").split("-2025")[0]
         network = a.get("network", "none")
 

@@ -11,15 +11,6 @@ defmodule TriOnyx.ToolRegistry do
   `TriOnyx.TaintMatrix` and `TriOnyx.SensitivityMatrix` respectively.
   """
 
-  @known_tools ~w(
-    Read Grep Glob Write Edit NotebookEdit SendMessage
-    BCPQuery BCPRespond BCPPublish RestartAgent Bash WebFetch WebSearch
-    SendEmail SaveDraft MoveEmail CreateFolder
-    CalendarQuery CalendarCreate CalendarUpdate CalendarDelete
-    SubmitItem
-    SubmitPage
-  )
-
   # Auth and capability metadata for built-in tools.
   # `requires_auth` indicates whether the gateway injects credentials when
   # executing this tool. `capability_level` is the tool's intrinsic capability
@@ -55,6 +46,10 @@ defmodule TriOnyx.ToolRegistry do
     "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false}
   }
+
+  # The set of known tools is exactly the set with declared metadata —
+  # adding a tool to @tool_meta is what registers it.
+  @known_tools @tool_meta |> Map.keys() |> Enum.sort()
 
   # Display metadata for the classification matrix UI.
   # Read appears twice (controlled vs external path) since each variant has a different taint level.

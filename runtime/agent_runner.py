@@ -154,11 +154,10 @@ _MAX_TOOL_RESULT_LEN = 4096
 # Reflection mode
 # ---------------------------------------------------------------------------
 
-# Tools the reflection harness is allowed to use. Deliberately minimal — we
-# want the model to read JSONL transcripts and write a single markdown report,
-# nothing else. Custom MCP tools (SendMessage, BCP, email, etc.) are not
-# wired up in reflection mode.
-_REFLECTION_TOOLS = ["Read", "Write", "Edit", "Glob", "Grep"]
+# The restricted reflection tool allow-list is decided by the gateway
+# (TriOnyx.AgentSession.reflection_tools/0) and arrives in the start
+# message's "tools" field. Custom MCP tools (SendMessage, BCP, email,
+# etc.) are not wired up in reflection mode.
 
 # System prompt template used exclusively in reflection mode. The agent does
 # NOT see its usual persona, memory, notes, or heartbeat — only the
@@ -245,8 +244,8 @@ async def _run_reflection(config: StartMessage) -> None:
 
     options = ClaudeAgentOptions(
         system_prompt=_reflection_system_prompt(config.name, date),
-        tools=_REFLECTION_TOOLS,
-        allowed_tools=_REFLECTION_TOOLS,
+        tools=config.tools,
+        allowed_tools=config.tools,
         permission_mode="acceptEdits",
         max_turns=config.max_turns,
         model=config.model,
@@ -512,6 +511,25 @@ class InboundDispatcher:
 _SEND_MESSAGE_TIMEOUT_S = 30
 
 
+def _submissions_path(agent_name: str) -> Path:
+    """Per-agent submissions ledger used for feedback enrichment."""
+    return Path(f"/workspace/agents/{agent_name}/submissions.json")
+
+
+async def _wait_for_matching_response(queue, request_id: str):
+    """Poll a response queue until the entry matching request_id arrives.
+
+    Responses for other request IDs (shouldn't happen under normal
+    operation, but defensive) are put back on the queue.
+    """
+    while True:
+        response = await queue.get()
+        if response.request_id == request_id:
+            return response
+        await queue.put(response)
+        await asyncio.sleep(0.01)
+
+
 class SendMessageHandler:
     """Handles the SendMessage custom tool for inter-agent communication.
 
@@ -540,7 +558,7 @@ class SendMessageHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(request_id),
+                _wait_for_matching_response(self._dispatcher.send_message_responses, request_id),
                 timeout=_SEND_MESSAGE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -550,20 +568,6 @@ class SendMessageHandler:
         if response.success:
             return f"Message delivered to {to}."
         return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, request_id: str) -> SendMessageResponse:
-        """Poll the response queue until we get our matching response.
-
-        Responses for other request IDs (shouldn't happen under normal
-        operation, but defensive) are put back on the queue.
-        """
-        while True:
-            response = await self._dispatcher.send_message_responses.get()
-            if response.request_id == request_id:
-                return response
-            # Not ours -- put it back for another consumer
-            await self._dispatcher.send_message_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -601,7 +605,7 @@ class RestartAgentHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(request_id),
+                _wait_for_matching_response(self._dispatcher.restart_agent_responses, request_id),
                 timeout=_RESTART_AGENT_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -611,16 +615,6 @@ class RestartAgentHandler:
         if response.success:
             return f"Agent '{agent_name}' restart initiated. {response.detail}"
         return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, request_id: str) -> RestartAgentResponse:
-        """Poll the response queue until we get our matching response."""
-        while True:
-            response = await self._dispatcher.restart_agent_responses.get()
-            if response.request_id == request_id:
-                return response
-            # Not ours -- put it back for another consumer
-            await self._dispatcher.restart_agent_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -645,7 +639,7 @@ class SubmitItemHandler:
     def __init__(self, dispatcher: InboundDispatcher, agent_name: str) -> None:
         self._dispatcher = dispatcher
         self._agent_name = agent_name
-        self._submissions_path = Path(f"/workspace/agents/{agent_name}/submissions.json")
+        self._submissions_path = _submissions_path(agent_name)
 
     async def handle(self, item_type: str, title: str, url: str, metadata: dict[str, str]) -> str:
         """Submit an item and wait for the gateway acknowledgment."""
@@ -662,7 +656,7 @@ class SubmitItemHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(request_id),
+                _wait_for_matching_response(self._dispatcher.submit_item_responses, request_id),
                 timeout=_SUBMIT_ITEM_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -696,15 +690,6 @@ class SubmitItemHandler:
             self._submissions_path.write_text(json.dumps(submissions, indent=2))
         except Exception:
             log.warning("Failed to persist submission to %s", self._submissions_path, exc_info=True)
-
-    async def _wait_for_response(self, request_id: str) -> SubmitItemResponse:
-        """Poll the response queue until we get our matching response."""
-        while True:
-            response = await self._dispatcher.submit_item_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.submit_item_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 _SUBMIT_IMAGE_TIMEOUT_S = 30
@@ -765,7 +750,7 @@ class SubmitImageHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(request_id),
+                _wait_for_matching_response(self._dispatcher.submit_image_responses, request_id),
                 timeout=_SUBMIT_IMAGE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -775,14 +760,6 @@ class SubmitImageHandler:
         if response.success:
             return f"Image submitted: {filename}"
         return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, request_id: str) -> SubmitImageResponse:
-        while True:
-            response = await self._dispatcher.submit_image_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.submit_image_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 _SUBMIT_PAGE_TIMEOUT_S = 30
@@ -830,7 +807,7 @@ class SubmitPageHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(request_id),
+                _wait_for_matching_response(self._dispatcher.submit_page_responses, request_id),
                 timeout=_SUBMIT_PAGE_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -840,14 +817,6 @@ class SubmitPageHandler:
         if response.success:
             return f"Page submitted: {resolved.name}"
         return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, request_id: str) -> SubmitPageResponse:
-        while True:
-            response = await self._dispatcher.submit_page_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.submit_page_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -878,7 +847,7 @@ def _enrich_item_feedback(content: str, agent_name: str) -> str:
     emoji = _VOTE_EMOJI.get(vote, vote)
 
     # Look up original submission
-    submissions_path = Path(f"/workspace/agents/{agent_name}/submissions.json")
+    submissions_path = _submissions_path(agent_name)
     entry: dict[str, Any] | None = None
     try:
         if submissions_path.exists():
@@ -1053,7 +1022,7 @@ class EmailHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_send_email(request_id),
+                _wait_for_matching_response(self._dispatcher.send_email_responses, request_id),
                 timeout=_EMAIL_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1072,7 +1041,7 @@ class EmailHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_save_draft(request_id),
+                _wait_for_matching_response(self._dispatcher.save_draft_responses, request_id),
                 timeout=_EMAIL_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1101,7 +1070,7 @@ class EmailHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_move_email(request_id),
+                _wait_for_matching_response(self._dispatcher.move_email_responses, request_id),
                 timeout=_EMAIL_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1122,7 +1091,7 @@ class EmailHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_create_folder(request_id),
+                _wait_for_matching_response(self._dispatcher.create_folder_responses, request_id),
                 timeout=_EMAIL_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1132,46 +1101,6 @@ class EmailHandler:
         if response.success:
             return f"Folder '{folder_name}' created."
         return f"Error: {response.detail}"
-
-    async def _wait_for_send_email(
-        self, request_id: str
-    ) -> SendEmailResponse:
-        while True:
-            response = await self._dispatcher.send_email_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.send_email_responses.put(response)
-            await asyncio.sleep(0.01)
-
-    async def _wait_for_save_draft(
-        self, request_id: str
-    ) -> SaveDraftResponse:
-        while True:
-            response = await self._dispatcher.save_draft_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.save_draft_responses.put(response)
-            await asyncio.sleep(0.01)
-
-    async def _wait_for_move_email(
-        self, request_id: str
-    ) -> MoveEmailResponse:
-        while True:
-            response = await self._dispatcher.move_email_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.move_email_responses.put(response)
-            await asyncio.sleep(0.01)
-
-    async def _wait_for_create_folder(
-        self, request_id: str
-    ) -> CreateFolderResponse:
-        while True:
-            response = await self._dispatcher.create_folder_responses.get()
-            if response.request_id == request_id:
-                return response
-            await self._dispatcher.create_folder_responses.put(response)
-            await asyncio.sleep(0.01)
 
 
 # ---------------------------------------------------------------------------
@@ -1204,7 +1133,7 @@ class CalendarHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.calendar_query_responses, request_id),
+                _wait_for_matching_response(self._dispatcher.calendar_query_responses, request_id),
                 timeout=_CALENDAR_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1223,7 +1152,7 @@ class CalendarHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.calendar_create_responses, request_id),
+                _wait_for_matching_response(self._dispatcher.calendar_create_responses, request_id),
                 timeout=_CALENDAR_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1242,7 +1171,7 @@ class CalendarHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.calendar_update_responses, request_id),
+                _wait_for_matching_response(self._dispatcher.calendar_update_responses, request_id),
                 timeout=_CALENDAR_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1261,7 +1190,7 @@ class CalendarHandler:
 
         try:
             response = await asyncio.wait_for(
-                self._wait_for_response(self._dispatcher.calendar_delete_responses, request_id),
+                _wait_for_matching_response(self._dispatcher.calendar_delete_responses, request_id),
                 timeout=_CALENDAR_OP_TIMEOUT_S,
             )
         except asyncio.TimeoutError:
@@ -1271,14 +1200,6 @@ class CalendarHandler:
         if response.success:
             return f"Event {uid} deleted from {calendar}"
         return f"Error: {response.detail}"
-
-    async def _wait_for_response(self, queue: asyncio.Queue, request_id: str) -> Any:
-        while True:
-            response = await queue.get()
-            if response.request_id == request_id:
-                return response
-            await queue.put(response)
-            await asyncio.sleep(0.01)
 
 
 # ---------------------------------------------------------------------------

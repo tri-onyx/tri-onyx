@@ -31,7 +31,7 @@ defmodule TriOnyx.DefinitionWatcher do
   def init(opts) do
     agents_dir =
       Keyword.get_lazy(opts, :agents_dir, fn ->
-        Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+        TriOnyx.agents_dir()
       end)
 
     expanded = Path.expand(agents_dir)

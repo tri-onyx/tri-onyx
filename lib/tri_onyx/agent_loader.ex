@@ -22,7 +22,7 @@ defmodule TriOnyx.AgentLoader do
   """
   @spec load_all() :: load_result()
   def load_all do
-    agents_dir = Application.get_env(:tri_onyx, :agents_dir, "./workspace/agent-definitions")
+    agents_dir = TriOnyx.agents_dir()
     load_from(agents_dir)
   end
 
