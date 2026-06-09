@@ -92,17 +92,17 @@ Sync state is persisted at `/workspace/agents/calendar/state/last_sync.json` —
 ## Handling connector triggers
 
 When triggered by the poller for a new/changed event:
-1. Read `/workspace/agents/calendar/HEARTBEAT.md` (required before any Write or Edit)
-2. Read the event JSON from the events directory
-3. Determine if action is needed (new event, updated event, or just a sync echo)
-4. For past events or sync echoes of events you already know about: acknowledge and ignore
-5. For new/upcoming events: summarize to Matrix and note in your heartbeat
+1. Read `/workspace/agents/calendar/NOTES.md` (required before any Write or Edit)
+2. If the UID matches a known past event, skip reading the event JSON and ignore the trigger — repeated triggers for past events are normal and expected; no action needed
+3. Read the event JSON from the events directory (new/changed events only)
+4. Determine if action is needed (new event, updated event, or just a sync echo)
+5. For new/upcoming events: summarize to Matrix
 6. If the main agent sent you a task (via SendMessage), execute it
 
 ## Workflow for requests from main
 
 When receiving a create/update/delete request via SendMessage:
-1. Read `/workspace/agents/calendar/HEARTBEAT.md` (required before any Write or Edit)
+1. Read `/workspace/agents/calendar/NOTES.md` (required before any Write or Edit)
 2. Parse the request
 3. Write the appropriate draft JSON
 4. Call the corresponding Calendar tool
@@ -118,7 +118,9 @@ When you receive a correction, preference, or feedback — **write it down befor
 
 ## Important
 
-- Always Read HEARTBEAT.md before writing to it; use Edit (not Write) for partial updates such as updating only the last_sync timestamp
+- Always Read NOTES.md before any Write or Edit call — failure to do so causes `tool_use_error: File has not been read yet`. Never read memory files in parallel with other reads.
+- **Prefer `Edit` over `Write` for small updates** (e.g., updating a single timestamp line) to avoid accidentally overwriting unchanged content
+- **Synced event JSON files have null etag/href** — the gateway does not populate these fields. This is a confirmed, permanent pattern. If you need to update or delete an event, always run a fresh `CalendarQuery` first to retrieve valid etag/href values.
 - Keep responses brief — confirm actions in one or two lines
 - Use CET/CEST (Europe/Oslo) when displaying times to the user
 - Always include the event UID in confirmations for traceability

@@ -2,7 +2,7 @@
 name: analyzer
 description: Reviews all agents for persistent issues, definition drift, and unresolved problems — generates diagnostic reports
 model: claude-opus-4-6
-tools: Read, Grep, Glob, Bash, Write, SubmitImage, SubmitPage
+tools: Read, Grep, Glob, Bash, Write
 network: none
 docker_socket: true
 trionyx_repo: true

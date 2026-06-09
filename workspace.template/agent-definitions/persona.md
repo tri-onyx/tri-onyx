@@ -8,10 +8,12 @@ fs_read:
   - "/AGENTS.md"
   - "/personality/**"
   - "/agent-definitions/**"
+  - "/agents/**"
 fs_write:
   - "/personality/**"
   - "/AGENTS.md"
   - "/agent-definitions/**"
+  - "/agents/persona/**"
 idle_timeout: 30m
 cron_schedules:
   - schedule: "0 8 * * 1"
