@@ -1159,6 +1159,19 @@ a:hover { text-decoration: underline; }
   font-weight: 600;
 }
 
+.chat-edit-link {
+  color: var(--muted);
+  margin-left: 6px;
+  opacity: 0.6;
+  transition: opacity 0.15s, color 0.15s;
+  vertical-align: middle;
+}
+
+.chat-edit-link:hover {
+  color: var(--accent);
+  opacity: 1;
+}
+
 /* ── Scrollbar ── */
 
 /* ── Message Timestamps ── */
