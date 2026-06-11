@@ -18,7 +18,7 @@ from slack_sdk.web.async_client import AsyncWebClient
 from connector.adapters.base import BaseAdapter, OnMessageCallback, OnReactionCallback
 from connector.config import AdapterConfig, RoomConfig
 from connector.formatting import markdown_to_mrkdwn
-from connector.protocol import InboundMessage
+from connector.protocol import InboundMessage, ReactionMessage
 
 logger = logging.getLogger(__name__)
 
@@ -162,6 +162,9 @@ class SlackAdapter(BaseAdapter):
         # Track typing indicator messages per channel so we can delete them
         self._typing_messages: dict[str, str] = {}  # channel_id -> message ts
 
+        # Approval tracking: message ts -> approval_id (for 👍/👎 reactions)
+        self._approval_events: dict[str, str] = {}
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -218,6 +221,8 @@ class SlackAdapter(BaseAdapter):
 
             if event_type == "message" and event.get("subtype") is None:
                 await self._handle_message(event)
+            elif event_type == "reaction_added":
+                await self._handle_reaction(event)
 
     async def _handle_message(self, event: dict[str, Any]) -> None:
         """Handle an incoming Slack message event."""
@@ -226,16 +231,27 @@ class SlackAdapter(BaseAdapter):
         channel = event.get("channel", "")
         channel_type = event.get("channel_type", "")
 
-        # Only handle DMs (im = direct message)
-        if channel_type != "im":
-            return
-
-        # Ignore messages from our own bot
-        if user_id == self._bot_user_id:
+        # Ignore messages from our own bot or any bot (prevents loops with
+        # agent replies and inter-agent mirrors posted by this app)
+        if user_id == self._bot_user_id or event.get("bot_id"):
             return
 
         # Ignore empty messages
         if not text:
+            return
+
+        # Bound channels (agent-owned, from gateway channel_bindings) are
+        # handled separately from the DM-based public access path.
+        if channel_type in ("channel", "group"):
+            room_cfg = self._config.rooms.get(channel)
+            if room_cfg is None:
+                logger.debug("Ignoring message in unbound channel %s", channel)
+                return
+            await self._handle_bound_channel_message(event, room_cfg)
+            return
+
+        # Only DMs beyond this point (im = direct message)
+        if channel_type != "im":
             return
 
         display_name = await self._get_display_name(user_id)
@@ -319,14 +335,112 @@ class SlackAdapter(BaseAdapter):
         if self._on_message:
             await self._on_message(msg)
 
+    async def _handle_bound_channel_message(
+        self, event: dict[str, Any], room_cfg: Any
+    ) -> None:
+        """Route a message in an agent-owned channel to its bound agent.
+
+        Bound channels are internal team spaces (the workspace is the trust
+        boundary), so there is no consent gating and members are treated as
+        verified senders. Every message in the channel goes to the agent —
+        no @-mention needed.
+        """
+        user_id = event.get("user", "")
+        channel = event.get("channel", "")
+        text = event.get("text", "").strip()
+
+        # Strip a leading @-mention of the bot ("<@U123> do X" -> "do X")
+        text = re.sub(rf"^<@{re.escape(self._bot_user_id)}>\s*", "", text).strip()
+        if not text:
+            return
+
+        display_name = await self._get_display_name(user_id)
+        is_owner = user_id == self._owner_user_id
+
+        if is_owner:
+            user_context = (
+                f"SYSTEM: This message is from the system owner "
+                f"({display_name}, ID: {user_id}) in your Slack channel."
+            )
+        else:
+            user_context = (
+                f"SYSTEM: This message is from team member {display_name} "
+                f"(ID: {user_id}) in your Slack channel."
+            )
+
+        msg = InboundMessage(
+            agent_name=room_cfg.agent,
+            content=f"{text}\n\n---\n{user_context}",
+            channel={
+                "platform": "slack",
+                "channel_id": channel,
+                "user_id": user_id,
+                "display_name": display_name,
+            },
+            trust={"level": "verified"},
+        )
+
+        if self._on_message:
+            await self._on_message(msg)
+
+    # Slack reaction names that map onto the gateway's approval emoji.
+    _REACTION_UNICODE = {
+        "+1": "👍",
+        "thumbsup": "👍",
+        "-1": "👎",
+        "thumbsdown": "👎",
+    }
+
+    async def _handle_reaction(self, event: dict[str, Any]) -> None:
+        """Forward 👍/👎 reactions on approval request messages to the gateway."""
+        item = event.get("item", {})
+        if item.get("type") != "message":
+            return
+
+        approval_id = self._approval_events.get(item.get("ts", ""))
+        if not approval_id:
+            return
+
+        user_id = event.get("user", "")
+        if user_id == self._bot_user_id:
+            return
+
+        name = event.get("reaction", "")
+        emoji = self._REACTION_UNICODE.get(name)
+        if emoji is None:
+            return
+
+        sender = await self._get_display_name(user_id)
+        logger.info(
+            "Approval reaction %s (%s) from %s for %s",
+            emoji, name, sender, approval_id,
+        )
+
+        msg = ReactionMessage(
+            emoji=emoji,
+            sender=sender,
+            channel={"platform": "slack", "channel_id": item.get("channel", "")},
+            approval_id=approval_id,
+            event_id=item.get("ts", ""),
+            trust={"level": "verified" if user_id == self._owner_user_id else "unverified"},
+        )
+
+        if self._on_reaction:
+            await self._on_reaction(msg)
+
     # ------------------------------------------------------------------
     # Outbound messaging
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _channel_id_of(channel: dict[str, Any]) -> str:
+        """Extract the Slack channel ID; generic routing uses "room_id"."""
+        return channel.get("channel_id") or channel.get("room_id") or ""
+
     async def send_text(
         self, channel: dict[str, Any], content: str, *, agent_name: str = ""
     ) -> None:
-        channel_id = channel.get("channel_id", "")
+        channel_id = self._channel_id_of(channel)
         if not channel_id:
             logger.warning("Slack send_text: no channel_id in channel dict")
             return
@@ -338,7 +452,7 @@ class SlackAdapter(BaseAdapter):
             await self._post_dm(channel_id, chunk)
 
     async def send_typing(self, channel: dict[str, Any], is_typing: bool) -> None:
-        channel_id = channel.get("channel_id", "")
+        channel_id = self._channel_id_of(channel)
         if not channel_id or not self._web_client:
             return
 
@@ -397,7 +511,7 @@ class SlackAdapter(BaseAdapter):
         filename: str,
         mime_type: str,
     ) -> None:
-        channel_id = channel.get("channel_id", "")
+        channel_id = self._channel_id_of(channel)
         if not channel_id or not self._web_client:
             return
         try:
@@ -408,6 +522,60 @@ class SlackAdapter(BaseAdapter):
             )
         except Exception:
             logger.exception("Slack file upload failed")
+
+    async def send_approval_request(
+        self,
+        approval_id: str,
+        from_agent: str,
+        to_agent: str,
+        category: int,
+        query_summary: str,
+        response_content: str,
+        anomalies: list[dict[str, Any]],
+        channel: dict[str, Any] | None = None,
+        kind: str = "bcp",
+    ) -> None:
+        """Post an approval request; 👍/👎 reactions decide it."""
+        if not self._web_client:
+            return
+
+        room_id = self._channel_id_of(channel or {})
+        if not room_id:
+            room_id = (
+                self._config.approval_rooms.get(from_agent)
+                or self._config.approval_rooms.get(to_agent)
+                or self._config.approval_rooms.get("_default", "")
+            )
+        if not room_id:
+            logger.warning(
+                "No Slack approval channel for agent %s — skipping", from_agent
+            )
+            return
+
+        anomaly_text = ""
+        if anomalies:
+            lines = [f"  • {a.get('message', str(a))}" for a in anomalies]
+            anomaly_text = "\n*Anomalies:*\n" + "\n".join(lines) + "\n"
+
+        header = (
+            "*Action Approval Required*"
+            if kind == "action"
+            else f"*BCP Cat-{category} Approval Required*"
+        )
+        body = (
+            f":rotating_light: {header}\n"
+            f"Agent: `{from_agent}`\n"
+            f"{query_summary}\n\n"
+            f"{response_content}\n"
+            f"{anomaly_text}\n"
+            f"React with :+1: to approve or :-1: to reject."
+        )
+
+        try:
+            resp = await self._web_client.chat_postMessage(channel=room_id, text=body)
+            self._approval_events[resp["ts"]] = approval_id
+        except Exception:
+            logger.exception("Slack approval request post failed to %s", room_id)
 
     async def health(self) -> dict[str, Any]:
         connected = self._socket_client is not None and self._running

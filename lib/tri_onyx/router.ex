@@ -128,10 +128,16 @@ defmodule TriOnyx.Router do
         }
       end)
 
-    known_agents =
-      TriggerRouter.list_agents()
-      |> Enum.map(& &1.name)
-      |> Enum.sort()
+    agents = TriggerRouter.list_agents()
+    known_agents = agents |> Enum.map(& &1.name) |> Enum.sort()
+
+    # Slack channel ownership, consumed by connectors to route channel
+    # messages, heartbeats, approvals, and inter-agent mirrors.
+    channel_bindings =
+      agents
+      |> Enum.filter(& &1.slack_channel)
+      |> Enum.map(&%{"agent" => &1.name, "slack_channel" => &1.slack_channel})
+      |> Enum.sort_by(& &1["agent"])
 
     conn
     |> send_json(200, %{
@@ -140,7 +146,8 @@ defmodule TriOnyx.Router do
       "tool_groups" => tool_groups,
       "known_tools" => TriOnyx.ToolRegistry.known_tools(),
       "tool_briefs" => TriOnyx.ToolRegistry.brief_specs(),
-      "known_agents" => known_agents
+      "known_agents" => known_agents,
+      "channel_bindings" => channel_bindings
     })
   end
 

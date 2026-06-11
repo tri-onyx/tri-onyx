@@ -34,6 +34,10 @@ defmodule TriOnyx.AgentDefinition do
     gateway-mediated `GitHub` tool. Auto-injects write access to the host-side
     clone at `/workspace/repos/<owner>/<repo>/**`; the repo token stays on the
     gateway (configured via `TRI_ONYX_GITHUB_TOKENS`).
+  - `slack_channel` — Slack channel ID (e.g. `C0123ABCDEF`) this agent owns.
+    Served to connectors via `GET /agents/schema` (`channel_bindings`); the
+    Slack adapter routes all messages in the channel to this agent and posts
+    the agent's heartbeats, approvals, and inter-agent mirrors there.
   - `reflection` — cron expression for a daily self-reflection run in an isolated
     container mode (e.g. `"0 23 * * *"`). The reflection run receives only the
     hardcoded reflection system prompt plus read-only access to today's session
@@ -97,6 +101,7 @@ defmodule TriOnyx.AgentDefinition do
           trionyx_repo: boolean(),
           exclude_from_personalization: boolean(),
           github_repo: String.t() | nil,
+          slack_channel: String.t() | nil,
           reflection: String.t() | nil
         }
 
@@ -133,6 +138,7 @@ defmodule TriOnyx.AgentDefinition do
     trionyx_repo: false,
     exclude_from_personalization: false,
     github_repo: nil,
+    slack_channel: nil,
     reflection: nil
   ]
 
@@ -295,6 +301,10 @@ defmodule TriOnyx.AgentDefinition do
     %{field: "github_repo", message: hint}
   end
 
+  def format_error({:invalid_slack_channel, _value, hint}) do
+    %{field: "slack_channel", message: hint}
+  end
+
   def format_error({:invalid_cron_schedule, idx, {:missing_field, field}}) do
     %{field: "cron_schedules", message: "Schedule ##{idx + 1}: missing #{field}"}
   end
@@ -403,6 +413,9 @@ defmodule TriOnyx.AgentDefinition do
           %{value: "heartbeat", label: "Heartbeat"}
         ],
         group: "messaging", order: 3, hint: "Accepted trigger types"},
+      %{key: "slack_channel", label: "Slack Channel", type: "string", required: false, default: nil,
+        options: nil, group: "messaging", order: 5,
+        hint: "Slack channel ID this agent owns (e.g. C0123ABCDEF)"},
       %{key: "bcp_channels", label: "BCP Channels", type: "yaml", required: false, default: [],
         options: nil, group: "messaging", order: 4,
         hint: "Business continuity protocol channels (YAML)",
@@ -458,9 +471,9 @@ defmodule TriOnyx.AgentDefinition do
   @spec frontmatter_field_order() :: [String.t()]
   defp frontmatter_field_order do
     ~w(name description model tools network fs_read fs_write send_to receive_from
-       restart_targets browser docker_socket trionyx_repo github_repo skills plugins
-       input_sources heartbeat_every idle_timeout cron_schedules reflection
-       bcp_channels base_taint max_effective_risk exclude_from_personalization)
+       restart_targets browser docker_socket trionyx_repo github_repo slack_channel
+       skills plugins input_sources heartbeat_every idle_timeout cron_schedules
+       reflection bcp_channels base_taint max_effective_risk exclude_from_personalization)
   end
 
   @spec serialize_yaml_field(String.t(), term()) :: [String.t()] | [nil]
@@ -666,6 +679,7 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo"),
          {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization"),
          {:ok, github_repo} <- parse_github_repo(yaml),
+         {:ok, slack_channel} <- parse_slack_channel(yaml),
          {:ok, reflection} <- parse_reflection(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
@@ -736,6 +750,7 @@ defmodule TriOnyx.AgentDefinition do
          trionyx_repo: trionyx_repo,
          exclude_from_personalization: exclude_from_personalization,
          github_repo: github_repo,
+         slack_channel: slack_channel,
          reflection: reflection
        }}
     end
@@ -1268,6 +1283,30 @@ defmodule TriOnyx.AgentDefinition do
 
       _other ->
         {:error, {:invalid_field_type, "github_repo", :expected_string}}
+    end
+  end
+
+  # Slack channel IDs are short uppercase-alphanumeric tokens (C…, G…).
+  # Loose validation — just enough to catch names ("#general") and typos.
+  @slack_channel_pattern ~r/\A[A-Z][A-Z0-9]{6,}\z/
+
+  @spec parse_slack_channel(map()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp parse_slack_channel(yaml) do
+    case Map.get(yaml, "slack_channel") do
+      nil ->
+        {:ok, nil}
+
+      channel when is_binary(channel) ->
+        if Regex.match?(@slack_channel_pattern, channel) do
+          {:ok, channel}
+        else
+          {:error,
+           {:invalid_slack_channel, channel,
+            "expected a Slack channel ID like \"C0123ABCDEF\" (not a #name)"}}
+        end
+
+      _other ->
+        {:error, {:invalid_field_type, "slack_channel", :expected_string}}
     end
   end
 

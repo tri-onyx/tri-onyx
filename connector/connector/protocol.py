@@ -155,6 +155,20 @@ class ApprovalRequestMessage:
 
 
 @dataclass(slots=True)
+class InterAgentMirrorMessage:
+    """A mirror of a routed inter-agent message, for humans to follow in chat.
+
+    The gateway broadcasts one per successfully routed inter-agent message;
+    the connector posts it into the rooms bound to either agent (if any).
+    """
+
+    from_agent: str
+    to_agent: str
+    message_type: str = "text"
+    content: str = ""
+
+
+@dataclass(slots=True)
 class ArticleMessage(OutboundMessage):
     """An article submitted by an agent for posting to chat."""
 
@@ -246,6 +260,14 @@ def decode(raw: str | bytes) -> object:
             action=data.get("action", ""),
             channel=data.get("channel", {}),
             params=data.get("params", {}),
+        )
+
+    if msg_type == "inter_agent_mirror":
+        return InterAgentMirrorMessage(
+            from_agent=data.get("from_agent", ""),
+            to_agent=data.get("to_agent", ""),
+            message_type=data.get("message_type", "text"),
+            content=data.get("content", ""),
         )
 
     if msg_type == "approval_request":

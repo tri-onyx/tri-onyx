@@ -22,14 +22,23 @@
                 "chat:write",
                 "im:history",
                 "im:read",
-                "users:read"
+                "users:read",
+                "channels:history",
+                "channels:read",
+                "groups:history",
+                "groups:read",
+                "reactions:read",
+                "files:write"
             ]
         }
     },
     "settings": {
         "event_subscriptions": {
             "bot_events": [
-                "message.im"
+                "message.im",
+                "message.channels",
+                "message.groups",
+                "reaction_added"
             ]
         },
         "interactivity": {

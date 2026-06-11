@@ -104,7 +104,14 @@ defmodule TriOnyx.Triggers.InterAgent do
           "(type: #{message.message_type})"
       )
 
-      TriOnyx.TriggerRouter.dispatch(router, event)
+      case TriOnyx.TriggerRouter.dispatch(router, event) do
+        {:ok, _pid} = result ->
+          broadcast_mirror(message, sanitized_payload)
+          result
+
+        other ->
+          other
+      end
     else
       {:error, {:send_not_allowed, from, to}} = error ->
         AuditLog.log_messaging_policy_rejection(audit_log, from, to, :send_not_allowed, "sender '#{from}' does not list '#{to}' in send_to")
@@ -226,6 +233,49 @@ defmodule TriOnyx.Triggers.InterAgent do
     end
   catch
     :exit, _ -> :low
+  end
+
+  @mirror_max_len 1_500
+
+  # Mirrors a successfully routed inter-agent message to connectors so
+  # humans can follow agent-to-agent conversations in chat. The connector
+  # resolves which rooms/channels (if any) the two agents are bound to;
+  # the gateway broadcasts unconditionally and platform-agnostically.
+  # Best-effort: mirror failures must never affect routing.
+  @spec broadcast_mirror(message(), map()) :: :ok
+  defp broadcast_mirror(message, sanitized_payload) do
+    frame =
+      Jason.encode!(%{
+        "type" => "inter_agent_mirror",
+        "from_agent" => message.from,
+        "to_agent" => message.to,
+        "message_type" => message.message_type,
+        "content" => render_mirror_content(sanitized_payload)
+      })
+
+    TriOnyx.ConnectorHandler.broadcast_to_connectors(frame)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # Single text-like field renders as plain text; anything else as JSON.
+  defp render_mirror_content(payload) do
+    text =
+      case payload do
+        %{"text" => text} when is_binary(text) and map_size(payload) == 1 -> text
+        %{"message" => text} when is_binary(text) and map_size(payload) == 1 -> text
+        %{"content" => text} when is_binary(text) and map_size(payload) == 1 -> text
+        other -> Jason.encode!(other, pretty: true)
+      end
+
+    if String.length(text) > @mirror_max_len do
+      String.slice(text, 0, @mirror_max_len) <> "…"
+    else
+      text
+    end
   end
 
   @spec log_sanitization(GenServer.server(), message(), boolean()) :: :ok

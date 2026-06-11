@@ -14,6 +14,7 @@ from typing import Any
 
 from connector.adapters.matrix import MatrixAdapter
 from connector.adapters.slack import SlackAdapter
+from connector.channel_bindings import load_channel_bindings
 from connector.config import AdapterConfig, ConnectorConfig, load_config
 from connector.gateway_client import GatewayClient
 from connector.tool_briefs import load_brief_specs
@@ -29,6 +30,7 @@ from connector.protocol import (
     ApprovalRequestMessage,
     HeartbeatNotification,
     InboundMessage,
+    InterAgentMirrorMessage,
     OutboundMessage,
     ReactionMessage,
 )
@@ -274,6 +276,33 @@ async def _route_heartbeat(
             await adapter.send_text(channel, msg.content, agent_name=msg.agent_name)
 
 
+async def _route_mirror(
+    adapters: dict[str, Any],
+    msg: InterAgentMirrorMessage,
+) -> None:
+    """Post an inter-agent message mirror into both agents' rooms.
+
+    Resolves each agent's room with the same lookup used for heartbeats;
+    agents without a room are silently skipped. When both agents share a
+    room the mirror is posted once.
+    """
+    targets: dict[tuple[str, str], tuple[Any, dict[str, Any]]] = {}
+    for agent in (msg.from_agent, msg.to_agent):
+        for adapter, channel in _resolve_agent_room(adapters, agent):
+            key = (channel.get("platform", ""), channel.get("room_id", ""))
+            targets.setdefault(key, (adapter, channel))
+
+    if not targets:
+        logger.debug(
+            "No rooms bound for mirror %s → %s", msg.from_agent, msg.to_agent
+        )
+        return
+
+    text = f"💬 [{msg.from_agent} → {msg.to_agent}] {msg.content}"
+    for adapter, channel in targets.values():
+        await adapter.send_text(channel, text, agent_name=msg.from_agent)
+
+
 async def run(config: ConnectorConfig) -> None:
     """Start all components and run until shutdown."""
     adapters = _build_adapters(config)
@@ -289,6 +318,7 @@ async def run(config: ConnectorConfig) -> None:
         on_action=lambda req: _route_action(adapters, req),
         on_heartbeat=lambda msg: _route_heartbeat(adapters, msg),
         on_approval_request=lambda msg: _route_approval_request(adapters, msg),
+        on_mirror=lambda msg: _route_mirror(adapters, msg),
     )
 
     # Wire adapter inbound -> gateway
@@ -314,6 +344,10 @@ async def run(config: ConnectorConfig) -> None:
         # Tool brief specs come from the gateway (retries while it boots);
         # until loaded, adapters fall back to generic first-input briefs.
         tg.create_task(load_brief_specs(config.gateway_url))
+
+        # Slack channel bindings also come from the gateway; until loaded,
+        # messages in bound channels are ignored by the Slack adapter.
+        tg.create_task(load_channel_bindings(config.gateway_url, adapters))
 
         # Start adapters
         for name, adapter in adapters.items():

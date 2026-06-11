@@ -1107,6 +1107,45 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "slack_channel parsing" do
+    test "defaults to nil when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.slack_channel == nil
+    end
+
+    test "parses a valid channel ID" do
+      content = """
+      ---
+      name: channel-agent
+      tools: Read
+      slack_channel: C0123ABCDEF
+      ---
+
+      Channel agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.slack_channel == "C0123ABCDEF"
+    end
+
+    test "rejects channel names and malformed IDs" do
+      for bad <- ["#general", "general", "c0123abcdef", "C12"] do
+        content = """
+        ---
+        name: bad-channel-agent
+        tools: Read
+        slack_channel: "#{bad}"
+        ---
+
+        Bad.
+        """
+
+        assert {:error, {:invalid_slack_channel, _, _}} = AgentDefinition.parse(content),
+               "expected #{inspect(bad)} to be rejected"
+      end
+    end
+  end
+
   describe "plugins parsing" do
     test "parses plugins list" do
       content = """

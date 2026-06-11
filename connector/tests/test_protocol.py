@@ -4,6 +4,7 @@ import json
 
 from connector.protocol import (
     ApprovalRequestMessage,
+    InterAgentMirrorMessage,
     ReactionMessage,
     decode,
     encode,
@@ -94,6 +95,36 @@ class TestApprovalRequestDecoding:
         assert msg.to_agent == ""
         assert msg.category == 0
         assert msg.anomalies == []
+
+
+class TestInterAgentMirrorDecoding:
+    def test_decode_mirror(self):
+        raw = json.dumps({
+            "type": "inter_agent_mirror",
+            "from_agent": "repo-foo",
+            "to_agent": "repo-bar",
+            "message_type": "text",
+            "content": "Can you check issue #42?",
+        })
+        msg = decode(raw)
+
+        assert isinstance(msg, InterAgentMirrorMessage)
+        assert msg.from_agent == "repo-foo"
+        assert msg.to_agent == "repo-bar"
+        assert msg.message_type == "text"
+        assert msg.content == "Can you check issue #42?"
+
+    def test_decode_mirror_defaults(self):
+        raw = json.dumps({
+            "type": "inter_agent_mirror",
+            "from_agent": "a",
+            "to_agent": "b",
+        })
+        msg = decode(raw)
+
+        assert isinstance(msg, InterAgentMirrorMessage)
+        assert msg.message_type == "text"
+        assert msg.content == ""
 
 
 class TestRoundTrip:
