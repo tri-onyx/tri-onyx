@@ -17,10 +17,13 @@ defmodule TriOnyx.Connectors.GitHub do
 
   Tokens come from the `:github` app env (set in `config/runtime.exs`
   from `TRI_ONYX_GITHUB_TOKENS`, a comma-separated list of
-  `owner/repo=token` pairs):
+  `owner/repo=token` pairs). A `default=token` entry is the fallback for
+  repos without an explicit token — note that a shared default trades
+  away per-repo blast-radius isolation (any agent using it can act on
+  every repo the token can reach):
 
       config :tri_onyx, :github,
-        tokens: %{"owner/repo" => "github_pat_..."},
+        tokens: %{"owner/repo" => "github_pat_...", "default" => "github_pat_..."},
         bot_name: "TriOnyx Agent",
         bot_email: "tri-onyx@example.invalid"
   """
@@ -62,7 +65,8 @@ defmodule TriOnyx.Connectors.GitHub do
   end
 
   @doc """
-  Returns the configured token for a repo, or an error if none is set.
+  Returns the configured token for a repo, falling back to the `default`
+  entry, or an error if neither is set.
   """
   @spec token_for(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def token_for(repo) do
@@ -73,9 +77,15 @@ defmodule TriOnyx.Connectors.GitHub do
         {:ok, token}
 
       _ ->
-        {:error,
-         "no GitHub token configured for #{repo} — " <>
-           "add it to TRI_ONYX_GITHUB_TOKENS (owner/repo=token,...)"}
+        case Map.fetch(tokens, "default") do
+          {:ok, token} when is_binary(token) and token != "" ->
+            {:ok, token}
+
+          _ ->
+            {:error,
+             "no GitHub token configured for #{repo} — add it to " <>
+               "TRI_ONYX_GITHUB_TOKENS (owner/repo=token,...) or set a default=token entry"}
+        end
     end
   end
 

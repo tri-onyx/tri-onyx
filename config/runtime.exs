@@ -55,7 +55,8 @@ end
 
 # GitHub connector — per-repo fine-grained tokens for the gateway-mediated
 # GitHub tool. Format: "owner/repo=github_pat_...,other/repo=github_pat_..."
-# Only enabled when TRI_ONYX_GITHUB_TOKENS is set
+# A "default=github_pat_..." entry is the fallback for repos without an
+# explicit token. Only enabled when TRI_ONYX_GITHUB_TOKENS is set
 if github_tokens = System.get_env("TRI_ONYX_GITHUB_TOKENS") do
   tokens =
     github_tokens
