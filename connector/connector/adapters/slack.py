@@ -114,6 +114,31 @@ class ConsentStore:
         return entry.get("consent_version") != self.consent_version
 
 
+class ChannelCache:
+    """Persistent name → channel ID map for auto-provisioned channels.
+
+    Avoids the heavily rate-limited ``conversations.list`` on every
+    startup: once a channel is created or found, its ID is remembered on
+    the persistent volume.
+    """
+
+    def __init__(self, path: str | Path) -> None:
+        self._path = Path(path)
+        self._data: dict[str, str] = {}
+        if self._path.exists():
+            self._data = yaml.safe_load(self._path.read_text()) or {}
+
+    def get(self, name: str) -> str | None:
+        return self._data.get(name)
+
+    def put(self, name: str, channel_id: str) -> None:
+        self._data[name] = channel_id
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(yaml.dump(self._data, default_flow_style=False))
+        tmp.rename(self._path)
+
+
 class SlackAdapter(BaseAdapter):
     """Bridges Slack DMs to the TriOnyx gateway via Socket Mode.
 
@@ -164,6 +189,11 @@ class SlackAdapter(BaseAdapter):
 
         # Approval tracking: message ts -> approval_id (for 👍/👎 reactions)
         self._approval_events: dict[str, str] = {}
+
+        # Auto-provisioned channel name -> ID cache (persistent volume)
+        self._channel_cache = ChannelCache(
+            self._config.extra.get("channel_cache_path", "/data/slack/channels.yaml")
+        )
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -534,9 +564,15 @@ class SlackAdapter(BaseAdapter):
     async def ensure_channel(self, name: str) -> str | None:
         """Find or create the channel *name*; returns its ID or None.
 
+        Create-first strategy: ``conversations.list`` is brutally
+        rate-limited for non-Marketplace apps (~1 req/min), so we keep a
+        local name→ID cache on the persistent volume, attempt
+        ``conversations.create`` directly when the name is unknown, and
+        only fall back to listing when the name is already taken by a
+        channel we did not create.
+
         Created channels automatically include the bot (as creator); the
-        configured owner is invited so they don't have to find it. Existing
-        channels are joined if the bot is not yet a member.
+        configured owner is invited so they don't have to find it.
         """
         deadline = time.monotonic() + self._ENSURE_READY_TIMEOUT_S
         while self._web_client is None or not self._bot_user_id:
@@ -545,48 +581,92 @@ class SlackAdapter(BaseAdapter):
                 return None
             await asyncio.sleep(1)
 
+        cached = self._channel_cache.get(name)
+        if cached:
+            return cached
+
         try:
-            existing = await self._find_channel_by_name(name)
-            if existing is not None:
+            channel_id = await self._create_channel(name)
+            if channel_id is None:
+                # name_taken — the channel exists; find its ID the slow way
+                existing = await self._find_channel_by_name(name)
+                if existing is None:
+                    logger.warning(
+                        "Channel #%s exists but could not be found via "
+                        "conversations.list (archived, or rate limits exhausted)",
+                        name,
+                    )
+                    return None
                 channel_id, is_member = existing
                 if not is_member:
                     await self._web_client.conversations_join(channel=channel_id)
                     logger.info("Joined existing channel #%s (%s)", name, channel_id)
-                return channel_id
 
-            private = bool(self._config.extra.get("channels_private", False))
-            resp = await self._web_client.conversations_create(
-                name=name, is_private=private
-            )
-            channel_id = resp["channel"]["id"]
-            logger.info("Created channel #%s (%s)", name, channel_id)
-
-            if self._owner_user_id:
-                try:
-                    await self._web_client.conversations_invite(
-                        channel=channel_id, users=self._owner_user_id
-                    )
-                except Exception:
-                    logger.warning(
-                        "Could not invite owner to #%s — invite manually", name
-                    )
-
+            self._channel_cache.put(name, channel_id)
             return channel_id
         except Exception:
             logger.exception("ensure_channel(%s) failed", name)
             return None
 
+    async def _create_channel(self, name: str) -> str | None:
+        """Create the channel and invite the owner; None if name is taken."""
+        assert self._web_client is not None
+        from slack_sdk.errors import SlackApiError
+
+        private = bool(self._config.extra.get("channels_private", False))
+        try:
+            resp = await self._web_client.conversations_create(
+                name=name, is_private=private
+            )
+        except SlackApiError as exc:
+            if exc.response.get("error") == "name_taken":
+                return None
+            raise
+
+        channel_id = resp["channel"]["id"]
+        logger.info("Created channel #%s (%s)", name, channel_id)
+
+        if self._owner_user_id:
+            try:
+                await self._web_client.conversations_invite(
+                    channel=channel_id, users=self._owner_user_id
+                )
+            except Exception:
+                logger.warning("Could not invite owner to #%s — invite manually", name)
+
+        return channel_id
+
+    # conversations.list retry budget when Slack rate-limits (429). The
+    # Retry-After can be a minute or more; provisioning runs at startup
+    # where waiting is acceptable.
+    _LIST_RATE_LIMIT_RETRIES = 3
+
     async def _find_channel_by_name(self, name: str) -> tuple[str, bool] | None:
         """Return (channel_id, bot_is_member) for *name*, or None."""
         assert self._web_client is not None
+        from slack_sdk.errors import SlackApiError
+
+        retries = self._LIST_RATE_LIMIT_RETRIES
         cursor = ""
         while True:
-            resp = await self._web_client.conversations_list(
-                types="public_channel,private_channel",
-                exclude_archived=True,
-                limit=200,
-                cursor=cursor or None,
-            )
+            try:
+                resp = await self._web_client.conversations_list(
+                    types="public_channel,private_channel",
+                    exclude_archived=True,
+                    limit=200,
+                    cursor=cursor or None,
+                )
+            except SlackApiError as exc:
+                if exc.response.status_code == 429 and retries > 0:
+                    retries -= 1
+                    delay = int(exc.response.headers.get("Retry-After", 30))
+                    logger.info(
+                        "conversations.list rate-limited — retrying in %ds", delay
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+                raise
+
             for ch in resp.get("channels", []):
                 if ch.get("name") == name:
                     return ch["id"], bool(ch.get("is_member"))
