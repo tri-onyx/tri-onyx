@@ -188,6 +188,23 @@ docker compose -f docker-compose.docs.yml down
 - Options: `-W 1920 -H 1080` for viewport size, `--wait networkidle` for load strategy
 - Dependencies are managed inline via PEP 723 — no manual install needed
 
+## Slack Log Tool
+
+- Use `uv run scripts/slack-log.py <command>` to inspect what was actually posted
+  in the Slack channels the TriOnyx bot is in (e.g. verifying agent output and
+  inter-agent mirrors without screenshots)
+- Subcommands:
+  ```bash
+  uv run scripts/slack-log.py channels                       # list bot channels
+  uv run scripts/slack-log.py read trionyx-golden-path-docs  # recent history
+  uv run scripts/slack-log.py read C0123ABCDEF -n 50         # by ID, more messages
+  ```
+- The bot token is taken from the running connector container's config (the
+  authoritative source — the host `.env` copy has drifted before) and is never
+  printed
+- Note: Slack returns `>` as `&gt;` in raw history text; blockquotes render fine
+  in the client
+
 ## Plugin System
 
 Plugins are reusable agent extensions (e.g., newsagg, diary, bookmarks) that live in `workspace/plugins/`. Each plugin is a directory of files that agents can read/write via FUSE paths like `/plugins/<name>/**`.

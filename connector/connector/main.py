@@ -309,8 +309,10 @@ async def _route_mirror(
         )
         return
 
+    # Single-asterisk bold: Slack mrkdwn (the markdown_to_mrkdwn pass in
+    # send_text is a no-op, so this must already be valid mrkdwn).
     quoted = "\n".join(f"> {line}" for line in msg.content.splitlines() or [""])
-    text = f"💬 **{msg.from_agent}** → **{msg.to_agent}**\n{quoted}"
+    text = f"💬 *{msg.from_agent}* → *{msg.to_agent}*\n{quoted}"
     for adapter, channel in targets.values():
         await adapter.send_text(channel, text, agent_name=msg.from_agent)
 
