@@ -5,7 +5,7 @@ The gateway's agent definitions own channel bindings, served as
 agent name plus either an explicit ``slack_channel`` ID or a
 ``github_repo`` from which a channel is auto-provisioned: the channel
 name is ``{prefix}{repo-name}`` (prefix from the Slack adapter's
-``channel_prefix`` config, default ``gh-``), and the bot creates the
+``channel_prefix`` config, default ``trionyx-``), and the bot creates the
 channel and invites the owner if it does not exist yet — the creator is
 automatically a member, so nobody has to invite the bot anywhere.
 
@@ -106,7 +106,7 @@ async def load_channel_bindings(gateway_url: str, adapters: dict[str, Any]) -> N
             await asyncio.sleep(_FETCH_RETRY_DELAY_S)
 
     assert bindings is not None
-    prefix = slack._config.extra.get("channel_prefix", "gh-")
+    prefix = slack._config.extra.get("channel_prefix", "trionyx-")
     desired_names = _resolve_names(bindings, prefix)
     bound = 0
 
