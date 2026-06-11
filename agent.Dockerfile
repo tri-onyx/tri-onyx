@@ -32,6 +32,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
       iptables \
       tini \
       gosu \
+      # git for local repo operations in agents with a github_repo clone
+      # (remote operations are gateway-mediated via the GitHub tool)
+      git \
       # Playwright/Chromium system dependencies
       libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 \
       libatspi2.0-0 libdbus-1-3 libdrm2 libxcomposite1 \

@@ -198,3 +198,31 @@ func TestIsBinaryPath(t *testing.T) {
 		}
 	}
 }
+
+func TestIsBinaryPathGitInternals(t *testing.T) {
+	gitInternal := []string{
+		"/repos/oslokommune/golden-path-docs/.git/objects/d5/df39b9e5279d",
+		"/repos/o/r/.git/objects/pack/pack-abc123.pack",
+		"/repos/o/r/.git/objects/pack/pack-abc123.idx",
+		"/repos/o/r/.git/index",
+		"/repos/o/r/.git/HEAD",
+		"/.git/config",
+	}
+	for _, p := range gitInternal {
+		if !IsBinaryPath(p) {
+			t.Errorf("expected .git internal to be exempt: %s", p)
+		}
+	}
+
+	// Working-tree files in a repo stay sanitized — only .git/ is exempt.
+	workingTree := []string{
+		"/repos/o/r/README.md",
+		"/repos/o/r/docs/guide.md",
+		"/repos/o/r/.gitignore",
+	}
+	for _, p := range workingTree {
+		if IsBinaryPath(p) {
+			t.Errorf("expected working-tree file to be sanitized: %s", p)
+		}
+	}
+}

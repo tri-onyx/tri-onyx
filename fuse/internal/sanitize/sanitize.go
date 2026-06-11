@@ -24,8 +24,23 @@ var binaryExtensions = map[string]bool{
 
 // IsBinaryPath reports whether the file at path is likely binary based on its
 // extension. Binary files must not be sanitized — stripping bytes corrupts them.
+//
+// Everything under a .git/ directory is exempt: the object database is
+// zlib-compressed binary in extensionless hash-named files (plus .pack/.idx
+// and the binary index), and stripping bytes from it corrupts the repository.
+// Note this means repo content read via git plumbing (git cat-file) bypasses
+// invisible-character stripping; checked-out working-tree files remain
+// sanitized.
 func IsBinaryPath(path string) bool {
-	return binaryExtensions[strings.ToLower(filepath.Ext(path))]
+	if binaryExtensions[strings.ToLower(filepath.Ext(path))] {
+		return true
+	}
+	for _, seg := range strings.Split(filepath.ToSlash(path), "/") {
+		if seg == ".git" {
+			return true
+		}
+	}
+	return false
 }
 
 // blocked reports whether a rune should be stripped from read data.

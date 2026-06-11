@@ -99,12 +99,21 @@ defmodule TriOnyx.Sandbox do
     # Inject default per-agent write path
     default_write = "/agents/#{definition.name}/**"
 
-    # Agents with a github_repo get write access to the host-side clone
-    # the gateway maintains for them under /workspace/repos/.
-    github_write_paths =
+    # Agents with a github_repo get write access to the host-side clone the
+    # gateway maintains under {workspace}/repos/. Policy paths are relative
+    # to the FUSE source (the workspace root), so the entry is /repos/...
+    # even though the agent sees it at /workspace/repos/... (the mountpoint).
+    # Parent directories are added as read paths so lookup/readdir works on
+    # the way down to the clone (same reason /plugins/ itself is included).
+    {github_write_paths, github_read_paths} =
       case definition.github_repo do
-        nil -> []
-        repo -> ["/workspace/repos/#{repo}/**"]
+        nil ->
+          {[], []}
+
+        repo ->
+          [owner, _name] = String.split(repo, "/", parts: 2)
+
+          {["/repos/#{repo}/**"], ["/repos/", "/repos/#{owner}/"]}
       end
 
     fs_write = Enum.uniq([default_write | github_write_paths ++ definition.fs_write])
@@ -129,7 +138,8 @@ defmodule TriOnyx.Sandbox do
         []
       end
 
-    fs_read = Enum.uniq(definition.fs_read ++ skill_read_paths ++ plugin_read_paths)
+    fs_read =
+      Enum.uniq(definition.fs_read ++ skill_read_paths ++ plugin_read_paths ++ github_read_paths)
 
     policy = %{
       "fs_read" => fs_read,

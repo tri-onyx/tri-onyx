@@ -642,6 +642,11 @@ defmodule TriOnyx.AgentPort do
       |> Keyword.put(:workspace_dir, host_workspace)
       |> Keyword.put(:log_dir, resolve_host_path(Application.get_env(:tri_onyx, :session_log_dir, "logs")))
 
+    # The FUSE path trie is built from files existing at mount time, so the
+    # repo clone must exist on the host before the container starts — a
+    # clone created mid-session would be invisible to the agent.
+    ensure_github_clone(definition)
+
     docker_args = Sandbox.build_docker_args(definition, session_id, sandbox_opts)
     container_name = "tri-onyx-#{definition.name}-#{session_id}"
 
@@ -660,6 +665,22 @@ defmodule TriOnyx.AgentPort do
     )
 
     {:ok, %__MODULE__{port: port, notify: notify, buffer: "", container_name: container_name}}
+  end
+
+  @spec ensure_github_clone(AgentDefinition.t()) :: :ok
+  defp ensure_github_clone(%AgentDefinition{github_repo: nil}), do: :ok
+
+  defp ensure_github_clone(%AgentDefinition{github_repo: repo}) do
+    alias TriOnyx.Connectors.GitHub
+
+    with {:ok, token} <- GitHub.token_for(repo),
+         {:ok, _dir} <- GitHub.ensure_clone(repo, token) do
+      :ok
+    else
+      {:error, reason} ->
+        Logger.warning("AgentPort: could not prepare clone of #{repo}: #{reason}")
+        :ok
+    end
   end
 
   @spec init_legacy(pid(), keyword()) :: {:ok, %__MODULE__{}}

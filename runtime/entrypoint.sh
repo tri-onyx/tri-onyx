@@ -313,6 +313,13 @@ fi
 # After hiding /mnt/host, gosu drops root privileges so the agent runs
 # as the unprivileged tri_onyx user with no capabilities.
 
+# Repo clones under /workspace/repos are owned by the gateway (root) but
+# accessed as tri_onyx through FUSE; git refuses to operate on repos with
+# mismatched ownership unless marked safe.
+if command -v git >/dev/null 2>&1; then
+    gosu tri_onyx git config --global --add safe.directory '*' || true
+fi
+
 log "Dropping privileges to tri_onyx user"
 exec unshare --mount -- sh -c '
     mount -t tmpfs none /mnt/host &&

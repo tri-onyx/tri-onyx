@@ -445,8 +445,10 @@ defmodule TriOnyx.SandboxTest do
       json = Sandbox.build_fuse_policy(definition)
       policy = Jason.decode!(json)
 
-      assert "/workspace/repos/myorg/myrepo/**" in policy["fs_write"]
+      assert "/repos/myorg/myrepo/**" in policy["fs_write"]
       assert "/agents/repo-agent/**" in policy["fs_write"]
+      assert "/repos/" in policy["fs_read"]
+      assert "/repos/myorg/" in policy["fs_read"]
     end
 
     test "no repo write path without github_repo" do
@@ -463,7 +465,7 @@ defmodule TriOnyx.SandboxTest do
       json = Sandbox.build_fuse_policy(definition)
       policy = Jason.decode!(json)
 
-      refute Enum.any?(policy["fs_write"], &String.starts_with?(&1, "/workspace/repos/"))
+      refute Enum.any?(policy["fs_write"], &String.starts_with?(&1, "/repos/"))
     end
   end
 
