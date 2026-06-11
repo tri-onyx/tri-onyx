@@ -1783,10 +1783,10 @@ defmodule TriOnyx.Router do
   @spec sse_wait_loop(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
   defp sse_wait_loop(conn, agent_name) do
     receive do
-      {:event_bus_agent, ^agent_name, %{"type" => "session_started", "session_id" => session_id} = event} ->
+      {:event_bus_agent, ^agent_name, %{"type" => "session_start", "session_id" => session_id} = event} ->
         EventBus.subscribe(session_id)
 
-        case Plug.Conn.chunk(conn, sse_encode("session_started", event)) do
+        case Plug.Conn.chunk(conn, sse_encode("session_start", event)) do
           {:ok, conn} -> sse_loop(conn)
           {:error, _reason} -> conn
         end

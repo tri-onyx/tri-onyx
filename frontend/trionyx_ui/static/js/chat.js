@@ -107,7 +107,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const es = new EventSource(url);
 
     const eventTypes = [
-      'connected', 'waiting', 'session_started', 'ready',
+      'connected', 'waiting', 'session_start', 'ready',
       'text', 'tool_use', 'tool_result',
       'result', 'error', 'user_prompt', 'risk_escalation',
       'send_message', 'bcp_query', 'session_stop', 'interrupted',
@@ -123,7 +123,7 @@ document.addEventListener('DOMContentLoaded', () => {
           return;
         }
 
-        if (type === 'connected' || type === 'session_started') {
+        if (type === 'connected' || type === 'session_start') {
           setStatus('connected', 'live');
           return;
         }

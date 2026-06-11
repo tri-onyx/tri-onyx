@@ -485,7 +485,7 @@ defmodule TriOnyx.AgentSession do
     Logger.info("AgentSession #{state.id}: runtime ready")
 
     EventBus.broadcast_agent(state.definition.name, %{
-      "type" => "session_started",
+      "type" => "session_start",
       "session_id" => state.id,
       "agent" => state.definition.name
     })
@@ -1703,7 +1703,7 @@ defmodule TriOnyx.AgentSession do
       "tools" => tools,
       "model" => definition.model,
       "system_prompt" => system_prompt,
-      "max_turns" => 100,
+      "max_turns" => 200,
       "cwd" => "/workspace",
       "skills" => skills,
       "plugins" => plugins
