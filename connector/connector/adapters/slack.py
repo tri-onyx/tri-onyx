@@ -613,7 +613,11 @@ class SlackAdapter(BaseAdapter):
         assert self._web_client is not None
         from slack_sdk.errors import SlackApiError
 
-        private = bool(self._config.extra.get("channels_private", False))
+        # Private by default: Slack enforces membership as the hard boundary
+        # for private channels (the bot cannot even see ones it's not in),
+        # matching the rest of the trust model. Set channels_private: false
+        # in the adapter config for public channels.
+        private = bool(self._config.extra.get("channels_private", True))
         try:
             resp = await self._web_client.conversations_create(
                 name=name, is_private=private
