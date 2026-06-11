@@ -429,6 +429,44 @@ defmodule TriOnyx.SandboxTest do
     end
   end
 
+  describe "github_repo FUSE path injection" do
+    test "auto-injects write path for the repo clone" do
+      content = """
+      ---
+      name: repo-agent
+      tools: Read, Bash, GitHub
+      github_repo: myorg/myrepo
+      ---
+
+      Repo agent.
+      """
+
+      {:ok, definition} = AgentDefinition.parse(content)
+      json = Sandbox.build_fuse_policy(definition)
+      policy = Jason.decode!(json)
+
+      assert "/workspace/repos/myorg/myrepo/**" in policy["fs_write"]
+      assert "/agents/repo-agent/**" in policy["fs_write"]
+    end
+
+    test "no repo write path without github_repo" do
+      content = """
+      ---
+      name: plain-agent
+      tools: Read
+      ---
+
+      Plain agent.
+      """
+
+      {:ok, definition} = AgentDefinition.parse(content)
+      json = Sandbox.build_fuse_policy(definition)
+      policy = Jason.decode!(json)
+
+      refute Enum.any?(policy["fs_write"], &String.starts_with?(&1, "/workspace/repos/"))
+    end
+  end
+
   # --- Test Helpers ---
 
   # Extracts -e KEY=VALUE pairs from docker args into a map

@@ -30,6 +30,10 @@ defmodule TriOnyx.AgentDefinition do
     risk exceeds this level. The default of "critical" can never be exceeded, so enforcement
     is opt-in per agent.
   - `exclude_from_personalization` — if true, skip this agent's logs when generating the user profile (default: false)
+  - `github_repo` — GitHub repository (`owner/repo`) this agent manages via the
+    gateway-mediated `GitHub` tool. Auto-injects write access to the host-side
+    clone at `/workspace/repos/<owner>/<repo>/**`; the repo token stays on the
+    gateway (configured via `TRI_ONYX_GITHUB_TOKENS`).
   - `reflection` — cron expression for a daily self-reflection run in an isolated
     container mode (e.g. `"0 23 * * *"`). The reflection run receives only the
     hardcoded reflection system prompt plus read-only access to today's session
@@ -92,6 +96,7 @@ defmodule TriOnyx.AgentDefinition do
           docker_socket: boolean(),
           trionyx_repo: boolean(),
           exclude_from_personalization: boolean(),
+          github_repo: String.t() | nil,
           reflection: String.t() | nil
         }
 
@@ -127,6 +132,7 @@ defmodule TriOnyx.AgentDefinition do
     docker_socket: false,
     trionyx_repo: false,
     exclude_from_personalization: false,
+    github_repo: nil,
     reflection: nil
   ]
 
@@ -285,6 +291,10 @@ defmodule TriOnyx.AgentDefinition do
     %{field: "reflection", message: "Invalid cron expression"}
   end
 
+  def format_error({:invalid_github_repo, _value, hint}) do
+    %{field: "github_repo", message: hint}
+  end
+
   def format_error({:invalid_cron_schedule, idx, {:missing_field, field}}) do
     %{field: "cron_schedules", message: "Schedule ##{idx + 1}: missing #{field}"}
   end
@@ -372,6 +382,9 @@ defmodule TriOnyx.AgentDefinition do
         options: nil, group: "sandbox", order: 4, hint: "Access to Docker socket"},
       %{key: "trionyx_repo", label: "TriOnyx Repo", type: "boolean", required: false, default: false,
         options: nil, group: "sandbox", order: 5, hint: "Access to the TriOnyx repo itself"},
+      %{key: "github_repo", label: "GitHub Repository", type: "string", required: false, default: nil,
+        options: nil, group: "sandbox", order: 6,
+        hint: "owner/repo managed via the gateway-mediated GitHub tool (token stays on the gateway)"},
 
       # Messaging
       %{key: "send_to", label: "Send To", type: "agent_list", required: false, default: [],
@@ -445,7 +458,7 @@ defmodule TriOnyx.AgentDefinition do
   @spec frontmatter_field_order() :: [String.t()]
   defp frontmatter_field_order do
     ~w(name description model tools network fs_read fs_write send_to receive_from
-       restart_targets browser docker_socket trionyx_repo skills plugins
+       restart_targets browser docker_socket trionyx_repo github_repo skills plugins
        input_sources heartbeat_every idle_timeout cron_schedules reflection
        bcp_channels base_taint max_effective_risk exclude_from_personalization)
   end
@@ -652,6 +665,7 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, docker_socket} <- parse_optional_boolean(yaml, "docker_socket"),
          {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo"),
          {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization"),
+         {:ok, github_repo} <- parse_github_repo(yaml),
          {:ok, reflection} <- parse_reflection(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
@@ -681,6 +695,20 @@ defmodule TriOnyx.AgentDefinition do
         )
       end
 
+      if "GitHub" in tools and is_nil(github_repo) do
+        Logger.warning(
+          "Agent '#{name}' has GitHub tool but no github_repo declared. " <>
+            "All GitHub commands will be rejected."
+        )
+      end
+
+      if github_repo != nil and "GitHub" not in tools do
+        Logger.warning(
+          "Agent '#{name}' declares github_repo but GitHub is not in tools list. " <>
+            "Agent can edit the clone but cannot reach GitHub."
+        )
+      end
+
       {:ok,
        %__MODULE__{
          name: name,
@@ -707,6 +735,7 @@ defmodule TriOnyx.AgentDefinition do
          docker_socket: docker_socket,
          trionyx_repo: trionyx_repo,
          exclude_from_personalization: exclude_from_personalization,
+         github_repo: github_repo,
          reflection: reflection
        }}
     end
@@ -1216,6 +1245,29 @@ defmodule TriOnyx.AgentDefinition do
     case Crontab.CronExpression.Parser.parse(schedule_str) do
       {:ok, _expr} -> :ok
       {:error, reason} -> {:error, {:invalid_cron_schedule, idx, {:invalid_expression, reason}}}
+    end
+  end
+
+  # GitHub owner and repo segments: alphanumerics, hyphens, underscores,
+  # dots — but never a path-traversal segment, since the repo string is
+  # joined into the host-side clone path.
+  @github_repo_pattern ~r"\A[A-Za-z0-9_][A-Za-z0-9_.-]*/[A-Za-z0-9_][A-Za-z0-9_.-]*\z"
+
+  @spec parse_github_repo(map()) :: {:ok, String.t() | nil} | {:error, term()}
+  defp parse_github_repo(yaml) do
+    case Map.get(yaml, "github_repo") do
+      nil ->
+        {:ok, nil}
+
+      repo when is_binary(repo) ->
+        if Regex.match?(@github_repo_pattern, repo) and ".." not in String.split(repo, "/") do
+          {:ok, repo}
+        else
+          {:error, {:invalid_github_repo, repo, "expected \"owner/repo\""}}
+        end
+
+      _other ->
+        {:error, {:invalid_field_type, "github_repo", :expected_string}}
     end
   end
 

@@ -1011,6 +1011,102 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "github_repo parsing" do
+    test "defaults to nil when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.github_repo == nil
+    end
+
+    test "parses a valid owner/repo string" do
+      content = """
+      ---
+      name: repo-agent
+      tools: Read, GitHub
+      github_repo: myorg/my-repo.name
+      ---
+
+      Repo agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.github_repo == "myorg/my-repo.name"
+    end
+
+    test "rejects strings that are not owner/repo" do
+      for bad <- ["justarepo", "a/b/c", "/leading", "trailing/", "owner/re po", "../etc"] do
+        content = """
+        ---
+        name: bad-repo-agent
+        tools: Read
+        github_repo: "#{bad}"
+        ---
+
+        Bad.
+        """
+
+        assert {:error, {:invalid_github_repo, _, _}} = AgentDefinition.parse(content),
+               "expected #{inspect(bad)} to be rejected"
+      end
+    end
+
+    test "rejects non-string github_repo" do
+      content = """
+      ---
+      name: bad-type-agent
+      tools: Read
+      github_repo:
+        - myorg/myrepo
+      ---
+
+      Bad.
+      """
+
+      assert {:error, {:invalid_field_type, "github_repo", :expected_string}} =
+               AgentDefinition.parse(content)
+    end
+
+    test "warns when GitHub tool is granted without github_repo" do
+      import ExUnit.CaptureLog
+
+      content = """
+      ---
+      name: toothless
+      tools: Read, GitHub
+      ---
+
+      No repo.
+      """
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _} = AgentDefinition.parse(content)
+        end)
+
+      assert log =~ "GitHub tool but no github_repo"
+    end
+
+    test "warns when github_repo is set without the GitHub tool" do
+      import ExUnit.CaptureLog
+
+      content = """
+      ---
+      name: clone-only
+      tools: Read
+      github_repo: myorg/myrepo
+      ---
+
+      Clone only.
+      """
+
+      log =
+        capture_log(fn ->
+          assert {:ok, _} = AgentDefinition.parse(content)
+        end)
+
+      assert log =~ "github_repo but GitHub is not in tools"
+    end
+  end
+
   describe "plugins parsing" do
     test "parses plugins list" do
       content = """

@@ -26,6 +26,7 @@ defmodule TriOnyx.TaintMatrix do
   | Bash (with network)   | high   | Shell + network = can curl/wget external data|
   | Read (external path)  | high   | Reads from outside /workspace or /mnt/host   |
   | Read (controlled path)| low    | Reads from /workspace or /mnt/host           |
+  | GitHub                | high   | Returns issue/PR/comment text from arbitrary GitHub users |
   | CalendarQuery          | low    | Gateway-mediated, returns structured JSON     |
   | CalendarCreate         | low    | Gateway-mediated, returns structured JSON     |
   | CalendarUpdate         | low    | Gateway-mediated, returns structured JSON     |
@@ -69,6 +70,7 @@ defmodule TriOnyx.TaintMatrix do
     "WebFetch" => :high,
     "WebSearch" => :high,
     "SendEmail" => :low,
+    "GitHub" => :high,
     "MoveEmail" => :low,
     "CreateFolder" => :low,
     "CalendarQuery" => :low,

@@ -1035,6 +1035,70 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  defp handle_agent_event({:github_request, req_id, command, args}, state) do
+    summary = Enum.join([command | args], " ")
+    Logger.info("AgentSession #{state.id}: github_request #{summary}")
+
+    repo = state.definition.github_repo
+    port = state.port
+    session_id = state.id
+    agent_name = state.definition.name
+
+    verdict =
+      cond do
+        is_nil(repo) -> {:deny, "no github_repo configured for this agent"}
+        "GitHub" not in state.definition.tools -> {:deny, "GitHub tool not granted"}
+        true -> TriOnyx.GitHub.CommandPolicy.classify(command, args)
+      end
+
+    case verdict do
+      {:deny, reason} ->
+        AgentPort.send_github_response(port, req_id, false, "denied by policy: #{reason}")
+
+      verdict ->
+        Task.start(fn ->
+          proceed =
+            case verdict do
+              :allow ->
+                :proceed
+
+              {:approval, reason} ->
+                await_github_approval(agent_name, session_id, repo, command, args, reason)
+            end
+
+          case proceed do
+            :proceed ->
+              case TriOnyx.Connectors.GitHub.execute(repo, command, args) do
+                {:ok, output} ->
+                  AgentPort.send_github_response(port, req_id, true, "ok", output)
+
+                {:error, reason} ->
+                  AgentPort.send_github_response(port, req_id, false, reason)
+              end
+
+            {:rejected, reason} ->
+              AgentPort.send_github_response(port, req_id, false, "approval rejected: #{reason}")
+          end
+        end)
+    end
+
+    broadcast_event(state, %{
+      "type" => "github_command",
+      "agent_name" => agent_name,
+      "repo" => repo,
+      "command" => command,
+      "args" => args,
+      "verdict" =>
+        case verdict do
+          :allow -> "allow"
+          {:approval, _} -> "approval"
+          {:deny, _} -> "deny"
+        end
+    })
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
 
@@ -1898,5 +1962,50 @@ defmodule TriOnyx.AgentSession do
       |> Enum.reject(&is_nil/1)
 
     Enum.join(parts, "\n")
+  end
+
+  # Submits an approval-gated GitHub command to the ApprovalQueue and blocks
+  # (inside the calling Task) until a human decides. Mirrors the SendEmail
+  # approval flow.
+  @spec await_github_approval(
+          String.t(),
+          String.t(),
+          String.t(),
+          String.t(),
+          [String.t()],
+          String.t()
+        ) :: :proceed | {:rejected, String.t()}
+  defp await_github_approval(agent_name, session_id, repo, command, args, reason) do
+    summary = Enum.join([command | args], " ")
+
+    {:ok, approval_id} =
+      BCP.ApprovalQueue.submit(%{
+        kind: "action",
+        agent_name: agent_name,
+        session_id: session_id,
+        tool_name: "GitHub",
+        tool_input: %{"repo" => repo, "command" => command, "args" => args}
+      })
+
+    approval_frame =
+      Jason.encode!(%{
+        "type" => "approval_request",
+        "approval_id" => approval_id,
+        "kind" => "action",
+        "from_agent" => agent_name,
+        "to_agent" => "",
+        "category" => 0,
+        "query_summary" => "GitHub [#{repo}]: #{summary}",
+        "response_content" => "#{reason}\n\n$ #{summary}",
+        "anomalies" => []
+      })
+
+    TriOnyx.ConnectorHandler.broadcast_to_connectors(approval_frame)
+
+    case BCP.ApprovalQueue.await_decision(BCP.ApprovalQueue, approval_id) do
+      {:approved, _item} -> :proceed
+      {:rejected, reason} -> {:rejected, reason}
+      {:error, :timeout} -> {:rejected, "approval timed out"}
+    end
   end
 end

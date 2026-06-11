@@ -51,6 +51,7 @@ defmodule TriOnyx.AgentPort do
           | {:bcp_response, String.t(), map()}
           | {:bcp_subscription_publish, String.t(), String.t(), map()}
           | {:send_email_request, String.t(), String.t()}
+          | {:github_request, String.t(), String.t(), [String.t()]}
           | {:save_draft_request, String.t(), String.t()}
           | {:move_email_request, String.t(), String.t(), String.t(), String.t()}
           | {:create_folder_request, String.t(), String.t()}
@@ -301,6 +302,25 @@ defmodule TriOnyx.AgentPort do
          "success" => success,
          "detail" => detail,
          "message_id" => message_id
+       }}
+    )
+  end
+
+  @doc """
+  Sends a `github_response` back to the runtime.
+  """
+  @spec send_github_response(GenServer.server(), String.t(), boolean(), String.t(), String.t()) ::
+          :ok
+  def send_github_response(server, request_id, success, detail \\ "", output \\ "") do
+    GenServer.cast(
+      server,
+      {:send,
+       %{
+         "type" => "github_response",
+         "request_id" => request_id,
+         "success" => success,
+         "detail" => detail,
+         "output" => output
        }}
     )
   end
@@ -774,6 +794,16 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(draft_path) ->
         {:ok, {:save_draft_request, req_id, draft_path}}
+
+      {:ok,
+       %{
+         "type" => "github_request",
+         "request_id" => req_id,
+         "command" => command,
+         "args" => args
+       }}
+      when is_binary(req_id) and is_binary(command) and is_list(args) ->
+        {:ok, {:github_request, req_id, command, Enum.map(args, &to_string/1)}}
 
       {:ok,
        %{

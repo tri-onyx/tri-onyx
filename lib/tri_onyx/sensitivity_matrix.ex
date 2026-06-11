@@ -23,6 +23,7 @@ defmodule TriOnyx.SensitivityMatrix do
   | SendEmail     | medium      | Uses gateway-injected SMTP credentials          |
   | MoveEmail     | low         | Folder move, no sensitive data exposed           |
   | CreateFolder  | low         | Folder creation, no sensitive data exposed       |
+  | GitHub        | medium      | Uses gateway-injected repo token                |
   | CalendarQuery | medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarCreate| medium      | Uses gateway-injected CalDAV credentials        |
   | CalendarUpdate| medium      | Uses gateway-injected CalDAV credentials        |
@@ -76,6 +77,7 @@ defmodule TriOnyx.SensitivityMatrix do
     "WebFetch" => :low,
     "WebSearch" => :low,
     "SendEmail" => :medium,
+    "GitHub" => :medium,
     "MoveEmail" => :low,
     "CreateFolder" => :low,
     "CalendarQuery" => :medium,

@@ -98,7 +98,16 @@ defmodule TriOnyx.Sandbox do
   def build_fuse_policy(%AgentDefinition{} = definition) do
     # Inject default per-agent write path
     default_write = "/agents/#{definition.name}/**"
-    fs_write = Enum.uniq([default_write | definition.fs_write])
+
+    # Agents with a github_repo get write access to the host-side clone
+    # the gateway maintains for them under /workspace/repos/.
+    github_write_paths =
+      case definition.github_repo do
+        nil -> []
+        repo -> ["/workspace/repos/#{repo}/**"]
+      end
+
+    fs_write = Enum.uniq([default_write | github_write_paths ++ definition.fs_write])
 
     # Add read paths for each declared skill so the Claude Code CLI can load
     # the SKILL.md files from .claude/skills/<name>/ within the workspace.

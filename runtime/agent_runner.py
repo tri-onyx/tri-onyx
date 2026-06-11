@@ -58,6 +58,7 @@ from protocol import (
     BCPValidationResult,
     BCPSubscriptionsActive,
     SendEmailResponse,
+    GitHubResponse,
     SaveDraftResponse,
     MoveEmailResponse,
     CreateFolderResponse,
@@ -83,6 +84,7 @@ from protocol import (
     emit_bcp_response,
     emit_bcp_publish,
     emit_send_email_request,
+    emit_github_request,
     emit_save_draft_request,
     emit_move_email_request,
     emit_create_folder_request,
@@ -299,6 +301,7 @@ class InboundDispatcher:
         self.bcp_query_queue: asyncio.Queue[BCPQueryMessage] = asyncio.Queue()
         self.bcp_validation_results: asyncio.Queue[BCPValidationResult] = asyncio.Queue()
         self.send_email_responses: asyncio.Queue[SendEmailResponse] = asyncio.Queue()
+        self.github_responses: asyncio.Queue[GitHubResponse] = asyncio.Queue()
         self.save_draft_responses: asyncio.Queue[SaveDraftResponse] = asyncio.Queue()
         self.move_email_responses: asyncio.Queue[MoveEmailResponse] = asyncio.Queue()
         self.create_folder_responses: asyncio.Queue[CreateFolderResponse] = asyncio.Queue()
@@ -332,6 +335,7 @@ class InboundDispatcher:
             self.send_message_responses,
             self.bcp_validation_results,
             self.send_email_responses,
+            self.github_responses,
             self.save_draft_responses,
             self.move_email_responses,
             self.create_folder_responses,
@@ -395,6 +399,12 @@ class InboundDispatcher:
                     await self.send_email_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse send_email_response: %s", exc)
+            elif msg_type == "github_response":
+                try:
+                    response = GitHubResponse.from_dict(data)
+                    await self.github_responses.put(response)
+                except Exception as exc:
+                    log.error("Failed to parse github_response: %s", exc)
             elif msg_type == "save_draft_response":
                 try:
                     response = SaveDraftResponse.from_dict(data)
@@ -1104,6 +1114,46 @@ class EmailHandler:
 
 
 # ---------------------------------------------------------------------------
+# GitHub tool handler
+# ---------------------------------------------------------------------------
+
+# GitHub operations can block on a human approval decision, so the timeout
+# is much longer than for other gateway-mediated tools.
+_GITHUB_OP_TIMEOUT_S = 600
+
+
+class GitHubHandler:
+    """Handles the gateway-mediated GitHub tool.
+
+    Emits a github_request and awaits the gateway's response, following
+    the same pattern as EmailHandler. The gateway holds the repo token,
+    classifies the command against its policy, and may queue it for
+    human approval before executing.
+    """
+
+    def __init__(self, dispatcher: InboundDispatcher) -> None:
+        self._dispatcher = dispatcher
+
+    async def run(self, command: str, args: list[str]) -> str:
+        request_id = uuid.uuid4().hex
+        log.info("GitHub %s %s (request_id=%s)", command, " ".join(args), request_id)
+        emit_github_request(request_id=request_id, command=command, args=args)
+
+        try:
+            response = await asyncio.wait_for(
+                _wait_for_matching_response(self._dispatcher.github_responses, request_id),
+                timeout=_GITHUB_OP_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("GitHub command timed out (request_id=%s)", request_id)
+            return f"Error: GitHub command timed out after {_GITHUB_OP_TIMEOUT_S}s"
+
+        if response.success:
+            return response.output if response.output else "(command succeeded with no output)"
+        return f"Error: {response.detail}"
+
+
+# ---------------------------------------------------------------------------
 # Calendar tool handler
 # ---------------------------------------------------------------------------
 
@@ -1237,6 +1287,10 @@ _MOVE_EMAIL_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_MOVE_EMAIL_TOOL}"
 _CREATE_FOLDER_MCP_NAME = f"mcp__{_EMAIL_SERVER}__{_CREATE_FOLDER_TOOL}"
 
 # Calendar tool names
+_GITHUB_SERVER = "github"
+_GITHUB_TOOL = "GitHub"
+_GITHUB_MCP_NAME = f"mcp__{_GITHUB_SERVER}__{_GITHUB_TOOL}"
+
 _CALENDAR_QUERY_TOOL = "CalendarQuery"
 _CALENDAR_CREATE_TOOL = "CalendarCreate"
 _CALENDAR_UPDATE_TOOL = "CalendarUpdate"
@@ -1271,6 +1325,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _SAVE_DRAFT_MCP_NAME: _SAVE_DRAFT_TOOL,
     _MOVE_EMAIL_MCP_NAME: _MOVE_EMAIL_TOOL,
     _CREATE_FOLDER_MCP_NAME: _CREATE_FOLDER_TOOL,
+    _GITHUB_MCP_NAME: _GITHUB_TOOL,
     _CALENDAR_QUERY_MCP_NAME: _CALENDAR_QUERY_TOOL,
     _CALENDAR_CREATE_MCP_NAME: _CALENDAR_CREATE_TOOL,
     _CALENDAR_UPDATE_MCP_NAME: _CALENDAR_UPDATE_TOOL,
@@ -1652,6 +1707,67 @@ def build_bcp_publish_tool(bcp_handler: BCPHandler) -> Any:
 # ---------------------------------------------------------------------------
 # SDK MCP tools for email operations
 # ---------------------------------------------------------------------------
+
+
+def build_github_tool(github_handler: GitHubHandler) -> Any:
+    """Create GitHub as an in-process SDK MCP tool."""
+
+    @tool(
+        _GITHUB_TOOL,
+        "Run a GitHub CLI (gh) or remote git command against this agent's "
+        "repository. The gateway executes it with repository credentials — "
+        "credentials never enter this container. Use command='gh' for GitHub "
+        "operations (issues, PRs, releases, API) and command='git' for remote "
+        "sync of your local clone under /workspace/repos/ (push, fetch, pull "
+        "— always name the remote and branch explicitly, e.g. args=['push', "
+        "'origin', 'my-branch']). Run local git operations (commit, checkout, "
+        "branch) directly via Bash in the clone instead. Pushes to the default "
+        "branch are blocked — push a feature branch and open a PR. Some "
+        "operations (e.g. pr merge, releases) require human approval and may "
+        "take a while to return.",
+        {
+            "type": "object",
+            "properties": {
+                "command": {
+                    "type": "string",
+                    "enum": ["gh", "git"],
+                    "description": "Binary to run: 'gh' (default) or 'git' for remote sync",
+                    "default": "gh",
+                },
+                "args": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Command arguments, e.g. ['pr', 'create', '--fill']",
+                },
+            },
+            "required": ["args"],
+        },
+    )
+    async def github(args: dict[str, Any]) -> dict[str, Any]:
+        command = args.get("command", "gh")
+        cmd_args = args.get("args", [])
+
+        # LLMs sometimes pass args as a single string — split it
+        if isinstance(cmd_args, str):
+            try:
+                cmd_args = json.loads(cmd_args)
+            except (json.JSONDecodeError, TypeError):
+                cmd_args = cmd_args.split()
+        if not isinstance(cmd_args, list) or not cmd_args:
+            return {
+                "content": [{"type": "text", "text": "Error: 'args' must be a non-empty list of strings."}],
+                "isError": True,
+            }
+        cmd_args = [str(a) for a in cmd_args]
+
+        result = await github_handler.run(command=command, args=cmd_args)
+        is_error = result.startswith("Error:")
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": is_error,
+        }
+
+    return github
 
 
 def build_send_email_tool(email_handler: EmailHandler) -> Any:
@@ -2691,6 +2807,16 @@ async def main() -> None:
                         tools=email_tools,
                     )
                     mcp_servers[_EMAIL_SERVER] = email_server
+
+                # GitHub MCP tool — hosted on a separate "github" MCP server
+                if _GITHUB_TOOL in config.tools:
+                    github_handler = GitHubHandler(dispatcher)
+                    github_server = create_sdk_mcp_server(
+                        name=_GITHUB_SERVER,
+                        tools=[build_github_tool(github_handler)],
+                    )
+                    mcp_servers[_GITHUB_SERVER] = github_server
+                    sdk_tools.append(_GITHUB_MCP_NAME)
 
                 # Calendar MCP tools — hosted on a separate "calendar" MCP server
                 calendar_handler = CalendarHandler(dispatcher)

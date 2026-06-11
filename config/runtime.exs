@@ -53,6 +53,31 @@ if imap_host = System.get_env("TRI_ONYX_IMAP_HOST") do
     }
 end
 
+# GitHub connector — per-repo fine-grained tokens for the gateway-mediated
+# GitHub tool. Format: "owner/repo=github_pat_...,other/repo=github_pat_..."
+# Only enabled when TRI_ONYX_GITHUB_TOKENS is set
+if github_tokens = System.get_env("TRI_ONYX_GITHUB_TOKENS") do
+  tokens =
+    github_tokens
+    |> String.split(",", trim: true)
+    |> Enum.flat_map(fn pair ->
+      case String.split(pair, "=", parts: 2) do
+        [repo, token] -> [{String.trim(repo), String.trim(token)}]
+        _ -> []
+      end
+    end)
+    |> Map.new()
+
+  config :tri_onyx, :github,
+    tokens: tokens,
+    bot_name: System.get_env("TRI_ONYX_GITHUB_BOT_NAME", "TriOnyx Agent"),
+    bot_email:
+      System.get_env(
+        "TRI_ONYX_GITHUB_BOT_EMAIL",
+        "tri-onyx-agent@users.noreply.github.com"
+      )
+end
+
 # Calendar connector — CalDAV polling + event management
 # Only enabled when TRI_ONYX_CALDAV_URL is set
 if caldav_url = System.get_env("TRI_ONYX_CALDAV_URL") do

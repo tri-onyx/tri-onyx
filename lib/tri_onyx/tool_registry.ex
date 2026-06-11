@@ -43,6 +43,7 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarCreate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
+    "GitHub" => %{requires_auth: true, capability_level: :high, requires_approval: false},
     "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "SubmitImage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false}
@@ -79,6 +80,7 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "CalendarCreate", display: "CalendarCreate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarUpdate", display: "CalendarUpdate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil},
+    %{key: "GitHub", display: "GitHub", variant: nil, group: "GitHub",            note: "gateway-mediated gh/git against the agent's repository; per-command policy with approval gates"},
     %{key: "SubmitItem", display: "SubmitItem", variant: nil, group: "Messaging",         note: "posts formatted item to chat (articles, listings, etc.)"},
     %{key: "SubmitImage", display: "SubmitImage", variant: nil, group: "Output",           note: "displays a workspace image file in chat"},
     %{key: "SubmitPage", display: "SubmitPage", variant: nil, group: "Output",            note: "renders self-contained HTML page in chat"}
@@ -135,6 +137,10 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarDelete" => [
       %{"keys" => ["uid"]},
       %{"keys" => ["calendar"], "prefix" => " in "}
+    ],
+    "GitHub" => [
+      %{"keys" => ["command"]},
+      %{"keys" => ["args"], "prefix" => " ", "max_len" => 80}
     ],
     "SubmitItem" => [%{"keys" => ["title"], "max_len" => 60}],
     "SubmitImage" => [%{"keys" => ["path"], "transform" => "path"}],

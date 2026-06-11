@@ -15,6 +15,7 @@ Gateway -> Runtime (stdin):
   submit_item_response -- gateway response after a submit_item_request
   submit_image_response -- gateway response after a submit_image_request
   submit_page_response -- gateway response after a submit_page_request
+  github_response      -- gateway response after a github_request
   bcp_query              -- BCP query delivered to a Reader agent
   bcp_response_delivery  -- validated BCP response delivered to a Controller agent
                             (carries optional subscription_id for subscription deliveries)
@@ -36,6 +37,7 @@ Runtime -> Gateway (stdout):
   submit_item_request -- request gateway to post an item to the connector
   submit_image_request -- request gateway to save and serve an image to the user
   submit_page_request -- request gateway to commit and serve an HTML page to the user
+  github_request      -- request gateway to run a gh/git command with repo credentials
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query (query_id for queries,
                           subscription_id + controller for subscription publishes)
@@ -271,6 +273,25 @@ class SendEmailResponse:
 
 
 @dataclass
+class GitHubResponse:
+    """Response from the gateway after a github_request."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+    output: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> GitHubResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+            output=data.get("output", ""),
+        )
+
+
+@dataclass
 class SaveDraftResponse:
     """Response from the gateway after saving a draft to IMAP."""
 
@@ -475,6 +496,7 @@ InboundMessage = (
     | BCPResponseDeliveryMessage
     | BCPSubscriptionsActive
     | SendEmailResponse
+    | GitHubResponse
     | SaveDraftResponse
     | MoveEmailResponse
     | CreateFolderResponse
@@ -500,6 +522,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "bcp_response_delivery": BCPResponseDeliveryMessage,
     "bcp_subscriptions_active": BCPSubscriptionsActive,
     "send_email_response": SendEmailResponse,
+    "github_response": GitHubResponse,
     "save_draft_response": SaveDraftResponse,
     "move_email_response": MoveEmailResponse,
     "create_folder_response": CreateFolderResponse,
@@ -658,6 +681,25 @@ def emit_send_email_request(
         "type": "send_email_request",
         "request_id": request_id,
         "draft_path": draft_path,
+    })
+
+
+def emit_github_request(
+    request_id: str,
+    command: str,
+    args: list[str],
+) -> None:
+    """Request the gateway to run a gh/git command with repo credentials.
+
+    The gateway classifies the command against its policy (allow /
+    approval / deny) and executes it in the host-side clone. The token
+    never enters this container.
+    """
+    _emit({
+        "type": "github_request",
+        "request_id": request_id,
+        "command": command,
+        "args": args,
     })
 
 
