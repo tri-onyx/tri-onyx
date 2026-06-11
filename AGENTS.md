@@ -30,7 +30,7 @@ When building new features, follow these steps in order:
 
 5. **Run end-to-end tests** — If the feature touches the agent runtime, connector, or gateway communication, run a live end-to-end test using the test-agent harness:
    ```
-   uv run scripts/test-agent.py --agent <agent-name> --prompt "<test prompt>"
+   uv run scripts/test-agent.py <agent-name> "<test prompt>"
    ```
    Check that tool calls, results, and Matrix output all look correct.
 
@@ -45,7 +45,7 @@ When building new features, follow these steps in order:
 
 The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control inside agent containers. Key things to know:
 
-- **The Dockerfile copies a pre-built binary** — `agent.Dockerfile` does `COPY fuse/tri-onyx-fs` (line 37). It does NOT compile from source. After changing Go code, you must recompile the binary before rebuilding the image:
+- **The Dockerfile copies a pre-built binary** — `agent.Dockerfile` does `COPY fuse/tri-onyx-fs`. It does NOT compile from source. After changing Go code, you must recompile the binary before rebuilding the image:
   ```
   docker run --rm -v $(pwd)/fuse:/src -w /src golang:1.22 go build -o tri-onyx-fs ./cmd/tri-onyx-fs
   docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .
@@ -79,7 +79,7 @@ docker exec -e ERL_AFLAGS= trionyx-gateway-1 \
 docker exec trionyx-gateway-1 hostname
 ```
 
-GenServer-based modules (`TriggerRouter`, `AgentSupervisor`, `Scheduler`, `ApprovalQueue`, `WebhookRegistry`) require the module name as the first argument (the server name). Plain modules (`SessionLogger`, `AgentLoader`) do not.
+Modules whose public functions take the server name as their first argument (`TriggerRouter`, `AgentSupervisor`, `Scheduler`, `ApprovalQueue`, `WebhookRegistry`) require the module name as the first RPC argument. Modules whose public API is plain functions (`SessionLogger` — a GenServer internally, but its query functions don't take a server name — and `AgentLoader`) do not.
 
 ### Agent management
 
