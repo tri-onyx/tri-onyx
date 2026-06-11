@@ -84,6 +84,7 @@ defmodule TriOnyx.SensitivityMatrix do
     "CalendarDelete" => :medium,
     "SaveDraft" => :low,
     "SubmitItem" => :low,
+    "SubmitImage" => :low,
     "SubmitPage" => :low
   }
 

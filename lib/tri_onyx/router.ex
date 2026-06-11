@@ -139,6 +139,7 @@ defmodule TriOnyx.Router do
       "groups" => schema.groups,
       "tool_groups" => tool_groups,
       "known_tools" => TriOnyx.ToolRegistry.known_tools(),
+      "tool_briefs" => TriOnyx.ToolRegistry.brief_specs(),
       "known_agents" => known_agents
     })
   end

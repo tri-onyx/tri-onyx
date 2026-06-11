@@ -77,6 +77,7 @@ defmodule TriOnyx.TaintMatrix do
     "CalendarDelete" => :low,
     "SaveDraft" => :low,
     "SubmitItem" => :low,
+    "SubmitImage" => :low,
     "SubmitPage" => :low
   }
 

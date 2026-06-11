@@ -44,6 +44,7 @@ defmodule TriOnyx.ToolRegistry do
     "CalendarUpdate" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "CalendarDelete" => %{requires_auth: true, capability_level: :medium, requires_approval: false},
     "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "SubmitImage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false}
   }
 
@@ -79,8 +80,66 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "CalendarUpdate", display: "CalendarUpdate", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "CalendarDelete", display: "CalendarDelete", variant: nil, group: "Calendar (CalDAV)", note: nil},
     %{key: "SubmitItem", display: "SubmitItem", variant: nil, group: "Messaging",         note: "posts formatted item to chat (articles, listings, etc.)"},
+    %{key: "SubmitImage", display: "SubmitImage", variant: nil, group: "Output",           note: "displays a workspace image file in chat"},
     %{key: "SubmitPage", display: "SubmitPage", variant: nil, group: "Output",            note: "renders self-contained HTML page in chat"}
   ]
+
+  # One-line brief specs for tool_use events, rendered by every UI surface
+  # (web chat, approvals, Matrix connector). Each tool maps to an ordered
+  # list of segments; a segment renders the first non-empty input value
+  # among `keys`, optionally path-shortened ("path" transform), truncated
+  # to `max_len`, and wrapped in `prefix`/`suffix`. Empty segments are
+  # skipped. Tools without a spec fall back to the consumer's generic
+  # first-input-key rendering. Keys here may include SDK built-in tools
+  # (Agent, Task*) that appear in transcripts but are not in @tool_meta.
+  # String keys throughout so the map serializes to JSON as-is.
+  @brief_specs %{
+    "Read" => [
+      %{"keys" => ["file_path"], "transform" => "path"},
+      %{"keys" => ["offset"], "prefix" => ":"}
+    ],
+    "Write" => [%{"keys" => ["file_path"], "transform" => "path"}],
+    "Edit" => [
+      %{"keys" => ["file_path"], "transform" => "path"},
+      %{"keys" => ["old_string"], "prefix" => " (replacing '", "suffix" => "…')", "max_len" => 40}
+    ],
+    "NotebookEdit" => [%{"keys" => ["notebook_path"], "transform" => "path"}],
+    "Bash" => [%{"keys" => ["command", "description"], "max_len" => 100}],
+    "Glob" => [%{"keys" => ["pattern"]}],
+    "Grep" => [
+      %{"keys" => ["pattern"], "prefix" => "/", "suffix" => "/"},
+      %{"keys" => ["include", "glob"], "prefix" => " "}
+    ],
+    "WebFetch" => [%{"keys" => ["url"], "max_len" => 80}],
+    "WebSearch" => [%{"keys" => ["query"]}],
+    "Agent" => [%{"keys" => ["description", "prompt"], "max_len" => 80}],
+    "Task" => [%{"keys" => ["description", "prompt"], "max_len" => 80}],
+    "TaskCreate" => [%{"keys" => ["description", "subject"], "max_len" => 60}],
+    "TaskUpdate" => [%{"keys" => ["description", "subject"], "max_len" => 60}],
+    "SendMessage" => [%{"keys" => ["to"], "prefix" => "→ "}],
+    "SendEmail" => [%{"keys" => ["draft_path"], "transform" => "path"}],
+    "SaveDraft" => [%{"keys" => ["draft_path"], "transform" => "path"}],
+    "MoveEmail" => [
+      %{"keys" => ["uid"]},
+      %{"keys" => ["source_folder"], "prefix" => " "},
+      %{"keys" => ["dest_folder"], "prefix" => "→"}
+    ],
+    "CreateFolder" => [%{"keys" => ["folder_name"]}],
+    "CalendarQuery" => [
+      %{"keys" => ["calendar"]},
+      %{"keys" => ["from"], "prefix" => " "},
+      %{"keys" => ["to"], "prefix" => "→"}
+    ],
+    "CalendarCreate" => [%{"keys" => ["draft_path"], "transform" => "path"}],
+    "CalendarUpdate" => [%{"keys" => ["draft_path"], "transform" => "path"}],
+    "CalendarDelete" => [
+      %{"keys" => ["uid"]},
+      %{"keys" => ["calendar"], "prefix" => " in "}
+    ],
+    "SubmitItem" => [%{"keys" => ["title"], "max_len" => 60}],
+    "SubmitImage" => [%{"keys" => ["path"], "transform" => "path"}],
+    "SubmitPage" => [%{"keys" => ["title", "path"], "max_len" => 60}]
+  }
 
   @doc """
   Returns display entries for the classification matrix UI.
@@ -90,6 +149,15 @@ defmodule TriOnyx.ToolRegistry do
   """
   @spec display_entries() :: [map()]
   def display_entries, do: @display_entries
+
+  @doc """
+  Returns one-line brief rendering specs for tool_use events, keyed by
+  tool name. Served via `GET /agents/schema` as `tool_briefs` so every
+  UI surface renders briefs from the same data instead of hardcoding
+  per-tool logic. See the `@brief_specs` comment for segment semantics.
+  """
+  @spec brief_specs() :: %{String.t() => [map()]}
+  def brief_specs, do: @brief_specs
 
   @doc """
   Returns the list of all known tool names.
