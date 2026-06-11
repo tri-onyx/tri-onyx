@@ -3,7 +3,8 @@ import json
 from django.http import HttpResponse
 
 from trionyx_ui import gateway
-from trionyx_ui.views.helpers import escape as _esc, short_path as _short_path
+from trionyx_ui.tool_briefs import format_tool_brief
+from trionyx_ui.views.helpers import escape as _esc
 
 
 def approvals_badge(request):
@@ -85,7 +86,7 @@ def _render_item(item: dict) -> str:
         agent = _esc(item.get("agent_name", ""))
         tool = _esc(item.get("tool_name", ""))
         tool_input = item.get("tool_input", {})
-        brief = _tool_brief(tool, tool_input)
+        brief = format_tool_brief(tool, tool_input)
         action_desc = f"{tool} for {agent}"
 
         desc = (
@@ -122,14 +123,5 @@ def _render_item(item: dict) -> str:
     )
 
 
-def _tool_brief(tool_name: str, tool_input: dict) -> str:
-    if tool_name in ("Read", "Write"):
-        return _short_path(tool_input.get("file_path", ""))
-    if tool_name == "Bash":
-        cmd = tool_input.get("command", "")
-        return cmd[:60] + ("..." if len(cmd) > 60 else "")
-    if tool_name == "Edit":
-        return _short_path(tool_input.get("file_path", ""))
-    return ""
 
 

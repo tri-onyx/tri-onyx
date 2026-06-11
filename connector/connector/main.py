@@ -16,6 +16,7 @@ from connector.adapters.matrix import MatrixAdapter
 from connector.adapters.slack import SlackAdapter
 from connector.config import AdapterConfig, ConnectorConfig, load_config
 from connector.gateway_client import GatewayClient
+from connector.tool_briefs import load_brief_specs
 from connector.protocol import (
     ActionRequest,
     AgentStepMessage,
@@ -310,6 +311,10 @@ async def run(config: ConnectorConfig) -> None:
 
     # Start all components concurrently
     async with asyncio.TaskGroup() as tg:
+        # Tool brief specs come from the gateway (retries while it boots);
+        # until loaded, adapters fall back to generic first-input briefs.
+        tg.create_task(load_brief_specs(config.gateway_url))
+
         # Start adapters
         for name, adapter in adapters.items():
             tg.create_task(adapter.start(on_adapter_message, on_reaction=on_adapter_reaction))

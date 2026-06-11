@@ -43,6 +43,7 @@ from connector.adapters.base import BaseAdapter, OnMessageCallback, OnReactionCa
 from connector.config import AdapterConfig, RoomConfig
 from connector.formatting import markdown_to_matrix_html
 from connector.protocol import AgentStepMessage, ApprovalRequestMessage, InboundMessage, ReactionMessage
+from connector.tool_briefs import format_tool_brief
 
 logger = logging.getLogger(__name__)
 
@@ -1181,30 +1182,8 @@ class MatrixAdapter(BaseAdapter):
     def _format_step_brief(step: AgentStepMessage) -> str:
         """Brief mode: one-liner with tool name and primary parameter."""
         if step.step_type == "tool_use":
-            inp = step.input or {}
             name = step.name or ""
-            detail = ""
-            if name == "Read":
-                detail = inp.get("file_path", "")
-            elif name in ("Write", "Edit"):
-                detail = inp.get("file_path", "")
-            elif name == "Bash":
-                detail = (inp.get("command") or inp.get("description") or "")[:80]
-            elif name == "Glob":
-                detail = inp.get("pattern", "")
-            elif name == "Grep":
-                detail = f"/{inp.get('pattern', '')}/"
-            elif name == "WebFetch":
-                detail = inp.get("url", "")
-            elif name == "WebSearch":
-                detail = inp.get("query", "")
-            elif name == "Task":
-                detail = (inp.get("description") or inp.get("prompt") or "")[:80]
-            else:
-                keys = list(inp.keys())
-                if keys:
-                    v = inp[keys[0]]
-                    detail = str(v)[:80] if isinstance(v, str) else json.dumps(v)[:80]
+            detail = format_tool_brief(name, step.input or {})
             line = f"\U0001f527 {name}"
             if detail:
                 line += f" \u2014 {detail}"

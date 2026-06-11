@@ -323,50 +323,57 @@ function relativeTime(isoStr) {
 }
 
 // ── Tool briefs ──
+// Per-tool specs come from the gateway (ToolRegistry.brief_specs, embedded
+// by the chat template as #tool-briefs). Each spec is an ordered list of
+// segments: {keys, prefix?, suffix?, max_len?, transform?}. Tools without
+// a spec render generically from their first input field.
+
+let briefSpecs = null;
+
+function getBriefSpecs() {
+  if (briefSpecs === null) {
+    const el = document.getElementById('tool-briefs');
+    try {
+      briefSpecs = (el && JSON.parse(el.textContent)) || {};
+    } catch (e) {
+      briefSpecs = {};
+    }
+  }
+  return briefSpecs;
+}
+
+function stringifyBriefValue(v) {
+  if (typeof v === 'string') return v;
+  if (v === null || v === undefined) return '';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
 
 function formatToolBrief(name, input) {
   if (!input) return '';
 
-  switch (name) {
-    case 'Read': {
-      const p = shortPath(input.file_path || '');
-      const off = input.offset;
-      return escapeHtml(p + (off ? ':' + off : ''));
+  const segments = getBriefSpecs()[name];
+  if (segments && segments.length) {
+    let out = '';
+    for (const seg of segments) {
+      let value;
+      for (const k of (seg.keys || [])) {
+        const v = input[k];
+        if (v !== undefined && v !== null && v !== '') { value = v; break; }
+      }
+      if (value === undefined) continue;
+      let text = stringifyBriefValue(value);
+      if (seg.transform === 'path') text = shortPath(text);
+      if (seg.max_len && text.length > seg.max_len) text = text.slice(0, seg.max_len) + '…';
+      out += (seg.prefix || '') + text + (seg.suffix || '');
     }
-    case 'Write':
-      return escapeHtml(shortPath(input.file_path || ''));
-
-    case 'Edit': {
-      const p = shortPath(input.file_path || '');
-      const old = (input.old_string || '').slice(0, 40);
-      return escapeHtml(p + (old ? ` (replacing '${old}...')` : ''));
-    }
-    case 'Bash': {
-      const cmd = input.command || '';
-      return escapeHtml(cmd.slice(0, 100) + (cmd.length > 100 ? '...' : ''));
-    }
-    case 'Glob':
-      return escapeHtml(input.pattern || '');
-
-    case 'Grep': {
-      const pat = input.pattern || '';
-      const glob = input.include || '';
-      return escapeHtml('/' + pat + '/' + (glob ? ' ' + glob : ''));
-    }
-    case 'WebFetch':
-      return escapeHtml((input.url || '').slice(0, 80));
-
-    case 'WebSearch':
-      return escapeHtml(input.query || '');
-
-    case 'Agent':
-    case 'TaskCreate':
-    case 'TaskUpdate':
-      return escapeHtml((input.description || input.subject || '').slice(0, 60));
-
-    default:
-      return '';
+    return escapeHtml(out);
   }
+
+  const keys = Object.keys(input);
+  if (!keys.length) return '';
+  const text = stringifyBriefValue(input[keys[0]]);
+  return escapeHtml(text.slice(0, 80) + (text.length > 80 ? '…' : ''));
 }
 
 // ── Utilities ──

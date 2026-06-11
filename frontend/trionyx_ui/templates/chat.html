@@ -146,6 +146,7 @@
      data-session-id="{{ session_id }}"
      data-is-active="{{ is_active|yesno:'true,false' }}"
      style="display:none;"></div>
+{{ tool_briefs|json_script:"tool-briefs" }}
 {% endblock %}
 
 {% block scripts %}

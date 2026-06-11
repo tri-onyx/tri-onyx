@@ -10,10 +10,13 @@ from django.utils.safestring import mark_safe
 from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
+from trionyx_ui.tool_briefs import (
+    format_tool_brief as _format_tool_brief,
+    get_brief_specs as _get_brief_specs,
+)
 from trionyx_ui.views.helpers import (
     escape as _escape,
     resolve_connected_agents as _resolve_connected_agents,
-    short_path as _short_path,
 )
 
 _md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
@@ -122,6 +125,7 @@ def agent_chat(request, name):
         "viewing_history": False,
         "active_sessions": active_sessions if show_session_picker else [],
         "selected_session_id": session_id,
+        "tool_briefs": _get_brief_specs(),
     })
 
 
@@ -386,41 +390,5 @@ def _pair_tool_calls(messages: list[dict]) -> list[dict]:
     return paired
 
 
-def _format_tool_brief(tool_name: str, tool_input: dict) -> str:
-    if tool_name == "Read":
-        path = tool_input.get("file_path", "")
-        offset = tool_input.get("offset")
-        return f"{_short_path(path)}" + (f":{offset}" if offset else "")
-
-    if tool_name == "Write":
-        return _short_path(tool_input.get("file_path", ""))
-
-    if tool_name == "Edit":
-        path = _short_path(tool_input.get("file_path", ""))
-        old = (tool_input.get("old_string", "") or "")[:40]
-        return f"{path}" + (f" (replacing '{old}...')" if old else "")
-
-    if tool_name == "Bash":
-        cmd = tool_input.get("command", "")
-        return cmd[:100] + ("..." if len(cmd) > 100 else "")
-
-    if tool_name == "Glob":
-        return tool_input.get("pattern", "")
-
-    if tool_name == "Grep":
-        pattern = tool_input.get("pattern", "")
-        glob = tool_input.get("include", "")
-        return f"/{pattern}/" + (f" {glob}" if glob else "")
-
-    if tool_name == "WebFetch":
-        return tool_input.get("url", "")[:80]
-
-    if tool_name == "WebSearch":
-        return tool_input.get("query", "")
-
-    if tool_name in ("Agent", "TaskCreate", "TaskUpdate"):
-        return tool_input.get("description", tool_input.get("subject", ""))[:60]
-
-    return ""
 
 
