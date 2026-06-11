@@ -24,7 +24,7 @@ When building new features, follow these steps in order:
 3. **Run existing tests** — Always run the relevant test suite after making changes:
    - Elixir (gateway): `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
    - Go (FUSE): `docker run --rm --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined -v $(pwd)/fuse:/src -w /src golang:1.22 bash -c "apt-get update -qq && apt-get install -y -qq fuse3 2>/dev/null && go test ./..."`
-   - Python (connector): `docker run --rm -v $(pwd)/connector:/app -w /app connector:latest uv run pytest`
+   - Python (connector): `docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run pytest`
 
 4. **Rebuild images and restart containers** — Before running end-to-end tests, rebuild any affected images and restart containers so the latest code is running (see Container Rebuilds below).
 
