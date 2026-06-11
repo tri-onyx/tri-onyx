@@ -523,6 +523,77 @@ class SlackAdapter(BaseAdapter):
         except Exception:
             logger.exception("Slack file upload failed")
 
+    # ------------------------------------------------------------------
+    # Channel provisioning
+    # ------------------------------------------------------------------
+
+    # ensure_channel may be called (by the channel-bindings loader) before
+    # start() has authenticated the web client.
+    _ENSURE_READY_TIMEOUT_S = 60
+
+    async def ensure_channel(self, name: str) -> str | None:
+        """Find or create the channel *name*; returns its ID or None.
+
+        Created channels automatically include the bot (as creator); the
+        configured owner is invited so they don't have to find it. Existing
+        channels are joined if the bot is not yet a member.
+        """
+        deadline = time.monotonic() + self._ENSURE_READY_TIMEOUT_S
+        while self._web_client is None or not self._bot_user_id:
+            if time.monotonic() > deadline:
+                logger.warning("ensure_channel(%s): Slack client not ready", name)
+                return None
+            await asyncio.sleep(1)
+
+        try:
+            existing = await self._find_channel_by_name(name)
+            if existing is not None:
+                channel_id, is_member = existing
+                if not is_member:
+                    await self._web_client.conversations_join(channel=channel_id)
+                    logger.info("Joined existing channel #%s (%s)", name, channel_id)
+                return channel_id
+
+            private = bool(self._config.extra.get("channels_private", False))
+            resp = await self._web_client.conversations_create(
+                name=name, is_private=private
+            )
+            channel_id = resp["channel"]["id"]
+            logger.info("Created channel #%s (%s)", name, channel_id)
+
+            if self._owner_user_id:
+                try:
+                    await self._web_client.conversations_invite(
+                        channel=channel_id, users=self._owner_user_id
+                    )
+                except Exception:
+                    logger.warning(
+                        "Could not invite owner to #%s — invite manually", name
+                    )
+
+            return channel_id
+        except Exception:
+            logger.exception("ensure_channel(%s) failed", name)
+            return None
+
+    async def _find_channel_by_name(self, name: str) -> tuple[str, bool] | None:
+        """Return (channel_id, bot_is_member) for *name*, or None."""
+        assert self._web_client is not None
+        cursor = ""
+        while True:
+            resp = await self._web_client.conversations_list(
+                types="public_channel,private_channel",
+                exclude_archived=True,
+                limit=200,
+                cursor=cursor or None,
+            )
+            for ch in resp.get("channels", []):
+                if ch.get("name") == name:
+                    return ch["id"], bool(ch.get("is_member"))
+            cursor = resp.get("response_metadata", {}).get("next_cursor", "")
+            if not cursor:
+                return None
+
     async def send_approval_request(
         self,
         approval_id: str,

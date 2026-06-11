@@ -132,11 +132,20 @@ defmodule TriOnyx.Router do
     known_agents = agents |> Enum.map(& &1.name) |> Enum.sort()
 
     # Slack channel ownership, consumed by connectors to route channel
-    # messages, heartbeats, approvals, and inter-agent mirrors.
+    # messages, heartbeats, approvals, and inter-agent mirrors. Agents
+    # with an explicit slack_channel bind to that ID; agents with only a
+    # github_repo get a channel auto-provisioned by the connector from
+    # the repo name.
     channel_bindings =
       agents
-      |> Enum.filter(& &1.slack_channel)
-      |> Enum.map(&%{"agent" => &1.name, "slack_channel" => &1.slack_channel})
+      |> Enum.filter(&(&1.slack_channel || &1.github_repo))
+      |> Enum.map(
+        &%{
+          "agent" => &1.name,
+          "slack_channel" => &1.slack_channel,
+          "github_repo" => &1.github_repo
+        }
+      )
       |> Enum.sort_by(& &1["agent"])
 
     conn
