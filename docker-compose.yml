@@ -33,6 +33,10 @@ services:
       - TRI_ONYX_SMTP_PASSWORD
       - TRI_ONYX_SMTP_SSL
       - TRI_ONYX_EMAIL_AGENT
+      # GitHub connector (optional — set TRI_ONYX_GITHUB_TOKENS in .env to enable)
+      - TRI_ONYX_GITHUB_TOKENS
+      - TRI_ONYX_GITHUB_BOT_NAME
+      - TRI_ONYX_GITHUB_BOT_EMAIL
       # Calendar connector (optional — set TRI_ONYX_CALDAV_URL in .env to enable)
       - TRI_ONYX_CALDAV_URL
       - TRI_ONYX_CALDAV_USERNAME
