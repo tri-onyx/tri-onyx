@@ -125,6 +125,17 @@ async def _route_outbound(
                 )
         return
 
+    # Text output from sessions without a routable channel (inter-agent
+    # spawned sessions, the test harness, heartbeats) is posted to the
+    # agent's own room so channel-bound agents are visible there
+    # regardless of what triggered them.
+    if adapter is None and isinstance(msg, (AgentTextMessage, AgentErrorMessage)) and msg.agent_name:
+        content = msg.error if isinstance(msg, AgentErrorMessage) else msg.content
+        if content:
+            for resolved_adapter, channel in _resolve_agent_room(adapters, msg.agent_name):
+                await resolved_adapter.send_text(channel, content, agent_name=msg.agent_name)
+        return
+
     if adapter is None:
         logger.warning("No adapter for platform %s", platform)
         return
@@ -298,7 +309,8 @@ async def _route_mirror(
         )
         return
 
-    text = f"💬 [{msg.from_agent} → {msg.to_agent}] {msg.content}"
+    quoted = "\n".join(f"> {line}" for line in msg.content.splitlines() or [""])
+    text = f"💬 **{msg.from_agent}** → **{msg.to_agent}**\n{quoted}"
     for adapter, channel in targets.values():
         await adapter.send_text(channel, text, agent_name=msg.from_agent)
 
