@@ -206,6 +206,9 @@ defmodule TriOnyx.Router do
             "fs_write" => definition.fs_write,
             "send_to" => definition.send_to,
             "receive_from" => definition.receive_from,
+            "github_repo" => definition.github_repo,
+            "github_read_repos" => definition.github_read_repos,
+            "slack_channel" => definition.slack_channel,
             "bcp_channels" => serialize_bcp_channels(definition.bcp_channels),
             "capability_level" => to_string(RiskScorer.infer_capability(definition.tools, definition.network, definition))
           })
@@ -272,10 +275,14 @@ defmodule TriOnyx.Router do
               "skills" => definition.skills,
               "plugins" => definition.plugins,
               "base_taint" => to_string(definition.base_taint),
+              "max_effective_risk" => to_string(definition.max_effective_risk),
               "input_sources" => Enum.map(definition.input_sources, &to_string/1),
               "browser" => definition.browser,
               "docker_socket" => definition.docker_socket,
               "trionyx_repo" => definition.trionyx_repo,
+              "github_repo" => definition.github_repo,
+              "github_read_repos" => definition.github_read_repos,
+              "slack_channel" => definition.slack_channel,
               "exclude_from_personalization" => definition.exclude_from_personalization,
               "reflection" => definition.reflection
             }

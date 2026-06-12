@@ -81,6 +81,28 @@
   </div>
 </div>
 
+{% if agent.github_repo or agent.github_read_repos or agent.slack_channel %}
+<div class="ctx-section">
+  <div class="ctx-section-title">GitHub</div>
+  {% if agent.github_repo %}
+    <div class="ctx-fs-label">Repository</div>
+    <div class="ctx-path"><a href="https://github.com/{{ agent.github_repo }}" target="_blank" rel="noopener">{{ agent.github_repo }}</a></div>
+  {% endif %}
+  {% if agent.github_read_repos %}
+    <div class="ctx-fs-label">Read-only mirrors</div>
+    {% for repo in agent.github_read_repos %}
+      <div class="ctx-path"><a href="https://github.com/{{ repo }}" target="_blank" rel="noopener">{{ repo }}</a></div>
+    {% endfor %}
+  {% endif %}
+  {% if agent.slack_channel %}
+    <div class="ctx-row">
+      <span class="ctx-row-label">Slack channel</span>
+      <span style="font-size: 12px;">{{ agent.slack_channel }}</span>
+    </div>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if agent.bcp_channels %}
 <div class="ctx-section">
   <div class="ctx-section-title">BCP Channels</div>
