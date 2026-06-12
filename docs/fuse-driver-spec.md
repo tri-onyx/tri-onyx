@@ -58,7 +58,9 @@ tri-onyx-fs --config /etc/tri_onyx/fs-policy.json --source /mnt/host --mountpoin
   "fs_write": [
     "/repo/src/output/**"
   ],
-  "log_denials": true
+  "log_denials": true,
+  "log_writes": true,
+  "log_reads": true
 }
 ```
 
@@ -123,6 +125,25 @@ This is the hardest part of the implementation. The naive approach is to allow L
 ```
 
 The gateway captures the container's stderr and can route denial logs to the audit system.
+
+## Access Logging
+
+Two further flags emit structured JSON to stderr for *allowed* operations
+(used by the gateway's track-and-kill risk escalation, see ADR-011):
+
+- `log_writes` — every write-side operation (`open`, `create`, `mkdir`, `setattr`, …):
+
+```json
+{"event":"write","op":"create","path":"/agents/main/notes.md","time":"2026-02-13T12:00:00Z"}
+```
+
+- `log_reads` — read opens, deduplicated per path for the lifetime of the
+  mount (risk escalation is monotonic, so repeat reads carry no new
+  information):
+
+```json
+{"event":"read","op":"open","path":"/shared/inbox/report.md","time":"2026-02-13T12:00:00Z"}
+```
 
 ## Performance Considerations
 

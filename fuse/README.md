@@ -41,13 +41,17 @@ tri-onyx-fs --config /etc/tri_onyx/fs-policy.json \
   "fs_write": [
     "/repo/src/output/**"
   ],
-  "log_denials": true
+  "log_denials": true,
+  "log_writes": true,
+  "log_reads": true
 }
 ```
 
 - `fs_read`: glob patterns for read-only access
 - `fs_write`: glob patterns for read+write access (write implies read)
 - `log_denials`: emit structured JSON to stderr on denied operations
+- `log_writes`: emit structured JSON to stderr on allowed write operations
+- `log_reads`: emit structured JSON to stderr on allowed read opens (deduplicated per path)
 - All patterns are relative to the mountpoint root
 - Missing keys default to empty arrays / false
 
@@ -81,6 +85,18 @@ When `log_denials` is true, denied operations are logged to stderr as JSON:
 
 ```json
 {"event":"denied","op":"open","path":"/repo/.env","mode":"read","time":"2026-02-13T12:00:00Z"}
+```
+
+## Access logging
+
+`log_writes` and `log_reads` emit the same shape (without `mode`) for
+*allowed* operations — the gateway uses these for track-and-kill risk
+escalation (ADR-011). Read events are deduplicated per path for the
+lifetime of the mount:
+
+```json
+{"event":"write","op":"create","path":"/agents/main/notes.md","time":"2026-02-13T12:00:00Z"}
+{"event":"read","op":"open","path":"/shared/inbox/report.md","time":"2026-02-13T12:00:00Z"}
 ```
 
 ## Dependencies
