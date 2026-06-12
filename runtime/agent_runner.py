@@ -45,6 +45,7 @@ from typing import Any
 sys.path.insert(0, str(Path(__file__).parent))
 
 from protocol import (
+    WORKSPACE_ROOT,
     StartMessage,
     PromptMessage,
     InterruptMessage,
@@ -523,7 +524,7 @@ _SEND_MESSAGE_TIMEOUT_S = 30
 
 def _submissions_path(agent_name: str) -> Path:
     """Per-agent submissions ledger used for feedback enrichment."""
-    return Path(f"/workspace/agents/{agent_name}/submissions.json")
+    return Path(f"{WORKSPACE_ROOT}/agents/{agent_name}/submissions.json")
 
 
 async def _wait_for_matching_response(queue, request_id: str):
@@ -728,7 +729,7 @@ class SubmitImageHandler:
     async def handle(self, path: str) -> str:
         resolved = Path(path)
         if not resolved.is_absolute():
-            resolved = Path("/workspace") / path
+            resolved = Path(WORKSPACE_ROOT) / path
 
         if not resolved.is_file():
             return f"Error: file not found: {path}"
@@ -747,7 +748,7 @@ class SubmitImageHandler:
         media_type = _EXT_TO_MEDIA_TYPE.get(ext, "application/octet-stream")
         filename = resolved.name
 
-        workspace_relative = str(resolved).removeprefix("/workspace/")
+        workspace_relative = str(resolved).removeprefix(f"{WORKSPACE_ROOT}/")
 
         request_id = uuid.uuid4().hex
         log.info("SubmitImage path=%r filename=%r (request_id=%s)", path, filename, request_id)
@@ -789,7 +790,7 @@ class SubmitPageHandler:
     async def handle(self, path: str, title: str = "") -> str:
         resolved = Path(path)
         if not resolved.is_absolute():
-            resolved = Path("/workspace") / path
+            resolved = Path(WORKSPACE_ROOT) / path
 
         if not resolved.is_file():
             return f"Error: file not found: {path}"
@@ -805,7 +806,7 @@ class SubmitPageHandler:
         if size > _PAGE_MAX_SIZE:
             return f"Error: file too large ({size // 1024 // 1024}MB). Maximum is 5MB."
 
-        workspace_relative = str(resolved).removeprefix("/workspace/")
+        workspace_relative = str(resolved).removeprefix(f"{WORKSPACE_ROOT}/")
 
         request_id = uuid.uuid4().hex
         log.info("SubmitPage path=%r title=%r (request_id=%s)", path, title, request_id)
@@ -2855,7 +2856,7 @@ async def main() -> None:
                 # Build SDK plugin paths for declared workspace plugins
                 sdk_plugins = (
                     [
-                        {"type": "local", "path": f"/workspace/plugins/{p}"}
+                        {"type": "local", "path": f"{WORKSPACE_ROOT}/plugins/{p}"}
                         for p in config.plugins
                     ]
                     if config.plugins

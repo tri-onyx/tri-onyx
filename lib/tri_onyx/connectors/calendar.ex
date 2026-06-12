@@ -728,7 +728,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec do_poll(%__MODULE__{}) :: %__MODULE__{}
   defp do_poll(state) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.agent_name])
 
     # Query window: past 7 days to future 90 days
@@ -804,7 +804,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec load_known_etags(String.t()) :: map()
   defp load_known_etags(agent_name) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     state_path = Path.join([workspace_dir, "agents", agent_name, "state", "last_sync.json"])
 
     case File.read(state_path) do
@@ -821,7 +821,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec write_sync_state(String.t(), map()) :: :ok
   defp write_sync_state(agent_name, etags) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     state_dir = Path.join([workspace_dir, "agents", agent_name, "state"])
     File.mkdir_p!(state_dir)
     state_path = Path.join(state_dir, "last_sync.json")

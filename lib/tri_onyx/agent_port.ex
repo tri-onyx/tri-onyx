@@ -630,7 +630,7 @@ defmodule TriOnyx.AgentPort do
   defp init_docker(notify, definition, opts) do
     session_id = Keyword.fetch!(opts, :session_id)
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     # The gateway runs inside a container where the host repo is mounted at
     # /app. Docker bind mounts are resolved on the host, so we must translate
     # the container-local workspace path to its host equivalent.

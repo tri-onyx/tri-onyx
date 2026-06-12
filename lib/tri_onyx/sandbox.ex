@@ -131,7 +131,7 @@ defmodule TriOnyx.Sandbox do
     # the SKILL.md files from .claude/skills/<name>/ within the workspace.
     skill_read_paths =
       Enum.map(definition.skills, fn skill ->
-        "/workspace/.claude/skills/#{skill}/**"
+        "#{TriOnyx.Workspace.container_root()}/.claude/skills/#{skill}/**"
       end)
 
     # Add read paths for each declared plugin so the agent can access

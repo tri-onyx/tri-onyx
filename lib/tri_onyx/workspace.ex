@@ -41,6 +41,14 @@ defmodule TriOnyx.Workspace do
   end
 
   @doc """
+  Returns the path the workspace is mounted at inside agent containers.
+  The Python runtime mirrors this as `protocol.WORKSPACE_ROOT` (it is
+  also sent as `agent.cwd` in the start message).
+  """
+  @spec container_root() :: String.t()
+  def container_root, do: "/workspace"
+
+  @doc """
   Ensures the workspace directory is initialized as a git repository
   with template context files.
 

@@ -50,6 +50,11 @@ import sys
 from dataclasses import dataclass, field
 from typing import Any
 
+# Mount path of the agent workspace inside the container. Mirrors
+# TriOnyx.Workspace.container_root/0 on the gateway side, which also
+# sends it as agent.cwd in the start message.
+WORKSPACE_ROOT = "/workspace"
+
 
 # ---------------------------------------------------------------------------
 # Inbound message types (gateway -> runtime via stdin)
@@ -82,7 +87,7 @@ class StartMessage:
             model=agent["model"],
             system_prompt=agent.get("system_prompt", ""),
             max_turns=agent.get("max_turns", 200),
-            cwd=agent.get("cwd", "/workspace"),
+            cwd=agent.get("cwd", WORKSPACE_ROOT),
             skills=agent.get("skills", []),
             plugins=agent.get("plugins", []),
         )

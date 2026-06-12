@@ -94,7 +94,7 @@ defmodule TriOnyx.Connectors.GitHub do
   """
   @spec repo_dir(String.t()) :: String.t()
   def repo_dir(repo) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     Path.expand(Path.join([workspace_dir, "repos", repo]))
   end
 
@@ -121,7 +121,7 @@ defmodule TriOnyx.Connectors.GitHub do
   """
   @spec mirror_dir(String.t()) :: String.t()
   def mirror_dir(repo) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     Path.expand(Path.join([workspace_dir, "repos-ro", repo]))
   end
 

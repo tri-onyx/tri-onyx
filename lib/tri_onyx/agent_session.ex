@@ -964,13 +964,13 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:send_email_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: send_email_request draft=#{draft_path}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
 
     # Translate agent path (/workspace/...) to host path
     host_path =
       draft_path
-      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1116,12 +1116,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
 
     host_path =
       draft_path
-      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1152,7 +1152,7 @@ defmodule TriOnyx.AgentSession do
         "#{source_folder} -> #{dest_folder}"
     )
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
     port = state.port
 
@@ -1181,7 +1181,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:create_folder_request, req_id, folder_name}, state) do
     Logger.info("AgentSession #{state.id}: create_folder_request folder=#{folder_name}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
     port = state.port
 
@@ -1208,7 +1208,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_query_request, req_id, params}, state) do
     Logger.info("AgentSession #{state.id}: calendar_query_request params=#{inspect(params)}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
     port = state.port
 
@@ -1235,12 +1235,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_create_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: calendar_create_request draft=#{draft_path}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
 
     host_path =
       draft_path
-      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1276,12 +1276,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_update_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: calendar_update_request draft=#{draft_path}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
 
     host_path =
       draft_path
-      |> String.replace_prefix("/workspace/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1320,7 +1320,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_delete_request, req_id, uid, calendar}, state) do
     Logger.info("AgentSession #{state.id}: calendar_delete_request uid=#{uid} calendar=#{calendar}")
 
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
     port = state.port
 
@@ -1790,7 +1790,7 @@ defmodule TriOnyx.AgentSession do
       "model" => definition.model,
       "system_prompt" => system_prompt,
       "max_turns" => 200,
-      "cwd" => "/workspace",
+      "cwd" => TriOnyx.Workspace.container_root(),
       "skills" => skills,
       "plugins" => plugins
     }

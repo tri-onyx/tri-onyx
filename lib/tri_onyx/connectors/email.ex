@@ -730,7 +730,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
       :error ->
         # Backwards compat: derive from inbox contents if no state file yet
-        workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+        workspace_dir = TriOnyx.Workspace.workspace_dir()
         inbox_dir = Path.join([workspace_dir, "agents", agent_name, "inbox"])
 
         case File.ls(inbox_dir) do
@@ -753,7 +753,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
   @spec last_uid_state_path(String.t()) :: String.t()
   defp last_uid_state_path(agent_name) do
-    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_dir = TriOnyx.Workspace.workspace_dir()
     Path.join([workspace_dir, "agents", agent_name, "state", "last_uid"])
   end
 
@@ -795,7 +795,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
     case connect_and_fetch(imap, state.last_uid) do
       {:ok, emails, new_last_uid} ->
-        workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+        workspace_dir = TriOnyx.Workspace.workspace_dir()
         inbox_dir = Path.join([workspace_dir, "agents", state.agent_name, "inbox"])
 
         Enum.each(emails, fn {uid, raw_email} ->

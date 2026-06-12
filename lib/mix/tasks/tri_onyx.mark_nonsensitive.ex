@@ -32,7 +32,7 @@ defmodule Mix.Tasks.TriOnyx.MarkNonsensitive do
   end
 
   def run([file_path | _rest]) do
-    workspace_path = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    workspace_path = TriOnyx.Workspace.workspace_dir()
 
     full_path = Path.join(workspace_path, file_path)
 

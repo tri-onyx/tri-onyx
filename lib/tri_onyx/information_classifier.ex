@@ -231,7 +231,7 @@ defmodule TriOnyx.InformationClassifier do
     path = Map.get(input, "file_path", "")
 
     if controlled_path?(path) do
-      rel_path = path |> String.replace_leading("/workspace/", "")
+      rel_path = path |> String.replace_leading(TriOnyx.Workspace.container_root() <> "/", "")
 
       # The risk manifest is updated on every FUSE-observed write, so it
       # is fresher than git history. Fall back to the Sc-Sensitivity git
@@ -312,9 +312,9 @@ defmodule TriOnyx.InformationClassifier do
   defp controlled_path?(""), do: false
 
   defp controlled_path?(path) when is_binary(path) do
-    normalized = Path.expand(path, "/workspace")
+    normalized = Path.expand(path, TriOnyx.Workspace.container_root())
 
-    String.starts_with?(normalized, "/workspace") or
+    String.starts_with?(normalized, TriOnyx.Workspace.container_root()) or
       String.starts_with?(normalized, "/mnt/host")
   end
 

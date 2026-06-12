@@ -36,10 +36,11 @@ OUTPUT_DIR = ROOT / "docs" / "agents"
 MKDOCS_YML = ROOT / "mkdocs.yml"
 RISK_JSON = ROOT / "tmp" / "agent_risk.json"
 
-# Mirrors TriOnyx.AgentDefinition.default_model/0. Only used as a fallback
-# when tmp/agent_risk.json (which carries the gateway-resolved model) is
-# absent, e.g. in CI runs without a gateway image.
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
+# Shown when neither tmp/agent_risk.json (which carries the
+# gateway-resolved model) nor the definition frontmatter names a model.
+# The actual default lives in TriOnyx.AgentDefinition.default_model/0;
+# this script deliberately does not mirror the value.
+DEFAULT_MODEL = "(gateway default)"
 
 
 def load_risk_data() -> dict:
