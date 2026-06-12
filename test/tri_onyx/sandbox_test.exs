@@ -451,6 +451,29 @@ defmodule TriOnyx.SandboxTest do
       assert "/repos/myorg/" in policy["fs_read"]
     end
 
+    test "github_read_repos inject read-only mirror paths" do
+      content = """
+      ---
+      name: reader-agent
+      tools: Read, Bash, GitHub
+      github_repo: myorg/mine
+      github_read_repos:
+        - myorg/docs
+      ---
+
+      Reader.
+      """
+
+      {:ok, definition} = AgentDefinition.parse(content)
+      json = Sandbox.build_fuse_policy(definition)
+      policy = Jason.decode!(json)
+
+      assert "/repos-ro/myorg/docs/**" in policy["fs_read"]
+      assert "/repos-ro/" in policy["fs_read"]
+      assert "/repos-ro/myorg/" in policy["fs_read"]
+      refute Enum.any?(policy["fs_write"], &String.starts_with?(&1, "/repos-ro/"))
+    end
+
     test "no repo write path without github_repo" do
       content = """
       ---

@@ -116,6 +116,68 @@ defmodule TriOnyx.Connectors.GitHub do
     end
   end
 
+  @doc """
+  Returns the gateway-owned read-only mirror directory for a repo.
+  """
+  @spec mirror_dir(String.t()) :: String.t()
+  def mirror_dir(repo) do
+    workspace_dir = Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+    Path.expand(Path.join([workspace_dir, "repos-ro", repo]))
+  end
+
+  @doc """
+  Ensures the read-only mirror for `repo` exists and tracks the remote
+  default branch.
+
+  Unlike working clones (which agents own and mutate), mirrors belong to
+  the gateway: on every call the mirror is force-synced to origin's
+  default branch, so a reader always sees current main as of its session
+  start. Serialized per repo.
+  """
+  @spec ensure_mirror(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  def ensure_mirror(repo, token) do
+    dir = mirror_dir(repo)
+
+    :global.trans({{:tri_onyx_github_mirror, repo}, self()}, fn ->
+      if File.dir?(Path.join(dir, ".git")) do
+        refresh_mirror(repo, dir, token)
+      else
+        clone_mirror(repo, token, dir)
+      end
+    end)
+  end
+
+  defp clone_mirror(repo, token, dir) do
+    Logger.info("GitHub connector: cloning read-only mirror of #{repo} to #{dir}")
+    File.mkdir_p!(Path.dirname(dir))
+
+    args =
+      credential_args() ++
+        ["clone", "--config", "core.symlinks=false", "https://github.com/#{repo}.git", dir]
+
+    case run_in("git", args, File.cwd!(), token) do
+      {_output, 0} -> {:ok, dir}
+      {output, code} -> {:error, "mirror clone failed (exit #{code}): #{String.trim(output)}"}
+    end
+  end
+
+  defp refresh_mirror(repo, dir, token) do
+    with {_out, 0} <- run_in("git", credential_args() ++ ["fetch", "origin"], dir, token),
+         # Hard reset is safe here — nothing else writes to the mirror.
+         {_out, 0} <- run_in("git", ["reset", "--hard", "origin/HEAD"], dir, token) do
+      {:ok, dir}
+    else
+      {output, code} ->
+        Logger.warning(
+          "GitHub connector: mirror refresh of #{repo} failed (exit #{code}): " <>
+            "#{String.trim(output)} — serving previous state"
+        )
+
+        # A stale mirror is still useful context.
+        {:ok, dir}
+    end
+  end
+
   # --- Private ---
 
   defp clone(repo, token, dir) do

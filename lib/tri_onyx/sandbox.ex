@@ -116,6 +116,15 @@ defmodule TriOnyx.Sandbox do
           {["/repos/#{repo}/**"], ["/repos/", "/repos/#{owner}/"]}
       end
 
+    # github_read_repos grant read-only views of gateway-owned mirrors
+    # under {workspace}/repos-ro/ (agent view: /workspace/repos-ro/).
+    mirror_read_paths =
+      Enum.flat_map(definition.github_read_repos, fn repo ->
+        [owner, _name] = String.split(repo, "/", parts: 2)
+        ["/repos-ro/", "/repos-ro/#{owner}/", "/repos-ro/#{repo}/**"]
+      end)
+      |> Enum.uniq()
+
     fs_write = Enum.uniq([default_write | github_write_paths ++ definition.fs_write])
 
     # Add read paths for each declared skill so the Claude Code CLI can load
@@ -139,7 +148,10 @@ defmodule TriOnyx.Sandbox do
       end
 
     fs_read =
-      Enum.uniq(definition.fs_read ++ skill_read_paths ++ plugin_read_paths ++ github_read_paths)
+      Enum.uniq(
+        definition.fs_read ++
+          skill_read_paths ++ plugin_read_paths ++ github_read_paths ++ mirror_read_paths
+      )
 
     policy = %{
       "fs_read" => fs_read,

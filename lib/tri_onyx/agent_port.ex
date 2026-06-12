@@ -668,19 +668,30 @@ defmodule TriOnyx.AgentPort do
   end
 
   @spec ensure_github_clone(AgentDefinition.t()) :: :ok
-  defp ensure_github_clone(%AgentDefinition{github_repo: nil}), do: :ok
-
-  defp ensure_github_clone(%AgentDefinition{github_repo: repo}) do
+  defp ensure_github_clone(%AgentDefinition{} = definition) do
     alias TriOnyx.Connectors.GitHub
 
-    with {:ok, token} <- GitHub.token_for(repo),
-         {:ok, _dir} <- GitHub.ensure_clone(repo, token) do
-      :ok
-    else
-      {:error, reason} ->
-        Logger.warning("AgentPort: could not prepare clone of #{repo}: #{reason}")
+    if repo = definition.github_repo do
+      with {:ok, token} <- GitHub.token_for(repo),
+           {:ok, _dir} <- GitHub.ensure_clone(repo, token) do
         :ok
+      else
+        {:error, reason} ->
+          Logger.warning("AgentPort: could not prepare clone of #{repo}: #{reason}")
+      end
     end
+
+    Enum.each(definition.github_read_repos, fn repo ->
+      with {:ok, token} <- GitHub.token_for(repo),
+           {:ok, _dir} <- GitHub.ensure_mirror(repo, token) do
+        :ok
+      else
+        {:error, reason} ->
+          Logger.warning("AgentPort: could not prepare mirror of #{repo}: #{reason}")
+      end
+    end)
+
+    :ok
   end
 
   @spec init_legacy(pid(), keyword()) :: {:ok, %__MODULE__{}}

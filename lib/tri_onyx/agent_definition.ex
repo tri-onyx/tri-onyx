@@ -34,6 +34,11 @@ defmodule TriOnyx.AgentDefinition do
     gateway-mediated `GitHub` tool. Auto-injects write access to the host-side
     clone at `/workspace/repos/<owner>/<repo>/**`; the repo token stays on the
     gateway (configured via `TRI_ONYX_GITHUB_TOKENS`).
+  - `github_read_repos` — list of GitHub repositories (`owner/repo`) this agent
+    may read for context but not act on. Each grants a read-only FUSE view of a
+    gateway-owned mirror at `/workspace/repos-ro/<owner>/<repo>/`, fast-forwarded
+    to the remote default branch at session start. The GitHub tool remains
+    scoped to `github_repo`.
   - `slack_channel` — Slack channel ID (e.g. `C0123ABCDEF`) this agent owns.
     Served to connectors via `GET /agents/schema` (`channel_bindings`); the
     Slack adapter routes all messages in the channel to this agent and posts
@@ -101,6 +106,7 @@ defmodule TriOnyx.AgentDefinition do
           trionyx_repo: boolean(),
           exclude_from_personalization: boolean(),
           github_repo: String.t() | nil,
+          github_read_repos: [String.t()],
           slack_channel: String.t() | nil,
           reflection: String.t() | nil
         }
@@ -138,6 +144,7 @@ defmodule TriOnyx.AgentDefinition do
     trionyx_repo: false,
     exclude_from_personalization: false,
     github_repo: nil,
+    github_read_repos: [],
     slack_channel: nil,
     reflection: nil
   ]
@@ -305,6 +312,10 @@ defmodule TriOnyx.AgentDefinition do
     %{field: "slack_channel", message: hint}
   end
 
+  def format_error({:invalid_github_read_repo, _value, hint}) do
+    %{field: "github_read_repos", message: hint}
+  end
+
   def format_error({:invalid_cron_schedule, idx, {:missing_field, field}}) do
     %{field: "cron_schedules", message: "Schedule ##{idx + 1}: missing #{field}"}
   end
@@ -395,6 +406,9 @@ defmodule TriOnyx.AgentDefinition do
       %{key: "github_repo", label: "GitHub Repository", type: "string", required: false, default: nil,
         options: nil, group: "sandbox", order: 6,
         hint: "owner/repo managed via the gateway-mediated GitHub tool (token stays on the gateway)"},
+      %{key: "github_read_repos", label: "GitHub Read Repos", type: "list", required: false, default: [],
+        options: nil, group: "sandbox", order: 7,
+        hint: "owner/repo list readable as gateway-owned mirrors (read-only, no GitHub tool access)"},
 
       # Messaging
       %{key: "send_to", label: "Send To", type: "agent_list", required: false, default: [],
@@ -471,9 +485,10 @@ defmodule TriOnyx.AgentDefinition do
   @spec frontmatter_field_order() :: [String.t()]
   defp frontmatter_field_order do
     ~w(name description model tools network fs_read fs_write send_to receive_from
-       restart_targets browser docker_socket trionyx_repo github_repo slack_channel
-       skills plugins input_sources heartbeat_every idle_timeout cron_schedules
-       reflection bcp_channels base_taint max_effective_risk exclude_from_personalization)
+       restart_targets browser docker_socket trionyx_repo github_repo github_read_repos
+       slack_channel skills plugins input_sources heartbeat_every idle_timeout
+       cron_schedules reflection bcp_channels base_taint max_effective_risk
+       exclude_from_personalization)
   end
 
   @spec serialize_yaml_field(String.t(), term()) :: [String.t()] | [nil]
@@ -679,6 +694,7 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, trionyx_repo} <- parse_optional_boolean(yaml, "trionyx_repo"),
          {:ok, exclude_from_personalization} <- parse_optional_boolean(yaml, "exclude_from_personalization"),
          {:ok, github_repo} <- parse_github_repo(yaml),
+         {:ok, github_read_repos} <- parse_github_read_repos(yaml, github_repo),
          {:ok, slack_channel} <- parse_slack_channel(yaml),
          {:ok, reflection} <- parse_reflection(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
@@ -750,6 +766,7 @@ defmodule TriOnyx.AgentDefinition do
          trionyx_repo: trionyx_repo,
          exclude_from_personalization: exclude_from_personalization,
          github_repo: github_repo,
+         github_read_repos: github_read_repos,
          slack_channel: slack_channel,
          reflection: reflection
        }}
@@ -1283,6 +1300,34 @@ defmodule TriOnyx.AgentDefinition do
 
       _other ->
         {:error, {:invalid_field_type, "github_repo", :expected_string}}
+    end
+  end
+
+  @spec parse_github_read_repos(map(), String.t() | nil) ::
+          {:ok, [String.t()]} | {:error, term()}
+  defp parse_github_read_repos(yaml, github_repo) do
+    case Map.get(yaml, "github_read_repos") do
+      nil ->
+        {:ok, []}
+
+      repos when is_list(repos) ->
+        invalid =
+          Enum.find(repos, fn repo ->
+            not is_binary(repo) or not Regex.match?(@github_repo_pattern, repo)
+          end)
+
+        case invalid do
+          nil ->
+            # The agent's own repo is already fully accessible — a mirror
+            # of it would only be confusing.
+            {:ok, repos |> Enum.uniq() |> Enum.reject(&(&1 == github_repo))}
+
+          bad ->
+            {:error, {:invalid_github_read_repo, bad, "expected a list of \"owner/repo\""}}
+        end
+
+      _other ->
+        {:error, {:invalid_field_type, "github_read_repos", :expected_list}}
     end
   end
 

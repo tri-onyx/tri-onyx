@@ -1107,6 +1107,65 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "github_read_repos parsing" do
+    test "defaults to empty list" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.github_read_repos == []
+    end
+
+    test "parses a list of owner/repo strings" do
+      content = """
+      ---
+      name: reader-agent
+      tools: Read
+      github_read_repos:
+        - myorg/docs
+        - myorg/api
+      ---
+
+      Reader.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.github_read_repos == ["myorg/docs", "myorg/api"]
+    end
+
+    test "drops the agent's own repo and duplicates" do
+      content = """
+      ---
+      name: reader-agent
+      tools: Read, GitHub
+      github_repo: myorg/mine
+      github_read_repos:
+        - myorg/mine
+        - myorg/docs
+        - myorg/docs
+      ---
+
+      Reader.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.github_read_repos == ["myorg/docs"]
+    end
+
+    test "rejects malformed entries" do
+      content = """
+      ---
+      name: bad-reader
+      tools: Read
+      github_read_repos:
+        - justarepo
+      ---
+
+      Bad.
+      """
+
+      assert {:error, {:invalid_github_read_repo, "justarepo", _}} =
+               AgentDefinition.parse(content)
+    end
+  end
+
   describe "slack_channel parsing" do
     test "defaults to nil when not specified" do
       assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
