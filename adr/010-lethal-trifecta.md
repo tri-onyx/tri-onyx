@@ -98,8 +98,8 @@ Effective taint is the maximum of the two: `effective_taint = max(base_taint, se
 
 In multi-agent pipelines, labels propagate across stages:
 
-- **Taint propagates forward** through data flow (as already implemented). Agent B reading Agent A's output inherits A's taint. Sanitization steps taint down one level.
-- **Sensitivity decays forward** through data flow. Agent B reading Agent A's output inherits `step_down(A's sensitivity)` — one level lower. An uncompromised agent won't willingly disclose secrets, so sensitivity attenuates per hop.
+- **Taint propagates forward** through data flow (as already implemented). Agent B reading Agent A's output inherits A's taint. ~~Sanitization steps taint down one level.~~ *(superseded — see correction below)*
+- **Sensitivity decays forward** through data flow. Agent B reading Agent A's output inherits `step_down(A's sensitivity)` — one level lower. An uncompromised agent won't willingly disclose secrets, so sensitivity attenuates per hop. *(graph analysis only — see correction below)*
 - **Capability is not inherited.** Each agent has its own capability level determined by its tool access. A high-capability agent receiving a message from a low-capability agent does not reduce its own capability.
 
 > **Correction (2026-06-09):** two claims above were superseded or never implemented as written. (1) Sanitization does **not** step taint down — structural validation cannot remove prompt injection from free text, so the receiver inherits the sender's full taint; taint step-down happens only through BCP (see ADR-005 and SECURITY_MODEL.md § Sanitization). (2) Per-hop sensitivity decay exists only in the worst-case graph analysis (`GraphAnalyzer.propagate_levels/3`); runtime session state does not apply it (see SECURITY_MODEL.md § Information Propagation).

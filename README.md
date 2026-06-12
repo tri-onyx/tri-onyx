@@ -159,5 +159,5 @@ Full documentation is available at **[tri-onyx.com](https://tri-onyx.com)**:
 - [API Reference](https://tri-onyx.com/api-reference/) — full HTTP API documentation
 - [Web Dashboard](https://tri-onyx.com/web-dashboard/) — monitoring and management UI
 - [Comparison with OpenClaw](https://tri-onyx.com/comparison/) — detailed side-by-side
-- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001-010
+- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001-011
 - [Project Structure](https://tri-onyx.com/project-structure/) — full source tree reference
