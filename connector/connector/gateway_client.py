@@ -24,6 +24,7 @@ from connector.protocol import (
     HealthMessage,
     InboundMessage,
     InterAgentMirrorMessage,
+    PromptMirrorMessage,
     OutboundMessage,
     ReactionMessage,
     RegisterMessage,
@@ -48,6 +49,7 @@ ActionHandler = Callable[[ActionRequest], Coroutine[Any, Any, None]]
 HeartbeatHandler = Callable[[HeartbeatNotification], Coroutine[Any, Any, None]]
 ApprovalRequestHandler = Callable[[ApprovalRequestMessage], Coroutine[Any, Any, None]]
 MirrorHandler = Callable[[InterAgentMirrorMessage], Coroutine[Any, Any, None]]
+PromptMirrorHandler = Callable[[PromptMirrorMessage], Coroutine[Any, Any, None]]
 
 
 class GatewayClient:
@@ -68,6 +70,7 @@ class GatewayClient:
         on_heartbeat: HeartbeatHandler | None = None,
         on_approval_request: ApprovalRequestHandler | None = None,
         on_mirror: MirrorHandler | None = None,
+        on_prompt_mirror: PromptMirrorHandler | None = None,
     ) -> None:
         self._config = config
         self._adapters = adapters or {}
@@ -76,6 +79,7 @@ class GatewayClient:
         self._on_heartbeat = on_heartbeat
         self._on_approval_request = on_approval_request
         self._on_mirror = on_mirror
+        self._on_prompt_mirror = on_prompt_mirror
         self._ws: ClientConnection | None = None
         self._registered = asyncio.Event()
         self._closing = False
@@ -216,6 +220,11 @@ class GatewayClient:
         if isinstance(msg, InterAgentMirrorMessage):
             if self._on_mirror:
                 await self._on_mirror(msg)
+            return
+
+        if isinstance(msg, PromptMirrorMessage):
+            if self._on_prompt_mirror:
+                await self._on_prompt_mirror(msg)
             return
 
         if isinstance(msg, OutboundMessage):

@@ -5,6 +5,7 @@ import json
 from connector.protocol import (
     ApprovalRequestMessage,
     InterAgentMirrorMessage,
+    PromptMirrorMessage,
     ReactionMessage,
     decode,
     encode,
@@ -125,6 +126,22 @@ class TestInterAgentMirrorDecoding:
         assert isinstance(msg, InterAgentMirrorMessage)
         assert msg.message_type == "text"
         assert msg.content == ""
+
+
+class TestPromptMirrorDecoding:
+    def test_decode_prompt_mirror(self):
+        raw = json.dumps({
+            "type": "prompt_mirror",
+            "agent_name": "golden-path-docs",
+            "source": "web",
+            "content": "How many guides are there?",
+        })
+        msg = decode(raw)
+
+        assert isinstance(msg, PromptMirrorMessage)
+        assert msg.agent_name == "golden-path-docs"
+        assert msg.source == "web"
+        assert msg.content == "How many guides are there?"
 
 
 class TestRoundTrip:

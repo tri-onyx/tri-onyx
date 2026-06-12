@@ -526,6 +526,18 @@ defmodule TriOnyx.Router do
           {:ok, pid} ->
             case AgentSession.send_prompt(pid, content) do
               :ok ->
+                # Mirror the user's frontend message into the agent's bound
+                # chat room (the connector resolves which room, if any) so
+                # channel members see both sides of frontend conversations.
+                TriOnyx.ConnectorHandler.broadcast_to_connectors(
+                  Jason.encode!(%{
+                    "type" => "prompt_mirror",
+                    "agent_name" => name,
+                    "source" => "web",
+                    "content" => content
+                  })
+                )
+
                 conn
                 |> send_json(200, %{"status" => "sent", "agent" => name})
 

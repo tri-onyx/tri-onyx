@@ -32,6 +32,7 @@ from connector.protocol import (
     InboundMessage,
     InterAgentMirrorMessage,
     OutboundMessage,
+    PromptMirrorMessage,
     ReactionMessage,
 )
 
@@ -317,6 +318,21 @@ async def _route_mirror(
         await adapter.send_text(channel, text, agent_name=msg.from_agent)
 
 
+async def _route_prompt_mirror(
+    adapters: dict[str, Any],
+    msg: PromptMirrorMessage,
+) -> None:
+    """Post a frontend user prompt into the agent's room.
+
+    Pairs with the gateway's completion broadcast so channel members see
+    both sides of frontend conversations with a channel-bound agent.
+    """
+    quoted = "\n".join(f"> {line}" for line in msg.content.splitlines() or [""])
+    text = f"🖥️ *{msg.source}* → *{msg.agent_name}*\n{quoted}"
+    for adapter, channel in _resolve_agent_room(adapters, msg.agent_name):
+        await adapter.send_text(channel, text, agent_name=msg.agent_name)
+
+
 async def run(config: ConnectorConfig) -> None:
     """Start all components and run until shutdown."""
     adapters = _build_adapters(config)
@@ -333,6 +349,7 @@ async def run(config: ConnectorConfig) -> None:
         on_heartbeat=lambda msg: _route_heartbeat(adapters, msg),
         on_approval_request=lambda msg: _route_approval_request(adapters, msg),
         on_mirror=lambda msg: _route_mirror(adapters, msg),
+        on_prompt_mirror=lambda msg: _route_prompt_mirror(adapters, msg),
     )
 
     # Wire adapter inbound -> gateway

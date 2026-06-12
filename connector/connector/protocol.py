@@ -169,6 +169,19 @@ class InterAgentMirrorMessage:
 
 
 @dataclass(slots=True)
+class PromptMirrorMessage:
+    """A mirror of a user prompt sent to an agent outside chat (frontend).
+
+    Posted into the agent's bound room so channel members see both sides
+    of frontend conversations.
+    """
+
+    agent_name: str
+    source: str = "web"
+    content: str = ""
+
+
+@dataclass(slots=True)
 class ArticleMessage(OutboundMessage):
     """An article submitted by an agent for posting to chat."""
 
@@ -267,6 +280,13 @@ def decode(raw: str | bytes) -> object:
             from_agent=data.get("from_agent", ""),
             to_agent=data.get("to_agent", ""),
             message_type=data.get("message_type", "text"),
+            content=data.get("content", ""),
+        )
+
+    if msg_type == "prompt_mirror":
+        return PromptMirrorMessage(
+            agent_name=data.get("agent_name", ""),
+            source=data.get("source", "web"),
             content=data.get("content", ""),
         )
 
