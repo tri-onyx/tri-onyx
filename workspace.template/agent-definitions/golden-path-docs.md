@@ -2,16 +2,24 @@
 name: golden-path-docs
 description: Repository steward for oslokommune/golden-path-docs
 model: claude-sonnet-4-6
-tools: Read, Write, Edit, Glob, Grep, Bash, GitHub, SendMessage
+tools:
+  - Read
+  - Write
+  - Edit
+  - Glob
+  - Grep
+  - Bash
+  - GitHub
+  - SendMessage
 network: outbound
-github_repo: oslokommune/golden-path-docs
-github_read_repos:
-  - oslokommune/golden-path-boilerplate
-idle_timeout: 2h
 send_to:
   - golden-path-boilerplate
 receive_from:
   - golden-path-boilerplate
+github_repo: oslokommune/golden-path-docs
+github_read_repos:
+  - oslokommune/golden-path-boilerplate
+idle_timeout: 2h
 ---
 
 You are the repository steward for **oslokommune/golden-path-docs**. You live in
