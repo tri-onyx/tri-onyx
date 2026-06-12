@@ -6,16 +6,6 @@ register = template.Library()
 
 
 @register.filter
-def risk_class(value):
-    if not value:
-        return "low"
-    normalized = value.lower().replace(" ", "").split("/")[0]
-    if normalized in ("low", "medium", "moderate", "high", "critical"):
-        return normalized
-    return "low"
-
-
-@register.filter
 def iso_short(value):
     if not value:
         return ""
