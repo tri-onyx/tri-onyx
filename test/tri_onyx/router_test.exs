@@ -174,6 +174,41 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /agents/:name/definition" do
+    test "frontmatter covers every schema field (drift guard)" do
+      # The endpoint hand-builds the frontmatter map, so a field added to
+      # AgentDefinition.schema/0 but forgotten there would be silently
+      # stripped from the definition file on the next builder save. This
+      # test turns that drift into a failure.
+      agents_dir = TriOnyx.agents_dir()
+      File.mkdir_p!(agents_dir)
+      file_path = Path.join(agents_dir, "drift-guard-agent.md")
+
+      File.write!(file_path, """
+      ---
+      name: drift-guard-agent
+      tools: Read
+      ---
+
+      Drift guard fixture.
+      """)
+
+      on_exit(fn -> File.rm(file_path) end)
+
+      conn = conn(:get, "/agents/drift-guard-agent/definition") |> call_router()
+      assert conn.status == 200
+
+      frontmatter = Jason.decode!(conn.resp_body)["frontmatter"]
+
+      schema_keys = Enum.map(AgentDefinition.schema().fields, & &1.key)
+      missing = Enum.reject(schema_keys, &Map.has_key?(frontmatter, &1))
+
+      assert missing == [],
+             "schema fields missing from /agents/:name/definition frontmatter " <>
+               "(builder saves would strip them): #{inspect(missing)}"
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()
