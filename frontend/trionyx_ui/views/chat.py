@@ -10,6 +10,7 @@ from django.utils.safestring import mark_safe
 from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
+from trionyx_ui.schema_cache import sse_event_types, visible_event_types
 from trionyx_ui.tool_briefs import (
     format_tool_brief as _format_tool_brief,
     get_brief_specs as _get_brief_specs,
@@ -27,24 +28,6 @@ def _render_md(text: str) -> str:
     return html.replace("<a ", '<a target="_blank" rel="noopener" ')
 
 
-VISIBLE_EVENT_TYPES = {
-    "user_prompt",
-    "text",
-    "tool_use",
-    "tool_result",
-    "result",
-    "error",
-    "ready",
-    "session_start",
-    "session_stop",
-    "send_message",
-    "bcp_query",
-    "risk_escalation",
-    "approval_request",
-    "interrupted",
-    "image",
-    "page",
-}
 
 
 def agent_chat(request, name):
@@ -96,7 +79,7 @@ def agent_chat(request, name):
     if session_id:
         raw_events = gateway.get_session_log(name, session_id)
         messages = _pair_tool_calls(
-            [classify_event(e) for e in raw_events if e.get("type") in VISIBLE_EVENT_TYPES]
+            [classify_event(e) for e in raw_events if e.get("type") in visible_event_types()]
         )
         if raw_events:
             last_timestamp = raw_events[-1].get("timestamp", "")
@@ -126,13 +109,14 @@ def agent_chat(request, name):
         "active_sessions": active_sessions if show_session_picker else [],
         "selected_session_id": session_id,
         "tool_briefs": _get_brief_specs(),
+        "sse_event_types": sse_event_types(),
     })
 
 
 def _render_historical_session(request, agent, name, history_session_id):
     raw_events = gateway.get_session_log(name, history_session_id)
     messages = _pair_tool_calls(
-        [classify_event(e) for e in raw_events if e.get("type") in VISIBLE_EVENT_TYPES]
+        [classify_event(e) for e in raw_events if e.get("type") in visible_event_types()]
     )
 
     session_start_ts = ""

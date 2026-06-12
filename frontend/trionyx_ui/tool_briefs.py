@@ -11,32 +11,14 @@ nothing.
 """
 
 import json
-import time
 
-from trionyx_ui import gateway
+from trionyx_ui.schema_cache import get_schema
 from trionyx_ui.views.helpers import short_path
-
-_CACHE_TTL_S = 300
-_cache: dict = {"specs": None, "fetched_at": 0.0}
 
 
 def get_brief_specs() -> dict:
-    """Return brief specs keyed by tool name, cached for a few minutes.
-
-    Falls back to the last known specs (or ``{}``) when the gateway is
-    unreachable, backing off for a full TTL so page renders don't retry
-    per message.
-    """
-    now = time.monotonic()
-    if _cache["specs"] is not None and now - _cache["fetched_at"] < _CACHE_TTL_S:
-        return _cache["specs"]
-    try:
-        _cache["specs"] = gateway.get_agent_schema().get("tool_briefs", {})
-    except Exception:
-        if _cache["specs"] is None:
-            _cache["specs"] = {}
-    _cache["fetched_at"] = now
-    return _cache["specs"]
+    """Return brief specs keyed by tool name (TTL-cached schema fetch)."""
+    return get_schema().get("tool_briefs", {})
 
 
 def _stringify(value) -> str:

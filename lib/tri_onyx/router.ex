@@ -155,6 +155,11 @@ defmodule TriOnyx.Router do
       "tool_groups" => tool_groups,
       "known_tools" => TriOnyx.ToolRegistry.known_tools(),
       "tool_briefs" => TriOnyx.ToolRegistry.brief_specs(),
+      "session_events" => %{
+        "types" => TriOnyx.SessionEvents.event_types(),
+        "chat_visible" => TriOnyx.SessionEvents.chat_visible(),
+        "sse_meta" => TriOnyx.SessionEvents.sse_meta_types()
+      },
       "known_agents" => known_agents,
       "channel_bindings" => channel_bindings
     })

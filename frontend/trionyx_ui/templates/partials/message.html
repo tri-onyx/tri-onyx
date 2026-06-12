@@ -88,4 +88,10 @@
     Approval requested
   </div>
 
+{% elif msg.type == "port_down" %}
+  <div class="msg msg-error" data-ts="{{ msg.timestamp }}">Agent process terminated</div>
+
+{% elif msg.type == "idle_timeout" %}
+  <div class="msg msg-system" data-ts="{{ msg.timestamp }}">Idle timeout — saving memory</div>
+
 {% endif %}

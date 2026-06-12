@@ -106,13 +106,15 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus('connecting', 'connecting...');
     const es = new EventSource(url);
 
-    const eventTypes = [
-      'connected', 'waiting', 'session_start', 'ready',
-      'text', 'tool_use', 'tool_result',
-      'result', 'error', 'user_prompt', 'risk_escalation',
-      'send_message', 'bcp_query', 'session_stop', 'interrupted',
-      'port_down', 'idle_timeout', 'image', 'page',
-    ];
+    // Gateway-owned list (SessionEvents.chat_visible + sse_meta),
+    // embedded by the chat template as #sse-event-types.
+    let eventTypes = [];
+    try {
+      const el = document.getElementById('sse-event-types');
+      eventTypes = (el && JSON.parse(el.textContent)) || [];
+    } catch (e) {
+      eventTypes = [];
+    }
 
     eventTypes.forEach(type => {
       es.addEventListener(type, (event) => {
@@ -245,6 +247,9 @@ function renderEvent(type, data) {
 
     case 'interrupted':
       return `<div class="msg msg-system" data-ts="${escapeAttr(ts)}">Interrupted: ${escapeHtml(data.reason || '')}</div>`;
+
+    case 'approval_request':
+      return `<div class="msg msg-system" data-ts="${escapeAttr(ts)}">Approval requested</div>`;
 
     case 'port_down':
       return `<div class="msg msg-error" data-ts="${escapeAttr(ts)}">Agent process terminated</div>`;
