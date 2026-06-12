@@ -6,8 +6,14 @@ The gateway exposes an HTTP API at `http://localhost:4000` for managing agents, 
 
 | Method | Path | Description |
 |--------|------|-------------|
+| `GET` | `/agents/schema` | Definition schema plus gateway-owned vocabularies (known tools, tool brief specs, session event types, channel bindings) |
 | `GET` | `/agents` | List agents with risk scores |
 | `GET` | `/agents/:name` | Agent detail with taint status |
+| `GET` | `/agents/:name/definition` | Raw agent definition markdown |
+| `GET` | `/agents/:name/context` | Assembled workspace context / system prompt preview |
+| `POST` | `/agents` | Create an agent definition |
+| `PUT` | `/agents/:name` | Update an agent definition |
+| `DELETE` | `/agents/:name` | Delete an agent definition |
 | `POST` | `/agents/:name/start` | Start an agent session |
 | `POST` | `/agents/:name/stop` | Stop an agent session |
 | `POST` | `/agents/:name/prompt` | Send prompt to running agent |
@@ -18,6 +24,7 @@ The gateway exposes an HTTP API at `http://localhost:4000` for managing agents, 
 | Method | Path | Description |
 |--------|------|-------------|
 | `POST` | `/hooks/:endpoint_id` | Authenticated webhook ingress (internet-facing) |
+| `POST` | `/webhooks/:agent_name` | Legacy unauthenticated webhook trigger (deprecated — use `/hooks/:endpoint_id`) |
 | `POST` | `/messages` | External message with Bearer token auth |
 
 ## Webhook endpoints
@@ -53,11 +60,25 @@ The gateway exposes an HTTP API at `http://localhost:4000` for managing agents, 
 |--------|------|-------------|
 | `GET` | `/graph/analysis` | Graph analysis with risk propagation |
 | `GET` | `/api/matrix` | Classification matrix (taint, sensitivity, capability) |
-| `GET` | `/audit?since=YYYY-MM-DD` | Query audit log |
+| `GET` | `/audit` | Query audit log (`?since=YYYY-MM-DD`) |
 | `GET` | `/logs` | List agents with session logs |
 | `GET` | `/logs/:agent_name` | List sessions for an agent |
 | `GET` | `/logs/:agent_name/:session_id` | Session log (JSONL) |
 | `GET` | `/health` | Health check |
+
+## Session artifacts
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/images/:agent_name/:session_id/:image_id` | Serve an image submitted via SubmitImage |
+| `GET` | `/pages/:commit/*page_path` | Serve an HTML page submitted via SubmitPage (pinned to a workspace commit) |
+
+## Workspace
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/api/workspace/tree` | Workspace file tree with taint/sensitivity and git status |
+| `GET` | `/api/workspace/file` | File detail with git provenance and commit trailers (`?path=...`) |
 
 ## Connectors
 
@@ -73,6 +94,7 @@ The gateway exposes an HTTP API at `http://localhost:4000` for managing agents, 
 | `GET` | `/heartbeats` | List heartbeat schedules |
 | `PUT` | `/heartbeats/enabled` | Enable/disable heartbeat scheduler |
 | `POST` | `/heartbeats/:agent_name` | Schedule heartbeat for agent |
+| `POST` | `/heartbeats/:agent_name/trigger` | Fire an agent's heartbeat immediately |
 | `DELETE` | `/heartbeats/:agent_name` | Cancel heartbeat for agent |
 
 ## Human review

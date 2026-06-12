@@ -76,7 +76,9 @@ Configures the agent.  Must be the first message sent after spawning.
     "model": "claude-sonnet-4-20250514",
     "system_prompt": "You are a code reviewer...",
     "max_turns": 200,
-    "cwd": "/workspace"
+    "cwd": "/workspace",
+    "skills": [],
+    "plugins": []
   }
 }
 ```
@@ -85,11 +87,12 @@ Configures the agent.  Must be the first message sent after spawning.
 |----------------------|------------|----------|------------------------------|-----------------------------------------------|
 | `agent.name`         | string     | yes      | `"unnamed"`                  | Agent identifier (from agent definition)      |
 | `agent.tools`        | string[]   | yes      | `[]`                         | Allowed tools (SDK `allowed_tools`)           |
-| `agent.model`        | string     | no       | `"claude-sonnet-4-20250514"` | LLM model identifier                         |
+| `agent.model`        | string     | yes      | —                            | LLM model identifier (gateway always sends it; a missing model is a protocol violation) |
 | `agent.system_prompt` | string    | no       | `""`                         | System prompt (appended to `claude_code` preset) |
 | `agent.max_turns`    | integer    | no       | `200`                        | Maximum SDK turns per session                 |
 | `agent.cwd`          | string     | no       | `"/workspace"`               | Working directory for the agent               |
 | `agent.skills`       | string[]   | no       | `[]`                         | List of skill names to load into the agent's context |
+| `agent.plugins`      | string[]   | no       | `[]`                         | List of plugin names mounted into the agent's context |
 
 ### `prompt`
 
@@ -110,6 +113,7 @@ Delivers a trigger payload to drive an agent session.
 |------------|--------|----------|------------------------------------------------|
 | `content`  | string | yes      | The prompt text to send to the LLM             |
 | `metadata` | object | no       | Opaque metadata from the gateway (not sent to LLM) |
+| `images`   | array  | no       | Image attachments (also accepted nested in `metadata.images`) |
 
 ### `interrupt`
 
@@ -143,6 +147,62 @@ and exit cleanly.
 | Field    | Type   | Required | Description              |
 |----------|--------|----------|--------------------------|
 | `reason` | string | no       | Human-readable reason    |
+
+### `memory_save`
+
+Requests that the agent save its memory files before an upcoming shutdown
+(e.g., idle timeout). The runtime drives a short memory-save turn and then
+awaits further messages.
+
+```json
+{
+  "type": "memory_save",
+  "reason": "idle_timeout"
+}
+```
+
+| Field    | Type   | Required | Description              |
+|----------|--------|----------|--------------------------|
+| `reason` | string | no       | Why memory should be saved now |
+
+### `bcp_query`
+
+A BCP query delivered to a Reader agent. The runtime drives an LLM turn to
+answer it and replies with a `bcp_response`.
+
+| Field        | Type   | Required | Description                                  |
+|--------------|--------|----------|----------------------------------------------|
+| `query_id`   | string | yes      | Correlation ID for the response              |
+| `category`   | int    | yes      | BCP category (1, 2, or 3)                    |
+| `from_agent` | string | yes      | Controller agent that asked                  |
+| `context`    | string | no       | Free-text context for the query              |
+| `fields`     | array  | no       | Requested fields (category-dependent)        |
+| `questions`  | array  | no       | Requested questions (category-dependent)     |
+| `directive`  | string | no       | Open directive (category 3)                  |
+| `max_words`  | int    | no       | Response length budget                       |
+
+### `bcp_query_error`
+
+Sent to a Controller agent when its `bcp_query_request` could not be routed
+(unknown Reader, channel not allowed, validation failure).
+
+| Field        | Type   | Required | Description                       |
+|--------------|--------|----------|-----------------------------------|
+| `request_id` | string | yes      | Correlates with the failed request |
+| `to_agent`   | string | yes      | The Reader that was targeted       |
+| `reason`     | string | yes      | Why routing failed                 |
+
+### `bcp_validation_result`
+
+Result of BCP response validation, sent back to the Reader that emitted a
+`bcp_response`. Carries `subscription_id` for subscription publish results.
+
+| Field             | Type   | Required | Description                          |
+|-------------------|--------|----------|--------------------------------------|
+| `query_id`        | string | yes      | The query the response answered      |
+| `success`         | bool   | yes      | Whether the response passed validation |
+| `detail`          | string | no       | Validation failure detail            |
+| `subscription_id` | string | no       | Present for subscription publishes   |
 
 ### `bcp_subscriptions_active`
 
@@ -179,6 +239,44 @@ Validated BCP response delivered to a Controller agent. In addition to query-res
 | `from_agent`      | string | yes      | Reader agent that produced the response                            |
 | `response`        | object | yes      | Validated response payload                                         |
 | `subscription_id` | string | no       | Present for subscription pushes, absent for query responses        |
+
+---
+
+## Request/Response Round-Trips
+
+Gateway-mediated tools (inter-agent messaging, email, calendar, GitHub,
+chat submissions) follow one pattern: the runtime emits a `*_request`
+message carrying a unique `request_id` and blocks the tool call until the
+gateway replies with the matching `*_response`.
+
+Every request carries `request_id` plus the fields below. Every response
+carries `request_id`, `success` (bool), and `detail` (string, error text on
+failure) plus any extra fields listed.
+
+| Runtime request (stdout) | Request fields | Gateway response (stdin) | Extra response fields |
+|--------------------------|----------------|--------------------------|------------------------|
+| `send_message_request` | `to`, `message_type`, `payload` | `send_message_response` | — |
+| `restart_agent_request` | `agent_name`, `force` | `restart_agent_response` | — |
+| `github_request` | `command`, `args` | `github_response` | `output` |
+| `send_email_request` | `draft_path` | `send_email_response` | `message_id` |
+| `save_draft_request` | `draft_path` | `save_draft_response` | — |
+| `move_email_request` | `uid`, `source_folder`, `dest_folder` | `move_email_response` | — |
+| `create_folder_request` | `folder_name` | `create_folder_response` | — |
+| `calendar_query_request` | `params` | `calendar_query_response` | `events` |
+| `calendar_create_request` | `draft_path` | `calendar_create_response` | `event` |
+| `calendar_update_request` | `draft_path` | `calendar_update_response` | `event` |
+| `calendar_delete_request` | `uid`, `calendar` | `calendar_delete_response` | — |
+| `submit_item_request` | `item_type`, `title`, `url`, `metadata` | `submit_item_response` | — |
+| `submit_image_request` | `path`, `filename`, `media_type` | `submit_image_response` | — |
+| `submit_page_request` | `path`, `title` | `submit_page_response` | — |
+
+The BCP query flow uses the same correlation pattern but asymmetric
+messages: a Controller emits `bcp_query_request` (`request_id`, `to`,
+`category`, `spec`); the gateway either delivers a `bcp_query` to the
+Reader or returns `bcp_query_error` to the Controller. The Reader answers
+with `bcp_response`, the gateway validates it (`bcp_validation_result`
+back to the Reader) and delivers it to the Controller as
+`bcp_response_delivery`.
 
 ---
 
@@ -309,6 +407,36 @@ may be a standalone protocol error (e.g., malformed input).
 | Field     | Type   | Description               |
 |-----------|--------|---------------------------|
 | `message` | string | Human-readable error text |
+
+### `log`
+
+Forwards a runtime log message to the gateway (surfaced as an `agent_log`
+session event).
+
+```json
+{
+  "type": "log",
+  "level": "warning",
+  "message": "Skill directory not found: research"
+}
+```
+
+| Field     | Type   | Description                       |
+|-----------|--------|-----------------------------------|
+| `level`   | string | Log level (`info`, `warning`, …)  |
+| `message` | string | Log text                          |
+
+### `bcp_query_request`
+
+Emitted by a Controller agent's runtime to query a Reader. See
+[Request/Response Round-Trips](#requestresponse-round-trips) for the flow.
+
+| Field        | Type   | Description                           |
+|--------------|--------|---------------------------------------|
+| `request_id` | string | Correlation ID                        |
+| `to`         | string | Target Reader agent                   |
+| `category`   | int    | BCP category (1, 2, or 3)             |
+| `spec`       | object | Query spec (fields/questions/directive) |
 
 ### `bcp_response` (extended)
 
