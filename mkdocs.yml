@@ -68,6 +68,7 @@ nav:
       - BCP Subscriptions: bcp-subscriptions.md
       - Web Dashboard: web-dashboard.md
       - API Reference: api-reference.md
+      - Cloud Architecture (Design): cloud-architecture-design.md
   - Guides:
       - Running as a Service: service-setup.md
       - Secret Management: secrets.md
