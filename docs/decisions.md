@@ -23,3 +23,4 @@ This page indexes the Architecture Decision Records (ADRs) and key design docume
 | [008](https://github.com/tri-onyx/tri-onyx/blob/main/adr/008-risk-manifest-provenance.md) | Risk manifest for file-level provenance tracking |
 | [009](https://github.com/tri-onyx/tri-onyx/blob/main/adr/009-graph-analysis-transitive-risk.md) | Graph analysis for transitive risk propagation |
 | [010](https://github.com/tri-onyx/tri-onyx/blob/main/adr/010-lethal-trifecta.md) | The lethal trifecta -- taint, sensitivity, and capability |
+| [011](https://github.com/tri-onyx/tri-onyx/blob/main/adr/011-track-and-kill-enforcement.md) | Track-and-kill risk enforcement -- reads escalate, exceeding the ceiling kills |

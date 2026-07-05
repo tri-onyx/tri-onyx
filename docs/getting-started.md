@@ -188,7 +188,7 @@ docker build --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) \
   -f agent.Dockerfile -t tri-onyx-agent:latest .
 
 # Connector (Python, chat bridge)
-docker build -f connector.Dockerfile -t connector:latest .
+docker build -f connector.Dockerfile -t trionyx-connector:latest .
 ```
 
 The agent image passes your host UID/GID so bind-mounted files have correct ownership.
@@ -201,7 +201,7 @@ The agent image passes your host UID/GID so bind-mounted files have correct owne
 docker compose up
 ```
 
-This starts the gateway and connector. The gateway spawns agent containers on demand when messages arrive.
+This starts the gateway, connector, web frontend, and Docker socket proxy services. The gateway spawns agent containers on demand when messages arrive.
 
 To run in the background:
 
@@ -241,7 +241,7 @@ Or test directly via the API:
 ```bash
 curl -X POST http://localhost:4000/agents/main/prompt \
   -H 'Content-Type: application/json' \
-  -d '{"text": "Hello, can you see this?"}'
+  -d '{"content": "Hello, can you see this?"}'
 ```
 
 Watch the gateway logs for the agent session lifecycle:
@@ -255,19 +255,21 @@ docker compose logs -f gateway
 For scripted testing:
 
 ```bash
-uv run scripts/test-agent.py --agent main --prompt "What tools do you have access to?"
+uv run scripts/test-agent.py main "What tools do you have access to?"
 ```
 
 ---
 
 ## 7. Web dashboard
 
-The gateway serves a web UI at [http://localhost:4000](http://localhost:4000):
+The `frontend` compose service serves a web UI at [http://127.0.0.1:8080](http://127.0.0.1:8080):
 
-- **`/`** — Agent overview and control panel
-- **`/graph`** — Real-time agent topology with taint/sensitivity visualization
-- **`/matrix`** — Classification matrix (taint, sensitivity, capability levels)
-- **`/logs`** — Session log browser
+- **`/`** — Agent overview: session statuses, gateway health, pending approvals
+- **`/graph/`** — Agent topology with taint/sensitivity risk analysis
+- **`/builder/`** — Create and edit agent definitions
+- **`/agents/<name>/`** — Per-agent chat: start sessions, send prompts, watch live output, browse session history
+
+See [Web Dashboard](web-dashboard.md) for details. The gateway's HTTP API remains at `http://localhost:4000`.
 
 ---
 

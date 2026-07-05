@@ -153,7 +153,7 @@ graph TB
     docker build -f agent.Dockerfile -t tri-onyx-agent:latest .
 
     # Connector image (Python, for Matrix chat bridge)
-    docker build -f connector.Dockerfile -t connector:latest .
+    docker build -f connector.Dockerfile -t trionyx-connector:latest .
     ```
 
     The agent image requires a pre-built FUSE driver binary at `fuse/tri-onyx-fs`.
@@ -193,5 +193,5 @@ graph TB
 
     # Python connector tests
     docker run --rm -v $(pwd)/connector:/app -w /app \
-      connector:latest uv run pytest
+      trionyx-connector:latest uv run pytest
     ```

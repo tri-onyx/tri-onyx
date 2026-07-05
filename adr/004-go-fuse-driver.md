@@ -1,6 +1,6 @@
 # ADR-004: Go FUSE Driver for Filesystem-Level Policy Enforcement
 
-- **Status:** Accepted
+- **Status:** Accepted, amended 2026-06-09 (risk-based read filtering removed — see Amendment below)
 - **Date:** 2026-02-17
 - **Deciders:** Falense
 
@@ -140,3 +140,22 @@ Patch the agent runtime to check permissions before every file operation. Faster
 - **Negative:** Adds Go as a third language in the stack (alongside Elixir and Python). Mitigated by the driver being a small, self-contained component (~500 lines of Go) with a stable interface.
 - **Negative:** The glob expansion at startup scales with the number of files in the source directory. For very large repositories, this adds startup latency. Acceptable because agent session startup is dominated by container creation and LLM initialization, not trie construction.
 - **Accepted trade-off:** FUSE adds a kernel-to-userspace round-trip per filesystem operation. This is the cost of userspace policy enforcement. The alternative (eBPF) avoids this but at significantly higher development and operational complexity. Since agents are I/O-bound on LLM API calls, filesystem latency is not on the critical path.
+
+## Amendment (2026-06-09): risk-based read filtering removed — see ADR-011
+
+The risk-manifest read filtering described above ("Risk manifest enables dynamic
+taint and sensitivity filtering", the manifest checks in the Architecture
+diagram, the `max_read_taint`/`max_read_sensitivity` thresholds in the Policy
+flow, and the corresponding Consequences bullet) no longer exists in the driver.
+[ADR-011](011-track-and-kill-enforcement.md) removed the `max_read_*` chain from
+the Go driver, policy parser, and sandbox config: it was dead code (the
+definition schema never had the fields and the gateway never emitted them), and
+blocking reads is capability sandboxing rather than information-flow tracking.
+
+Under the current model, the driver enforces glob-based path policy only and
+*reports* reads (a `log_reads` policy flag emits a JSON event per read open,
+deduplicated per path). The gateway resolves read events against the risk
+manifest, escalates the reading session's taint and sensitivity, and kills
+sessions that exceed their `max_effective_risk` ceiling. Everything else in this
+ADR — the trie, glob expansion, write/denial logging, symlink denial, and the
+choice of Go/FUSE — remains current.

@@ -115,6 +115,10 @@ This is the hardest part of the implementation. The naive approach is to allow L
 
 **Recommended approach:** At startup, expand all glob patterns against the source directory to build a trie of allowed paths. Use the trie for O(1) lookup and filtered readdir. Re-scan periodically or on inotify events if the source changes (but this is a future enhancement — static scan at startup is fine for v1).
 
+### Permission bits
+
+Report permissive mode bits to the kernel: `0777` for directories and `0666` for files, preserving the file type bits. The source filesystem's real mode bits reflect the host UID/GID, which does not match the container's unprivileged agent user, so honoring them would let the kernel's own permission pre-checks reject operations with spurious `EACCES` before the driver ever sees them. Neutralizing the bits ensures the kernel never pre-filters access, making the trie-based checks in each operation handler (plus the `Access` handler) the sole enforcement point.
+
 ## Denial Behavior
 
 - Denied operations return `syscall.EACCES` (permission denied).
