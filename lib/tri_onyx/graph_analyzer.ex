@@ -301,9 +301,12 @@ defmodule TriOnyx.GraphAnalyzer do
   Takes agent definitions, pre-built edges map, and base levels (from worst_case_* functions).
   Returns a map of agent_name => %{taint, sensitivity, taint_sources, sensitivity_sources}.
 
-  All edge types apply `step_down/1` on sensitivity — an uncompromised agent
-  won't willingly disclose secrets, so sensitivity decays by one level per hop.
-  BCP edges additionally apply `step_down/1` on taint.
+  Sensitivity propagates at FULL strength on `:filesystem` edges — runtime
+  file-read escalation (ADR-011) inherits the file's recorded sensitivity
+  unchanged, so the projection must match. `:messaging` and `:bcp` edges
+  apply `step_down/1` on sensitivity — an uncompromised intermediary won't
+  willingly disclose secrets verbatim, so sensitivity decays by one level
+  per hop. BCP edges additionally apply `step_down/1` on taint.
   Both axes are monotonic (only escalate), guaranteeing convergence.
   """
   @spec propagate_levels([map()], map(), map()) :: map()
@@ -336,7 +339,7 @@ defmodule TriOnyx.GraphAnalyzer do
       sensitivity_sources =
         incoming
         |> Enum.map(fn edge ->
-          src_sens = InformationClassifier.step_down(resolved[edge.from].sensitivity)
+          src_sens = propagated_sensitivity(resolved[edge.from].sensitivity, edge.edge_type)
           %{from: edge.from, contributed: src_sens, edge_type: edge.edge_type}
         end)
         |> Enum.filter(fn %{contributed: c} -> c == resolved_s and resolved_s != :low end)
@@ -360,7 +363,7 @@ defmodule TriOnyx.GraphAnalyzer do
           Enum.reduce(incoming, {base.taint, base.sensitivity}, fn edge, {t_acc, s_acc} ->
             src = current[edge.from]
             src_taint = if edge.edge_type == :bcp, do: InformationClassifier.step_down(src.taint), else: src.taint
-            src_sens = InformationClassifier.step_down(src.sensitivity)
+            src_sens = propagated_sensitivity(src.sensitivity, edge.edge_type)
             {InformationClassifier.higher_level(t_acc, src_taint),
              InformationClassifier.higher_level(s_acc, src_sens)}
           end)
@@ -370,6 +373,15 @@ defmodule TriOnyx.GraphAnalyzer do
 
     if next == current, do: current, else: do_propagate_levels(agent_names, edges, base_levels, next)
   end
+
+  # Sensitivity contributed across an edge. Filesystem edges propagate at
+  # full strength (runtime file-read escalation inherits file sensitivity
+  # unchanged, ADR-011); messaging and BCP edges decay one level per hop.
+  @spec propagated_sensitivity(InformationClassifier.sensitivity_level(), atom()) ::
+          InformationClassifier.sensitivity_level()
+  defp propagated_sensitivity(src_sensitivity, :filesystem), do: src_sensitivity
+  defp propagated_sensitivity(src_sensitivity, _edge_type),
+    do: InformationClassifier.step_down(src_sensitivity)
 
   # --- Private Functions ---
 
@@ -734,19 +746,18 @@ defmodule TriOnyx.GraphAnalyzer do
         has_network?(def.network)
       end)
 
-    writers =
-      Enum.filter(definitions, fn def ->
-        def.fs_write != []
-      end)
-
-    Enum.flat_map(writers, fn writer ->
+    # Every agent is a potential writer: effective_write_paths/1 includes
+    # the implicit /agents/{name}/** path injected by the sandbox, so an
+    # empty fs_write does not mean the agent cannot write. This mirrors
+    # build_filesystem_edges/2.
+    Enum.flat_map(definitions, fn writer ->
       writer_sensitivity = extract_sensitivity(sensitivity_levels, writer.name)
 
       Enum.flat_map(network_readers, fn reader ->
         reader_sensitivity = extract_sensitivity(sensitivity_levels, reader.name)
 
         if writer.name != reader.name and level_rank(writer_sensitivity) > level_rank(reader_sensitivity) do
-          overlapping = find_overlapping_paths(writer.fs_write, reader.fs_read)
+          overlapping = find_overlapping_paths(effective_write_paths(writer), reader.fs_read)
 
           if overlapping != [] do
             [

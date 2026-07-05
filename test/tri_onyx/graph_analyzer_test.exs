@@ -315,6 +315,43 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert violations == []
     end
 
+    test "detects violation via the implicit /agents/{name}/** write path" do
+      # Writer declares NO explicit fs_write — but the sandbox always injects
+      # /agents/{name}/** as a writable path, so a network-capable reader
+      # with overlapping fs_read is still an exfiltration channel.
+      writer =
+        make_def(%{
+          name: "secret-keeper",
+          tools: ["Read", "Write"],
+          network: :none,
+          fs_write: [],
+          fs_read: []
+        })
+
+      reader =
+        make_def(%{
+          name: "exfil-reader",
+          tools: ["Read", "WebFetch"],
+          network: :outbound,
+          fs_read: ["/agents/secret-keeper/**"],
+          fs_write: []
+        })
+
+      info_levels = %{
+        "secret-keeper" => %{taint: :low, sensitivity: :high},
+        "exfil-reader" => %{taint: :low, sensitivity: :low}
+      }
+
+      violations = GraphAnalyzer.bell_lapadula_violations([writer, reader], %{}, info_levels)
+
+      assert length(violations) == 1
+      violation = hd(violations)
+      assert violation["writer"] == "secret-keeper"
+      assert violation["reader"] == "exfil-reader"
+      assert violation["edge_type"] == "filesystem"
+      assert "/agents/secret-keeper/**" in violation["paths"]
+    end
+
     test "BLP ignores taint differences" do
       writer =
         make_def(%{
@@ -774,7 +811,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert result["ctrl"].sensitivity == :low
     end
 
-    test "BCP edge steps down sensitivity (like all edge types)" do
+    test "BCP edge steps down sensitivity" do
       ctrl = make_def(%{name: "ctrl"})
       rdr = make_def(%{name: "rdr"})
 
@@ -785,8 +822,53 @@ defmodule TriOnyx.GraphAnalyzerTest do
       }
 
       result = GraphAnalyzer.propagate_levels([ctrl, rdr], edges, base_levels)
-      # step_down(:high) = :medium — sensitivity decays per hop
+      # step_down(:high) = :medium — sensitivity decays per hop on BCP edges
       assert result["ctrl"].sensitivity == :medium
+    end
+
+    test "messaging edge steps down sensitivity" do
+      a = make_def(%{name: "a"})
+      b = make_def(%{name: "b"})
+
+      edges = %{"b" => [%{from: "a", paths: [], edge_type: :messaging}]}
+      base_levels = %{
+        "a" => %{taint: :low, sensitivity: :high},
+        "b" => %{taint: :low, sensitivity: :low}
+      }
+
+      result = GraphAnalyzer.propagate_levels([a, b], edges, base_levels)
+      # step_down(:high) = :medium — an uncompromised intermediary
+      # summarizes rather than disclosing secrets verbatim
+      assert result["b"].sensitivity == :medium
+    end
+
+    test "filesystem edge propagates sensitivity at full strength" do
+      # Runtime file-read escalation (ADR-011) inherits file sensitivity
+      # unchanged — the projection must not decay it per hop.
+      a = make_def(%{name: "a"})
+      b = make_def(%{name: "b"})
+      c = make_def(%{name: "c"})
+
+      edges = %{
+        "b" => [%{from: "a", paths: ["/data/**"], edge_type: :filesystem}],
+        "c" => [%{from: "b", paths: ["/out/**"], edge_type: :filesystem}]
+      }
+
+      base_levels = %{
+        "a" => %{taint: :low, sensitivity: :high},
+        "b" => %{taint: :low, sensitivity: :low},
+        "c" => %{taint: :low, sensitivity: :low}
+      }
+
+      result = GraphAnalyzer.propagate_levels([a, b, c], edges, base_levels)
+
+      assert result["b"].sensitivity == :high
+      # Full strength through the whole filesystem chain
+      assert result["c"].sensitivity == :high
+
+      # Source tracking attributes the full-strength contribution
+      assert [%{from: "a", contributed: :high, edge_type: :filesystem}] =
+               result["b"].sensitivity_sources
     end
 
     test "tracks taint_sources correctly" do
@@ -821,9 +903,10 @@ defmodule TriOnyx.GraphAnalyzerTest do
       result = GraphAnalyzer.propagate_levels([a, b], edges, base_levels)
       assert result["a"].taint == :high
       assert result["b"].taint == :high
-      # B base sens is :medium; A gets step_down(:medium) = :low, stays at base :low
-      assert result["a"].sensitivity == :low
-      # B keeps its base :medium; step_down(A's :low) = :low, no escalation
+      # Filesystem edges propagate sensitivity at full strength:
+      # A inherits B's :medium unchanged
+      assert result["a"].sensitivity == :medium
+      # B keeps its base :medium; A's :low contributes nothing
       assert result["b"].sensitivity == :medium
     end
   end

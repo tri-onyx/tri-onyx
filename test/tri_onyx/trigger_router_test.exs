@@ -127,6 +127,52 @@ defmodule TriOnyx.TriggerRouterTest do
     # Here we test the routing logic and error handling.
   end
 
+  describe "load_agents/1" do
+    # Boot path regression: TriOnyx.Application delegates initial agent
+    # loading to TriggerRouter.load_agents/1. On the first load every agent
+    # counts as "added", so heartbeats, crons, AND reflections must all be
+    # scheduled (reflections were previously skipped at boot).
+    test "first load schedules reflections for agents that declare one", %{router: router} do
+      alias TriOnyx.Triggers.Scheduler
+
+      agents_dir = "./tmp/test-agents-#{:erlang.unique_integer([:positive])}"
+      File.mkdir_p!(agents_dir)
+
+      File.write!(Path.join(agents_dir, "reflective-agent.md"), """
+      ---
+      name: reflective-agent
+      tools: Read
+      reflection: "0 23 * * *"
+      ---
+
+      A reflective test agent.
+      """)
+
+      previous_dir = Application.get_env(:tri_onyx, :agents_dir)
+      Application.put_env(:tri_onyx, :agents_dir, agents_dir)
+
+      on_exit(fn ->
+        if previous_dir do
+          Application.put_env(:tri_onyx, :agents_dir, previous_dir)
+        else
+          Application.delete_env(:tri_onyx, :agents_dir)
+        end
+
+        # load_agents schedules on the globally named Scheduler — clean up
+        Scheduler.cancel_reflection("reflective-agent")
+        File.rm_rf!(agents_dir)
+      end)
+
+      assert {:ok, 1} = TriggerRouter.load_agents(router)
+
+      assert {:ok, definition} = TriggerRouter.get_agent(router, "reflective-agent")
+      assert definition.reflection == "0 23 * * *"
+
+      reflections = Scheduler.list_reflections()
+      assert Enum.any?(reflections, fn {name, _job} -> name == "reflective-agent" end)
+    end
+  end
+
   describe "dispatch_reflection/2" do
     test "returns error for unknown agent", %{router: router} do
       assert {:error, {:unknown_agent, "nonexistent"}} =

@@ -1,10 +1,50 @@
+defmodule TriOnyx.Triggers.InterAgentTest.FakeSession do
+  @moduledoc """
+  Minimal stand-in for an AgentSession process. Responds to `:get_status`
+  (used by AgentSupervisor.find_session and InterAgent's sender lookup)
+  and `{:prompt, content, metadata}` (used by TriggerRouter dispatch),
+  forwarding received prompts to the test process.
+  """
+  use GenServer
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, Map.new(opts))
+
+  @impl GenServer
+  def init(state), do: {:ok, state}
+
+  @impl GenServer
+  def handle_call(:get_status, _from, state) do
+    status = %{
+      id: Map.get(state, :id, "fake-session"),
+      definition: state.definition,
+      taint_level: Map.get(state, :taint_level, :low),
+      sensitivity_level: Map.get(state, :sensitivity_level, :low),
+      information_level: Map.get(state, :information_level, :low),
+      status: :ready,
+      session_key: nil
+    }
+
+    {:reply, status, state}
+  end
+
+  def handle_call({:prompt, content, metadata}, _from, state) do
+    if pid = Map.get(state, :test_pid) do
+      send(pid, {:prompt_received, state.definition.name, content, metadata})
+    end
+
+    {:reply, :ok, state}
+  end
+end
+
 defmodule TriOnyx.Triggers.InterAgentTest do
   use ExUnit.Case
 
   alias TriOnyx.AgentDefinition
+  alias TriOnyx.AgentSupervisor
   alias TriOnyx.Triggers.InterAgent
   alias TriOnyx.TriggerRouter
   alias TriOnyx.AuditLog
+  alias TriOnyx.Triggers.InterAgentTest.FakeSession
 
   defp make_def(attrs) do
     defaults = %{
@@ -204,6 +244,152 @@ defmodule TriOnyx.Triggers.InterAgentTest do
 
       assert {:error, {:receive_not_allowed, "receiver-agent", "one-way-sender"}} =
                InterAgent.route(message, router: router, audit_log: audit_log)
+    end
+  end
+
+  describe "risk axis propagation via route/2" do
+    setup do
+      audit_name = :"audit_#{:erlang.unique_integer([:positive])}"
+
+      {:ok, _audit} =
+        AuditLog.start_link(
+          name: audit_name,
+          audit_dir: "./tmp/test-audit-#{:erlang.unique_integer([:positive])}"
+        )
+
+      sender = make_def(%{
+        name: "sender-agent",
+        tools: ["Read", "SendMessage"],
+        send_to: ["receiver-agent"],
+        receive_from: ["receiver-agent"]
+      })
+
+      receiver = make_def(%{
+        name: "receiver-agent",
+        tools: ["Read", "SendMessage"],
+        send_to: ["sender-agent"],
+        receive_from: ["sender-agent"]
+      })
+
+      sup_name = :"sup_#{:erlang.unique_integer([:positive])}"
+      {:ok, _sup} = AgentSupervisor.start_link(name: sup_name)
+
+      router_name = :"router_#{:erlang.unique_integer([:positive])}"
+
+      {:ok, _router} =
+        TriggerRouter.start_link(
+          name: router_name,
+          supervisor: sup_name,
+          definitions: [sender, receiver]
+        )
+
+      %{
+        router: router_name,
+        audit_log: audit_name,
+        supervisor: sup_name,
+        sender: sender,
+        receiver: receiver
+      }
+    end
+
+    defp start_fake_session(supervisor, opts) do
+      spec = %{
+        id: make_ref(),
+        start: {FakeSession, :start_link, [opts]},
+        restart: :temporary
+      }
+
+      {:ok, pid} = DynamicSupervisor.start_child(supervisor, spec)
+      pid
+    end
+
+    test "passes sender taint and sensitivity as separate axes in metadata",
+         %{router: router, audit_log: audit_log, supervisor: sup, sender: sender, receiver: receiver} do
+      # High-sensitivity but LOW-taint sender — the receiver's metadata must
+      # carry taint :low (not the combined :high level) and sensitivity :high.
+      start_fake_session(sup,
+        definition: sender,
+        taint_level: :low,
+        sensitivity_level: :high,
+        information_level: :high
+      )
+
+      start_fake_session(sup, definition: receiver, test_pid: self())
+
+      message = %{
+        from: "sender-agent",
+        to: "receiver-agent",
+        message_type: "status_update",
+        payload: %{"status" => "done"}
+      }
+
+      assert {:ok, _pid} =
+               InterAgent.route(message,
+                 router: router,
+                 audit_log: audit_log,
+                 supervisor: sup
+               )
+
+      assert_receive {:prompt_received, "receiver-agent", _payload, metadata}
+      assert metadata.taint_level == :low
+      assert metadata.sensitivity_level == :high
+      # Combined level kept for backward compat
+      assert metadata.information_level == :high
+      assert metadata.sender_information_level == :high
+    end
+
+    test "passes high sender taint through as taint",
+         %{router: router, audit_log: audit_log, supervisor: sup, sender: sender, receiver: receiver} do
+      start_fake_session(sup,
+        definition: sender,
+        taint_level: :high,
+        sensitivity_level: :medium,
+        information_level: :high
+      )
+
+      start_fake_session(sup, definition: receiver, test_pid: self())
+
+      message = %{
+        from: "sender-agent",
+        to: "receiver-agent",
+        message_type: "status_update",
+        payload: %{"status" => "done"}
+      }
+
+      assert {:ok, _pid} =
+               InterAgent.route(message,
+                 router: router,
+                 audit_log: audit_log,
+                 supervisor: sup
+               )
+
+      assert_receive {:prompt_received, "receiver-agent", _payload, metadata}
+      assert metadata.taint_level == :high
+      assert metadata.sensitivity_level == :medium
+    end
+
+    test "defaults both axes to low when sender has no active session",
+         %{router: router, audit_log: audit_log, supervisor: sup, receiver: receiver} do
+      start_fake_session(sup, definition: receiver, test_pid: self())
+
+      message = %{
+        from: "sender-agent",
+        to: "receiver-agent",
+        message_type: "status_update",
+        payload: %{"status" => "done"}
+      }
+
+      assert {:ok, _pid} =
+               InterAgent.route(message,
+                 router: router,
+                 audit_log: audit_log,
+                 supervisor: sup
+               )
+
+      assert_receive {:prompt_received, "receiver-agent", _payload, metadata}
+      assert metadata.taint_level == :low
+      assert metadata.sensitivity_level == :low
+      assert metadata.information_level == :low
     end
   end
 end

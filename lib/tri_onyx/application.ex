@@ -20,9 +20,7 @@ defmodule TriOnyx.Application do
 
   require Logger
 
-  alias TriOnyx.AgentLoader
   alias TriOnyx.RiskScorer
-  alias TriOnyx.Triggers.Scheduler
 
   @impl Application
   @spec start(Application.start_type(), term()) :: {:ok, pid()} | {:error, term()}
@@ -163,13 +161,16 @@ defmodule TriOnyx.Application do
     :ok
   end
 
+  # Loads agent definitions via TriggerRouter.load_agents/1 — the single
+  # code path that registers agents and schedules crons, heartbeats, and
+  # reflections, and registers BCP subscriptions (all agents count as
+  # "added" on the first load, so everything gets scheduled at boot).
+  # This function only adds boot-time risk-score display on top.
   @spec load_and_display_agents() :: :ok
   defp load_and_display_agents do
-    case AgentLoader.load_all() do
-      {:ok, definitions} ->
-        Enum.each(definitions, fn definition ->
-          TriOnyx.TriggerRouter.register_agent(definition)
-
+    case TriOnyx.TriggerRouter.load_agents() do
+      {:ok, count} ->
+        Enum.each(TriOnyx.TriggerRouter.list_agents(), fn definition ->
           input_risk = RiskScorer.infer_input_risk(:external_message, definition.tools, definition)
           taint = RiskScorer.infer_taint(:external_message, definition.tools)
           sensitivity = RiskScorer.infer_sensitivity(definition.tools, definition)
@@ -180,58 +181,14 @@ defmodule TriOnyx.Application do
               "input_risk=#{input_risk} " <>
               "effective_risk=#{RiskScorer.format_risk(effective_risk)}"
           )
-
-          if definition.heartbeat_every do
-            Scheduler.schedule_heartbeat(definition.name, definition.heartbeat_every)
-
-            Logger.info(
-              "Agent: #{definition.name} | heartbeat scheduled every #{definition.heartbeat_every}ms"
-            )
-          end
-
-          if definition.cron_schedules != [] do
-            Scheduler.schedule_agent_crons(definition.name, definition.cron_schedules)
-
-            Logger.info(
-              "Agent: #{definition.name} | #{length(definition.cron_schedules)} cron schedule(s) registered"
-            )
-          end
         end)
 
-        # Register BCP subscriptions from controller agent definitions
-        subs =
-          definitions
-          |> Enum.flat_map(fn definition ->
-            definition.bcp_channels
-            |> Enum.filter(fn ch ->
-              ch.role == :controller and Map.get(ch, :subscriptions, []) != []
-            end)
-            |> Enum.flat_map(fn ch ->
-              Enum.map(Map.get(ch, :subscriptions, []), fn sub ->
-                %TriOnyx.BCP.Subscription{
-                  id: sub.id,
-                  controller: definition.name,
-                  reader: ch.peer,
-                  category: sub.category,
-                  fields: sub.fields,
-                  questions: sub.questions,
-                  directive: sub.directive,
-                  max_words: sub.max_words
-                }
-              end)
-            end)
-          end)
-
-        TriOnyx.BCP.Subscription.register_all(subs)
-
-        if subs != [] do
-          Logger.info("Registered #{length(subs)} BCP subscription(s)")
-        end
-
-        Logger.info("Loaded #{length(definitions)} agent definition(s)")
+        Logger.info("Loaded #{count} agent definition(s)")
 
       {:error, reason} ->
         Logger.warning("Failed to load agent definitions: #{inspect(reason)}")
     end
+
+    :ok
   end
 end

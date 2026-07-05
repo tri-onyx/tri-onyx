@@ -42,6 +42,7 @@ defmodule TriOnyx.Triggers.InterAgent do
           {:router, GenServer.server()}
           | {:audit_log, GenServer.server()}
           | {:schema, map() | nil}
+          | {:supervisor, GenServer.server()}
         ]
 
   @doc """
@@ -55,6 +56,8 @@ defmodule TriOnyx.Triggers.InterAgent do
   - `:router` — TriggerRouter to dispatch to (default: `TriOnyx.TriggerRouter`)
   - `:audit_log` — AuditLog server for logging (default: `TriOnyx.AuditLog`)
   - `:schema` — optional message schema to validate against
+  - `:supervisor` — AgentSupervisor used to look up the sender's session
+    (default: `TriOnyx.AgentSupervisor`)
 
   Returns `{:ok, pid}` if dispatch succeeds, or `{:error, reason}` on failure.
   """
@@ -63,6 +66,7 @@ defmodule TriOnyx.Triggers.InterAgent do
     router = Keyword.get(opts, :router, TriOnyx.TriggerRouter)
     audit_log = Keyword.get(opts, :audit_log, AuditLog)
     schema = Keyword.get(opts, :schema, nil)
+    supervisor = Keyword.get(opts, :supervisor, AgentSupervisor)
 
     with :ok <- validate_message(message),
          :ok <- check_messaging_policy(message, router),
@@ -70,9 +74,12 @@ defmodule TriOnyx.Triggers.InterAgent do
       # Log successful sanitization
       log_sanitization(audit_log, message, true)
 
-      # Look up sender's information level and compute received level
-      sender_level = lookup_sender_information_level(message.from)
-      received_level = sender_level
+      # Look up the sender's risk levels. Taint and sensitivity are separate
+      # axes: the receiver's taint must only inherit the sender's TAINT, and
+      # the sender's sensitivity must propagate as sensitivity — conflating
+      # them (the old combined information_level) wrongly raised receiver
+      # taint for high-sensitivity/low-taint senders and dropped sensitivity.
+      sender_levels = lookup_sender_levels(supervisor, message.from)
 
       # Wrap the sanitized payload in a structured envelope so the receiving
       # agent has clear provenance metadata and knows how to reply.
@@ -93,8 +100,12 @@ defmodule TriOnyx.Triggers.InterAgent do
           from_agent: message.from,
           message_type: message.message_type,
           sanitized: true,
-          information_level: received_level,
-          sender_information_level: sender_level,
+          taint_level: sender_levels.taint,
+          sensitivity_level: sender_levels.sensitivity,
+          # Combined level kept for backward compat with consumers that
+          # still read the single-axis field.
+          information_level: sender_levels.information_level,
+          sender_information_level: sender_levels.information_level,
           routed_at: DateTime.utc_now() |> DateTime.to_iso8601()
         }
       }
@@ -220,19 +231,33 @@ defmodule TriOnyx.Triggers.InterAgent do
     end
   end
 
-  @spec lookup_sender_information_level(String.t()) :: TriOnyx.InformationClassifier.information_level()
-  defp lookup_sender_information_level(agent_name) do
-    case AgentSupervisor.find_session(agent_name) do
+  @default_levels %{taint: :low, sensitivity: :low, information_level: :low}
+
+  # Fetches the sender's taint and sensitivity levels (separate axes) from
+  # its active session, plus the combined information_level for backward
+  # compat. Defaults to low on all axes when no session is found
+  # (conservative for the sanitized path).
+  @spec lookup_sender_levels(GenServer.server(), String.t()) :: %{
+          taint: TriOnyx.InformationClassifier.information_level(),
+          sensitivity: TriOnyx.InformationClassifier.sensitivity_level(),
+          information_level: TriOnyx.InformationClassifier.information_level()
+        }
+  defp lookup_sender_levels(supervisor, agent_name) do
+    case AgentSupervisor.find_session(supervisor, agent_name) do
       {:ok, pid} ->
         status = TriOnyx.AgentSession.get_status(pid)
-        Map.get(status, :information_level, :low)
+
+        %{
+          taint: Map.get(status, :taint_level, :low),
+          sensitivity: Map.get(status, :sensitivity_level, :low),
+          information_level: Map.get(status, :information_level, :low)
+        }
 
       :error ->
-        # Sender session not found — default to low (conservative for sanitized path)
-        :low
+        @default_levels
     end
   catch
-    :exit, _ -> :low
+    :exit, _ -> @default_levels
   end
 
   @mirror_max_len 1_500

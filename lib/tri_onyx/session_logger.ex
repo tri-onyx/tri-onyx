@@ -63,8 +63,13 @@ defmodule TriOnyx.SessionLogger do
   """
   @spec list_sessions(String.t()) :: [map()]
   def list_sessions(agent_name) do
-    agent_dir = Path.join(log_base_dir(), agent_name)
+    case safe_agent_dir(agent_name) do
+      {:ok, agent_dir} -> do_list_sessions(agent_dir)
+      :error -> []
+    end
+  end
 
+  defp do_list_sessions(agent_dir) do
     if File.dir?(agent_dir) do
       agent_dir
       |> File.ls!()
@@ -92,12 +97,11 @@ defmodule TriOnyx.SessionLogger do
   """
   @spec read_session(String.t(), String.t()) :: {:ok, String.t()} | {:error, :not_found}
   def read_session(agent_name, session_id) do
-    path = session_path(agent_name, session_id)
-
-    if File.exists?(path) do
+    with {:ok, path} <- safe_session_path(agent_name, session_id),
+         true <- File.exists?(path) do
       {:ok, File.read!(path)}
     else
-      {:error, :not_found}
+      _ -> {:error, :not_found}
     end
   end
 
@@ -168,24 +172,59 @@ defmodule TriOnyx.SessionLogger do
 
   defp ensure_handle(state, agent_name, session_id) do
     key = {agent_name, session_id}
-    path = session_path(agent_name, session_id)
-    dir = Path.dirname(path)
 
-    File.mkdir_p!(dir)
+    case safe_session_path(agent_name, session_id) do
+      {:ok, path} ->
+        dir = Path.dirname(path)
+        File.mkdir_p!(dir)
 
-    case File.open(path, [:append, :utf8]) do
-      {:ok, handle} ->
-        Logger.debug("SessionLogger: opened #{path}")
-        %{state | handles: Map.put(state.handles, key, handle)}
+        case File.open(path, [:append, :utf8]) do
+          {:ok, handle} ->
+            Logger.debug("SessionLogger: opened #{path}")
+            %{state | handles: Map.put(state.handles, key, handle)}
 
-      {:error, reason} ->
-        Logger.error("SessionLogger: failed to open #{path}: #{inspect(reason)}")
+          {:error, reason} ->
+            Logger.error("SessionLogger: failed to open #{path}: #{inspect(reason)}")
+            state
+        end
+
+      :error ->
+        Logger.warning(
+          "SessionLogger: rejected unsafe log path for #{inspect(agent_name)}/#{inspect(session_id)}"
+        )
+
         state
     end
   end
 
-  defp session_path(agent_name, session_id) do
-    Path.join([log_base_dir(), agent_name, "#{session_id}.jsonl"])
+  # Resolves the agent's log directory, rejecting any agent name whose
+  # expanded path escapes the log base directory (path traversal defense).
+  @spec safe_agent_dir(String.t()) :: {:ok, String.t()} | :error
+  defp safe_agent_dir(agent_name) do
+    base = Path.expand(log_base_dir())
+    dir = Path.join(base, agent_name) |> Path.expand()
+
+    if String.starts_with?(dir, base <> "/") do
+      {:ok, dir}
+    else
+      :error
+    end
+  end
+
+  # Resolves the JSONL path for a session, rejecting any agent name or
+  # session id whose expanded path escapes the agent's log directory
+  # (and therefore the log base directory).
+  @spec safe_session_path(String.t(), String.t()) :: {:ok, String.t()} | :error
+  defp safe_session_path(agent_name, session_id) do
+    with {:ok, agent_dir} <- safe_agent_dir(agent_name) do
+      path = Path.join(agent_dir, "#{session_id}.jsonl") |> Path.expand()
+
+      if String.starts_with?(path, agent_dir <> "/") do
+        {:ok, path}
+      else
+        :error
+      end
+    end
   end
 
   defp log_base_dir do
