@@ -112,6 +112,50 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /agents/schema" do
+    test "exposes the full risk model (levels, ordering, matrix, capability rule)" do
+      conn = conn(:get, "/agents/schema") |> call_router()
+
+      assert conn.status == 200
+      body = Jason.decode!(conn.resp_body)
+
+      model = body["risk_model"]
+      assert is_map(model)
+      assert is_list(model["risk_matrix"])
+
+      # Taint/sensitivity level ordering sourced from InformationClassifier.
+      expected_levels = Enum.map(TriOnyx.InformationClassifier.levels(), &to_string/1)
+      assert model["levels"] == expected_levels
+      assert model["levels"] == ["low", "medium", "high"]
+
+      # Risk severity ordering sourced from RiskScorer.
+      expected_risk_levels = Enum.map(TriOnyx.RiskScorer.risk_levels(), &to_string/1)
+      assert model["risk_levels"] == expected_risk_levels
+      assert model["risk_levels"] == ["low", "moderate", "high", "critical"]
+
+      # 2D matrix is served under the model, matching RiskScorer.risk_matrix/0.
+      assert length(model["risk_matrix"]) == map_size(TriOnyx.RiskScorer.risk_matrix())
+
+      # Capability adjustment matches RiskScorer.capability_adjustment/0 exactly.
+      cap = model["capability_adjustment"]
+      assert is_map(cap)
+
+      for {capability, mapping} <- TriOnyx.RiskScorer.capability_adjustment() do
+        for {baseline, adjusted} <- mapping do
+          assert cap[to_string(capability)][to_string(baseline)] == to_string(adjusted),
+                 "capability_adjustment drift for #{capability}/#{baseline}"
+        end
+      end
+
+      # Spot-check the documented rule, including the low-baseline exception:
+      # high capability does NOT step a :low baseline up.
+      assert cap["high"]["low"] == "low"
+      assert cap["high"]["moderate"] == "high"
+      assert cap["low"]["critical"] == "high"
+      assert cap["medium"]["high"] == "high"
+    end
+  end
+
   describe "POST /webhooks/:agent_name" do
     test "rejects invalid JSON" do
       conn =

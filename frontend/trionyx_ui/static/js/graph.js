@@ -1,6 +1,11 @@
 // ── State ──
 let agents = [];
 let analysisData = null;
+// Gateway-owned risk model (level ordering, 2D matrix, capability adjustment),
+// delivered by /graph/data from GET /agents/schema. The frontend must NOT
+// hardcode any of this — see AGENTS.md "Source of Truth". Empty until loaded;
+// the derivation helpers below degrade gracefully in that case.
+let riskModel = {};
 let graphData = { nodes: [], links: [] };
 let simulation = null;
 const fadedNodes = new Set();
@@ -34,6 +39,7 @@ async function loadGraph() {
     const data = await resp.json();
     agents = data.agents || [];
     analysisData = data.analysis || null;
+    riskModel = data.risk_model || {};
 
     document.getElementById('status-text').className = 'connected';
     document.getElementById('status-text').textContent = 'Connected to gateway';
@@ -140,15 +146,42 @@ function buildGraph() {
   updateViolationCount();
 }
 
-// ── Constants ──
+// ── Risk model derivation (from gateway `riskModel`, never hardcoded) ──
 
-const LEVEL_RANK = { low: 0, medium: 1, high: 2 };
-const RISK_LEVELS = ['low', 'moderate', 'high', 'critical'];
-const RISK_MATRIX_2D = [
-  ['low', 'low', 'moderate'],
-  ['low', 'moderate', 'high'],
-  ['moderate', 'high', 'critical'],
-];
+// Fallback level ordering used only before the gateway data has loaded, so a
+// tooltip shown mid-fetch doesn't throw. The authoritative ordering is
+// `riskModel.levels`.
+const FALLBACK_LEVELS = ['low', 'medium', 'high'];
+
+// taint/sensitivity level → rank index, derived from the gateway's ordering.
+function levelRank() {
+  const levels = (riskModel.levels && riskModel.levels.length)
+    ? riskModel.levels : FALLBACK_LEVELS;
+  const rank = {};
+  levels.forEach((l, i) => { rank[l] = i; });
+  return rank;
+}
+
+// 2D baseline grid indexed [taintRank][sensRank], built from the gateway's
+// risk_matrix list of {taint, sensitivity, risk}. Empty until the model loads.
+function riskMatrix2D() {
+  const rank = levelRank();
+  const grid = [];
+  for (const cell of (riskModel.risk_matrix || [])) {
+    const ti = rank[cell.taint];
+    const si = rank[cell.sensitivity];
+    if (ti == null || si == null) continue;
+    if (!grid[ti]) grid[ti] = [];
+    grid[ti][si] = cell.risk;
+  }
+  return grid;
+}
+
+// ── Presentation-only maps (not risk-model data) ──
+
+// Human label for what a capability level does to the baseline. Purely
+// descriptive; the actual adjusted level comes from riskModel.capability_adjustment.
+const CAP_MOD_LABEL = { low: 'step down', medium: 'no change', high: 'step up' };
 
 const levelColor = { low: '#3fb950', medium: '#db6d28', high: '#f85149' };
 const riskColor = { low: '#3fb950', moderate: '#db6d28', high: '#f85149', critical: '#f85149' };
@@ -212,27 +245,26 @@ function buildRatingBreakdown(d) {
   const sensInputSources = allSensSources.filter(x => x.kind === 'input');
   const capDrivers = (d.capabilityDrivers || []).map(x => ({ tool: x.tool, level: x.level }));
 
+  const rank = levelRank();
+  const grid = riskMatrix2D();
+  const capAdjust = riskModel.capability_adjustment || {};
+
   const effT = d.effTaintLevel || d.taintLevel;
   const effS = d.effSensitivityLevel || d.sensitivityLevel;
-  const tI = LEVEL_RANK[effT] || 0;
-  const sI = LEVEL_RANK[effS] || 0;
-  const baseline = RISK_MATRIX_2D[tI][sI];
-  const baseIdx = RISK_LEVELS.indexOf(baseline);
+  const tI = rank[effT] || 0;
+  const sI = rank[effS] || 0;
+  // Baseline from the gateway's 2D matrix; fall back to the gateway-computed
+  // effective risk if the model hasn't loaded so the tooltip never breaks.
+  const baseline = (grid[tI] && grid[tI][sI]) || d.effectiveRisk;
 
-  let capMod, finalRisk;
-  if (d.capabilityLevel === 'low') {
-    capMod = 'step down';
-    finalRisk = RISK_LEVELS[Math.max(0, baseIdx - 1)];
-  } else if (d.capabilityLevel === 'high') {
-    capMod = 'step up';
-    finalRisk = RISK_LEVELS[Math.min(3, baseIdx + 1)];
-  } else {
-    capMod = 'no change';
-    finalRisk = baseline;
-  }
+  // Capability adjustment comes straight from the gateway table. `capMod` is
+  // just the descriptive label for the capability level.
+  const capMod = CAP_MOD_LABEL[d.capabilityLevel] || 'no change';
+  const adjusted = capAdjust[d.capabilityLevel];
+  const finalRisk = (adjusted && adjusted[baseline]) || d.effectiveRisk;
 
-  const liveTaintElevated = LEVEL_RANK[d.taintLevel] > LEVEL_RANK[d.worstCaseTaint || 'low'];
-  const liveSensElevated = LEVEL_RANK[d.sensitivityLevel] > LEVEL_RANK[d.worstCaseSensitivity || 'low'];
+  const liveTaintElevated = (rank[d.taintLevel] || 0) > (rank[d.worstCaseTaint || 'low'] || 0);
+  const liveSensElevated = (rank[d.sensitivityLevel] || 0) > (rank[d.worstCaseSensitivity || 'low'] || 0);
 
   return {
     taintToolSources, taintInputSources, sensToolSources, sensInputSources,
@@ -271,7 +303,7 @@ function edgeColor(link) {
   } else if (mode === 'blp') {
     level = link.sensitivityLevel;
   } else {
-    const rank = { low: 0, medium: 1, high: 2 };
+    const rank = levelRank();
     level = (rank[link.sensitivityLevel] || 0) >= (rank[link.taintLevel] || 0)
       ? link.sensitivityLevel : link.taintLevel;
   }
@@ -841,7 +873,7 @@ function updateMatrix() {
         label = `B${link.maxCategory || '?'}`;
       } else {
         label = `T:${(link.taintLevel || 'low')[0]} S:${(link.sensitivityLevel || 'low')[0]}`;
-        const rank = { low: 0, medium: 1, high: 2 };
+        const rank = levelRank();
         const maxRank = Math.max(rank[link.taintLevel] || 0, rank[link.sensitivityLevel] || 0);
         if (maxRank >= 1) cls = 'warning';
       }

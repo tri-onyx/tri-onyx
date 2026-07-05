@@ -32,6 +32,22 @@ defmodule TriOnyx.InformationClassifier do
   @type information_level :: :low | :medium | :high
   @type sensitivity_level :: :low | :medium | :high
 
+  # Ordered information levels, lowest severity first. This is the single
+  # source of truth for the taint/sensitivity level ordering used across the
+  # app (rank comparisons here, and served in `GET /agents/schema` so the
+  # frontend never hardcodes it).
+  @ordered_levels [:low, :medium, :high]
+  @level_ranks @ordered_levels |> Enum.with_index() |> Map.new()
+
+  @doc """
+  Returns the information levels in ascending severity order
+  (`[:low, :medium, :high]`).
+
+  Both the taint and sensitivity axes share this ordering.
+  """
+  @spec levels() :: [information_level()]
+  def levels, do: @ordered_levels
+
   @type classification :: %{
           taint: information_level(),
           sensitivity: sensitivity_level(),
@@ -321,9 +337,7 @@ defmodule TriOnyx.InformationClassifier do
   defp controlled_path?(_), do: false
 
   @spec level_rank(information_level()) :: non_neg_integer()
-  defp level_rank(:low), do: 0
-  defp level_rank(:medium), do: 1
-  defp level_rank(:high), do: 2
+  defp level_rank(level), do: Map.fetch!(@level_ranks, level)
 
   # Parses a level string from a risk-manifest entry, defaulting to :low
   # for missing or malformed values.

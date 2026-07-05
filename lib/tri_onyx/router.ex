@@ -161,7 +161,8 @@ defmodule TriOnyx.Router do
         "sse_meta" => TriOnyx.SessionEvents.sse_meta_types()
       },
       "known_agents" => known_agents,
-      "channel_bindings" => channel_bindings
+      "channel_bindings" => channel_bindings,
+      "risk_model" => risk_model_payload()
     })
   end
 
@@ -1009,16 +1010,10 @@ defmodule TriOnyx.Router do
         }
       end)
 
-    # Serialize the 2D risk matrix
-    risk_matrix =
-      RiskScorer.risk_matrix()
-      |> Enum.map(fn {{taint, sensitivity}, risk} ->
-        %{
-          "taint" => to_string(taint),
-          "sensitivity" => to_string(sensitivity),
-          "risk" => to_string(risk)
-        }
-      end)
+    # The full risk model (2D matrix, level ordering, capability rule) is
+    # built by risk_model_payload/0 so /agents/schema and this endpoint share
+    # one serialization.
+    risk_model = risk_model_payload()
 
     conn
     |> send_json(
@@ -1026,7 +1021,8 @@ defmodule TriOnyx.Router do
       %{
         "tools" => tools,
         "triggers" => triggers,
-        "risk_matrix" => risk_matrix
+        "risk_matrix" => risk_model["risk_matrix"],
+        "risk_model" => risk_model
       }
     )
   end
@@ -1648,6 +1644,42 @@ defmodule TriOnyx.Router do
   defp deprecated_taint_status(:high), do: "tainted"
 
   @spec serialize_analysis(map()) :: map()
+  # Fully describes the risk model so consumers (the frontend graph, docs)
+  # never hardcode any of it. All values are sourced from the authoritative
+  # modules — never literals here:
+  #   - `levels`: taint/sensitivity axis ordering (InformationClassifier)
+  #   - `risk_levels`: risk severity ordering (RiskScorer)
+  #   - `risk_matrix`: the 2D taint × sensitivity baseline (RiskScorer)
+  #   - `capability_adjustment`: baseline_risk → adjusted_risk per capability
+  @spec risk_model_payload() :: map()
+  defp risk_model_payload do
+    risk_matrix =
+      RiskScorer.risk_matrix()
+      |> Enum.map(fn {{taint, sensitivity}, risk} ->
+        %{
+          "taint" => to_string(taint),
+          "sensitivity" => to_string(sensitivity),
+          "risk" => to_string(risk)
+        }
+      end)
+
+    capability_adjustment =
+      RiskScorer.capability_adjustment()
+      |> Map.new(fn {capability, mapping} ->
+        {to_string(capability),
+         Map.new(mapping, fn {baseline, adjusted} ->
+           {to_string(baseline), to_string(adjusted)}
+         end)}
+      end)
+
+    %{
+      "levels" => Enum.map(InformationClassifier.levels(), &to_string/1),
+      "risk_levels" => Enum.map(RiskScorer.risk_levels(), &to_string/1),
+      "risk_matrix" => risk_matrix,
+      "capability_adjustment" => capability_adjustment
+    }
+  end
+
   defp serialize_analysis(analysis) do
     Map.new(analysis, fn {name, entry} ->
       {name,

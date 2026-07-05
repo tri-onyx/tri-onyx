@@ -54,6 +54,30 @@ defmodule TriOnyx.RiskScorer do
   @spec risk_matrix() :: %{{atom(), atom()} => risk_level()}
   def risk_matrix, do: @risk_matrix
 
+  # Capability modulation table: baseline_risk shifted by capability level.
+  # Single source of truth for the step-up/step-down rule — both the runtime
+  # computation (`modulate_by_capability/2`) and the value served in
+  # `GET /agents/schema` read from here. `:medium` is the identity (no change);
+  # `:low` steps down (floored at `:low`); `:high` steps up (capped at
+  # `:critical`), with the deliberate exception that a `:low` baseline stays
+  # `:low` under high capability (no data to exfiltrate, no injection surface).
+  @capability_adjustment %{
+    low: %{low: :low, moderate: :low, high: :moderate, critical: :high},
+    medium: %{low: :low, moderate: :moderate, high: :high, critical: :critical},
+    high: %{low: :low, moderate: :high, high: :critical, critical: :critical}
+  }
+
+  @doc """
+  Returns the capability adjustment table as
+  `%{capability_level => %{baseline_risk => adjusted_risk}}`.
+
+  This is the authoritative encoding of the step-up/step-down rule described
+  in the moduledoc; consumers (e.g. the frontend graph) must derive the
+  adjusted risk from this rather than reimplementing the arithmetic.
+  """
+  @spec capability_adjustment() :: %{atom() => %{risk_level() => risk_level()}}
+  def capability_adjustment, do: @capability_adjustment
+
   @doc """
   Computes effective risk from taint and sensitivity (2D baseline).
 
@@ -208,6 +232,20 @@ defmodule TriOnyx.RiskScorer do
   @risk_rank %{low: 0, moderate: 1, high: 2, critical: 3}
 
   @doc """
+  Returns the risk levels in ascending severity order
+  (`[:low, :moderate, :high, :critical]`).
+
+  Served in `GET /agents/schema` so the frontend can order risk badges
+  without hardcoding the sequence.
+  """
+  @spec risk_levels() :: [risk_level()]
+  def risk_levels do
+    @risk_rank
+    |> Enum.sort_by(fn {_level, rank} -> rank end)
+    |> Enum.map(fn {level, _rank} -> level end)
+  end
+
+  @doc """
   Returns true if `risk` exceeds the permitted maximum level.
 
   Used for kill-on-threshold enforcement: a session whose effective risk
@@ -235,17 +273,14 @@ defmodule TriOnyx.RiskScorer do
     if rank[a] >= rank[b], do: a, else: b
   end
 
-  # Capability modulation: shift risk level up or down by one step.
+  # Capability modulation: shift risk level per the @capability_adjustment
+  # table (the single source of truth, also served via /agents/schema).
   @spec modulate_by_capability(risk_level(), :low | :medium | :high) :: risk_level()
-  defp modulate_by_capability(risk, :medium), do: risk
-  defp modulate_by_capability(:low, :low), do: :low
-  defp modulate_by_capability(:moderate, :low), do: :low
-  defp modulate_by_capability(:high, :low), do: :moderate
-  defp modulate_by_capability(:critical, :low), do: :high
-  defp modulate_by_capability(:low, :high), do: :low
-  defp modulate_by_capability(:moderate, :high), do: :high
-  defp modulate_by_capability(:high, :high), do: :critical
-  defp modulate_by_capability(:critical, :high), do: :critical
+  defp modulate_by_capability(risk, capability) do
+    @capability_adjustment
+    |> Map.fetch!(capability)
+    |> Map.fetch!(risk)
+  end
 
   @spec higher_capability(atom(), atom()) :: atom()
   defp higher_capability(a, b) do
