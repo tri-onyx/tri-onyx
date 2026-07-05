@@ -517,6 +517,152 @@ func TestSymlinkAlwaysDenied(t *testing.T) {
 	}
 }
 
+// TestPreexistingSymlinkToOutsideTargetDenied verifies that a symlink that
+// already exists in the source tree (e.g. landed by a git checkout or a
+// plugin) cannot be read through the mount, even when its *logical* path is
+// covered by the policy. Without the Lookup/O_NOFOLLOW guards, the symlink
+// passes the trie check on its mount path and the open follows it to an
+// arbitrary target outside the policy.
+func TestPreexistingSymlinkToOutsideTargetDenied(t *testing.T) {
+	src := setupTestSource(t)
+
+	// A file entirely outside the source tree that must never be reachable.
+	outside := filepath.Join(t.TempDir(), "secret.txt")
+	if err := os.WriteFile(outside, []byte("TOP SECRET"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Pre-existing symlink inside the source tree.
+	link := filepath.Join(src, "repo/src/evil.py")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := pathtrie.New()
+	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
+	// Worst case: the symlink's logical path itself is in the trie (as if a
+	// read glob matched it at mount time).
+	tr.Insert("/repo/src/evil.py", pathtrie.ReadAccess, true)
+
+	mnt, cleanup := testMount(t, src, tr, nil)
+	defer cleanup()
+
+	data, err := os.ReadFile(filepath.Join(mnt, "repo/src/evil.py"))
+	if err == nil {
+		t.Fatalf("expected error reading through symlink, got content: %q", data)
+	}
+	if !os.IsPermission(err) {
+		t.Errorf("expected EACCES, got: %v", err)
+	}
+
+	// The node must be fully invisible: lstat is denied too.
+	if _, err := os.Lstat(filepath.Join(mnt, "repo/src/evil.py")); err == nil {
+		t.Error("expected error lstat'ing symlink node, but it succeeded")
+	}
+}
+
+// TestPreexistingSymlinkInsideSourceDenied verifies that even a symlink
+// pointing at an *allowed* file inside the source tree is denied — symlinks
+// are unconditionally invisible, regardless of target.
+func TestPreexistingSymlinkInsideSourceDenied(t *testing.T) {
+	src := setupTestSource(t)
+
+	link := filepath.Join(src, "repo/src/alias.py")
+	if err := os.Symlink(filepath.Join(src, "repo/src/main.py"), link); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := pathtrie.New()
+	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
+	tr.Insert("/repo/src/alias.py", pathtrie.ReadAccess, true)
+
+	mnt, cleanup := testMount(t, src, tr, nil)
+	defer cleanup()
+
+	if data, err := os.ReadFile(filepath.Join(mnt, "repo/src/alias.py")); err == nil {
+		t.Fatalf("expected error reading symlink, got content: %q", data)
+	} else if !os.IsPermission(err) {
+		t.Errorf("expected EACCES, got: %v", err)
+	}
+
+	// The real file stays readable.
+	if _, err := os.ReadFile(filepath.Join(mnt, "repo/src/main.py")); err != nil {
+		t.Errorf("real file should stay readable: %v", err)
+	}
+}
+
+// TestReaddirHidesSymlinks verifies that symlinks never appear in directory
+// listings, whether they entered via the trie or via a dynamic write glob.
+func TestReaddirHidesSymlinks(t *testing.T) {
+	src := setupTestSource(t)
+
+	if err := os.Symlink("/etc/passwd", filepath.Join(src, "repo/out/trie-link")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/etc/passwd", filepath.Join(src, "repo/out/glob-link")); err != nil {
+		t.Fatal(err)
+	}
+
+	tr := pathtrie.New()
+	tr.Insert("/repo/out/result.json", pathtrie.WriteAccess, true)
+	// Worst case: one symlink made it into the trie.
+	tr.Insert("/repo/out/trie-link", pathtrie.ReadAccess, true)
+
+	// The other is only reachable via the dynamic write glob fallback.
+	writePatterns := []string{"/repo/out/**"}
+
+	mnt, cleanup := testMount(t, src, tr, writePatterns)
+	defer cleanup()
+
+	entries, err := os.ReadDir(filepath.Join(mnt, "repo/out"))
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	names := make(map[string]bool)
+	for _, e := range entries {
+		names[e.Name()] = true
+	}
+	if !names["result.json"] {
+		t.Error("expected result.json in listing")
+	}
+	if names["trie-link"] {
+		t.Error("trie-covered symlink should be hidden from readdir")
+	}
+	if names["glob-link"] {
+		t.Error("glob-covered symlink should be hidden from readdir")
+	}
+}
+
+// TestOpenTruncOnReadOnlyDenied verifies that O_TRUNC counts as a write:
+// opening a read-only file with O_RDONLY|O_TRUNC must be denied and must
+// not empty the file.
+func TestOpenTruncOnReadOnlyDenied(t *testing.T) {
+	src := setupTestSource(t)
+
+	tr := pathtrie.New()
+	tr.Insert("/repo/src/main.py", pathtrie.ReadAccess, true)
+
+	mnt, cleanup := testMount(t, src, tr, nil)
+	defer cleanup()
+
+	f, err := os.OpenFile(filepath.Join(mnt, "repo/src/main.py"), os.O_RDONLY|os.O_TRUNC, 0)
+	if err == nil {
+		f.Close()
+		t.Fatal("expected error for O_TRUNC open on read-only file")
+	}
+	if !os.IsPermission(err) {
+		t.Errorf("expected EACCES, got: %v", err)
+	}
+
+	// Content must be intact on the source side.
+	data, err := os.ReadFile(filepath.Join(src, "repo/src/main.py"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(data) != "print('hello')\n" {
+		t.Errorf("file was truncated or modified: %q", data)
+	}
+}
+
 // TestPermissiveModeBits verifies that directories report 0777 and files
 // report 0666 through the FUSE mount, regardless of the source filesystem
 // permissions. This is critical for non-root users: the kernel checks the

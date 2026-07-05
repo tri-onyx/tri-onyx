@@ -303,6 +303,15 @@ func (n *SecureNode) Lookup(ctx context.Context, name string, out *fuse.EntryOut
 		return nil, gofusefs.ToErrno(err) // truly doesn't exist → ENOENT
 	}
 
+	// Symlinks are unconditionally denied, mirroring the Symlink handler:
+	// the target is opaque, so a pre-existing symlink (e.g. from a git
+	// checkout or plugin) would let its logical path pass the trie check
+	// while the open resolves somewhere outside the policy. Deny the node
+	// entirely so symlinks are invisible through the mount.
+	if st.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		return nil, n.deny("lookup", childMount, "symlink")
+	}
+
 	// File exists — check if trie allows at least traversal, or if the
 	// path matches a read/write pattern (dynamically created files won't
 	// be in the trie).
@@ -378,6 +387,12 @@ func (n *SecureNode) Getattr(ctx context.Context, f gofusefs.FileHandle, out *fu
 	if err != nil {
 		return gofusefs.ToErrno(err)
 	}
+	// A symlink may have appeared at this path after the node was looked
+	// up (e.g. swapped in on the host side). Symlinks are unconditionally
+	// denied — see Lookup.
+	if st.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+		return n.deny("getattr", mp, "symlink")
+	}
 	out.FromStat(&st)
 	out.Mode = sanitizeMode(out.Mode)
 
@@ -415,6 +430,9 @@ func (n *SecureNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscall.E
 		if err := syscall.Lstat(childSource, &st); err != nil {
 			continue // skip entries that disappeared from disk
 		}
+		if st.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+			continue // symlinks are unconditionally denied — hide them
+		}
 		entries = append(entries, fuse.DirEntry{
 			Name: name,
 			Mode: uint32(st.Mode),
@@ -440,6 +458,9 @@ func (n *SecureNode) Readdir(ctx context.Context) (gofusefs.DirStream, syscall.E
 				var st syscall.Stat_t
 				if err := syscall.Lstat(childSource, &st); err != nil {
 					continue
+				}
+				if st.Mode&syscall.S_IFMT == syscall.S_IFLNK {
+					continue // symlinks are unconditionally denied — hide them
 				}
 				entries = append(entries, fuse.DirEntry{
 					Name: name,
@@ -470,7 +491,13 @@ func (n *SecureNode) Open(ctx context.Context, flags uint32) (gofusefs.FileHandl
 	}
 
 	p := n.sourcePath()
-	fd, err := syscall.Open(p, int(flags)&^syscall.O_APPEND, 0)
+	// O_NOFOLLOW guarantees the final path component is never a symlink,
+	// so a pre-existing symlink in the source tree cannot redirect the
+	// open to a target outside the policy. Symlinks in *intermediate*
+	// components are still resolved by the kernel; the future hardening
+	// path is openat2(2) with RESOLVE_BENEATH, which confines the entire
+	// resolution to the source dir.
+	fd, err := syscall.Open(p, (int(flags)&^syscall.O_APPEND)|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return nil, 0, gofusefs.ToErrno(err)
 	}
@@ -528,7 +555,9 @@ func (n *SecureNode) Create(ctx context.Context, name string, flags uint32, mode
 	}
 
 	childSource := n.childSourcePath(name)
-	fd, err := syscall.Open(childSource, int(flags)|syscall.O_CREAT, mode)
+	// O_NOFOLLOW: never follow a pre-existing symlink at the target path
+	// (see the comment in Open for the intermediate-component caveat).
+	fd, err := syscall.Open(childSource, int(flags)|syscall.O_CREAT|syscall.O_NOFOLLOW, mode)
 	if err != nil {
 		return nil, nil, 0, gofusefs.ToErrno(err)
 	}

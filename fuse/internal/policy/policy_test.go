@@ -217,6 +217,43 @@ func TestRawWritePatternsPreserved(t *testing.T) {
 	}
 }
 
+// TestExpandSkipsSymlinks verifies that symlinks in the source tree never
+// enter the expanded path lists (and thus never enter the trie), even when
+// their logical path matches a read or write glob.
+func TestExpandSkipsSymlinks(t *testing.T) {
+	src := setupSource(t, []string{"repo/real.py"})
+	if err := os.Symlink("/etc/passwd", filepath.Join(src, "repo/link.py")); err != nil {
+		t.Fatal(err)
+	}
+
+	raw := &RawPolicy{
+		FsRead:  []string{"/repo/**"},
+		FsWrite: []string{"/repo/**"},
+	}
+	pol, err := Expand(raw, src)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, paths := range [][]string{pol.ReadPaths, pol.WritePaths} {
+		for _, p := range paths {
+			if p == "/repo/link.py" {
+				t.Errorf("symlink entered expanded paths: %v", paths)
+			}
+		}
+	}
+
+	found := false
+	for _, p := range pol.ReadPaths {
+		if p == "/repo/real.py" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("real file missing from ReadPaths: %v", pol.ReadPaths)
+	}
+}
+
 func strSliceEqual(a, b []string) bool {
 	if len(a) != len(b) {
 		return false

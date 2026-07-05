@@ -110,6 +110,14 @@ func collectPaths(sourceDir string) ([]string, error) {
 			return nil // skip unreadable entries
 		}
 
+		// Skip symlinks: they are unconditionally denied by the FUSE layer
+		// (the target is opaque and may point outside the policy), so they
+		// must never enter the trie as readable/writable paths. Note that
+		// filepath.Walk already does not descend into symlinked dirs.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
+
 		rel, err := filepath.Rel(sourceDir, absPath)
 		if err != nil {
 			return nil
