@@ -35,6 +35,21 @@ _DEFAULT_CONSENT_TEXT = (
     "any time by saying \"revoke consent\"."
 )
 
+# Accepted consent replies. Keep in sync with _DEFAULT_CONSENT_TEXT above,
+# which tells users to reply "I agree" and to revoke by saying
+# "revoke consent". Phrases are matched after _normalize_consent_reply().
+_CONSENT_ACCEPT_PHRASES = frozenset({"i agree", "agree"})
+_CONSENT_REVOKE_PHRASES = frozenset({"revoke consent", "disagree"})
+
+
+def _normalize_consent_reply(text: str) -> str:
+    """Normalize a user reply for consent-command matching.
+
+    Strips whitespace, lowercases, and removes surrounding punctuation and
+    markdown emphasis (e.g. Slack renders *I agree* with asterisks).
+    """
+    return text.strip().lower().strip("*_~`\"'.,!?: \t")
+
 
 class ConsentStore:
     """Manages user consent records in a YAML file on the persistent volume."""
@@ -286,10 +301,10 @@ class SlackAdapter(BaseAdapter):
 
         display_name = await self._get_display_name(user_id)
         is_owner = user_id == self._owner_user_id
-        text_lower = text.lower().strip()
+        consent_reply = _normalize_consent_reply(text)
 
         # --- Slack-local commands ---
-        if text_lower == "agree":
+        if consent_reply in _CONSENT_ACCEPT_PHRASES:
             if is_owner:
                 await self._post_dm(channel, "You're the owner — no consent needed.")
                 return
@@ -300,7 +315,7 @@ class SlackAdapter(BaseAdapter):
             )
             return
 
-        if text_lower == "disagree":
+        if consent_reply in _CONSENT_REVOKE_PHRASES:
             if self._consent.revoke_consent(user_id):
                 await self._post_dm(
                     channel,

@@ -731,6 +731,13 @@ class SubmitImageHandler:
         if not resolved.is_absolute():
             resolved = Path(WORKSPACE_ROOT) / path
 
+        # Canonicalize (collapse "..", follow symlinks) and require the
+        # result to stay inside the workspace root.
+        resolved = resolved.resolve()
+        workspace_root = Path(WORKSPACE_ROOT).resolve()
+        if not resolved.is_relative_to(workspace_root):
+            return f"Error: path is outside the workspace: {path}"
+
         if not resolved.is_file():
             return f"Error: file not found: {path}"
 
@@ -748,7 +755,7 @@ class SubmitImageHandler:
         media_type = _EXT_TO_MEDIA_TYPE.get(ext, "application/octet-stream")
         filename = resolved.name
 
-        workspace_relative = str(resolved).removeprefix(f"{WORKSPACE_ROOT}/")
+        workspace_relative = resolved.relative_to(workspace_root).as_posix()
 
         request_id = uuid.uuid4().hex
         log.info("SubmitImage path=%r filename=%r (request_id=%s)", path, filename, request_id)
@@ -792,6 +799,13 @@ class SubmitPageHandler:
         if not resolved.is_absolute():
             resolved = Path(WORKSPACE_ROOT) / path
 
+        # Canonicalize (collapse "..", follow symlinks) and require the
+        # result to stay inside the workspace root.
+        resolved = resolved.resolve()
+        workspace_root = Path(WORKSPACE_ROOT).resolve()
+        if not resolved.is_relative_to(workspace_root):
+            return f"Error: path is outside the workspace: {path}"
+
         if not resolved.is_file():
             return f"Error: file not found: {path}"
 
@@ -806,7 +820,7 @@ class SubmitPageHandler:
         if size > _PAGE_MAX_SIZE:
             return f"Error: file too large ({size // 1024 // 1024}MB). Maximum is 5MB."
 
-        workspace_relative = str(resolved).removeprefix(f"{WORKSPACE_ROOT}/")
+        workspace_relative = resolved.relative_to(workspace_root).as_posix()
 
         request_id = uuid.uuid4().hex
         log.info("SubmitPage path=%r title=%r (request_id=%s)", path, title, request_id)
@@ -2675,7 +2689,28 @@ async def main() -> None:
 
     try:
         while not shutdown_event.is_set():
-            msg_raw = await dispatcher.read_control()
+            # Race the control read against the shutdown event so a SIGTERM
+            # interrupts the blocking read immediately (instead of waiting
+            # for the next stdin message) and the graceful-disconnect path
+            # in the finally-block runs before docker escalates to SIGKILL.
+            read_task = asyncio.create_task(dispatcher.read_control())
+            shutdown_task = asyncio.create_task(shutdown_event.wait())
+            try:
+                await asyncio.wait(
+                    {read_task, shutdown_task},
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+            finally:
+                for task in (read_task, shutdown_task):
+                    if not task.done():
+                        task.cancel()
+
+            if shutdown_event.is_set():
+                log.info("Shutdown event set, exiting main loop")
+                break
+
+            # shutdown_task didn't fire, so read_task is the completed one.
+            msg_raw = read_task.result()
 
             if msg_raw is None:
                 log.info("Stdin closed, shutting down")

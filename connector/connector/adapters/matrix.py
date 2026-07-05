@@ -836,44 +836,41 @@ class MatrixAdapter(BaseAdapter):
         if not buf:
             return
 
-        # Merge messages from the same sender
-        merged_parts: list[str] = []
-        merged_images: list[dict[str, str]] = []
-        primary_sender: str = buf[0][1]
+        # Group the buffer into consecutive per-sender runs, merging within
+        # each run. Each run is dispatched as its own message so a sender
+        # change never drops the remaining buffered messages.
+        runs: list[tuple[str, list[str], list[dict[str, str]]]] = []
         for _, sender, body, images in buf:
-            if sender == primary_sender:
-                if body:
-                    merged_parts.append(body)
-                merged_images.extend(images)
-            else:
-                # Different sender breaks the merge — only take the first batch
-                break
-
-        merged_content = "\n".join(merged_parts)
-        trust = self._compute_trust(primary_sender)
+            if not runs or runs[-1][0] != sender:
+                runs.append((sender, [], []))
+            _, parts, run_images = runs[-1]
+            if body:
+                parts.append(body)
+            run_images.extend(images)
 
         channel = {
             "platform": "matrix",
             "room_id": room_id,
         }
 
-        msg = InboundMessage(
-            agent_name=room_cfg.agent,
-            content=merged_content,
-            channel=channel,
-            trust=trust,
-            images=merged_images,
-        )
-
-        if self._on_message:
-            logger.info(
-                "Dispatching message to gateway: agent=%s content=%.80s",
-                msg.agent_name,
-                msg.content,
+        for sender, parts, run_images in runs:
+            msg = InboundMessage(
+                agent_name=room_cfg.agent,
+                content="\n".join(parts),
+                channel=channel,
+                trust=self._compute_trust(sender),
+                images=run_images,
             )
-            await self._on_message(msg)
-        else:
-            logger.warning("No on_message callback set — message dropped")
+
+            if self._on_message:
+                logger.info(
+                    "Dispatching message to gateway: agent=%s content=%.80s",
+                    msg.agent_name,
+                    msg.content,
+                )
+                await self._on_message(msg)
+            else:
+                logger.warning("No on_message callback set — message dropped")
 
     # ------------------------------------------------------------------
     # Outbound: send to Matrix
@@ -1808,7 +1805,8 @@ class MatrixAdapter(BaseAdapter):
             # Check for rate limiting (429)
             error_code = getattr(resp, "status_code", None)
             if error_code == 429 or "M_LIMIT_EXCEEDED" in str(resp):
-                retry_after_ms = getattr(resp, "retry_after_ms", backoff * 1000)
+                # nio may set retry_after_ms to None — fall back to backoff
+                retry_after_ms = getattr(resp, "retry_after_ms", None) or backoff * 1000
                 wait = retry_after_ms / 1000.0
                 logger.warning(
                     "Rate limited on room_send (attempt %d), waiting %.1fs",

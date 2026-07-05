@@ -195,7 +195,15 @@ class GatewayClient:
 
     async def _handle_frame(self, raw: str | bytes) -> None:
         """Decode and dispatch a single gateway frame."""
-        msg = decode(raw)
+        try:
+            # json.JSONDecodeError is a ValueError subclass
+            msg = decode(raw)
+        except (ValueError, KeyError, TypeError) as exc:
+            preview = raw if isinstance(raw, (str, bytes)) else repr(raw)
+            logger.warning(
+                "Dropping malformed gateway frame (%s): %.200r", exc, preview
+            )
+            return
 
         if isinstance(msg, RegisteredMessage):
             logger.info("Registered with gateway (id=%s)", msg.connector_id)
