@@ -10,7 +10,7 @@
 
 - [x] Chat view redirect loop — replaced server-side redirect with "Starting agent..." interstitial that polls via HTMX until active
 - [ ] Approval requests rendered inline in chat with approve/reject buttons
-- [ ] Multiple sessions per agent — session picker when an agent has >1 active session
+- [x] Multiple sessions per agent — session picker when an agent has >1 active session
 - [x] Textarea auto-grow — smooth resize, height resets after submit, Shift+Enter for newline
 - [x] Message timestamps — relative time ("2m ago") shown on hover, full timestamp in tooltip
 - [x] Collapsible tool call pairs — tool_use + tool_result merged into single collapsible block
@@ -21,7 +21,7 @@
 
 ## Additional Pages
 
-- [ ] Graph view — agent topology with D3 force-directed layout, Biba/BLP violation highlighting
+- [x] Graph view — agent topology with D3 force-directed layout, Biba/BLP violation highlighting
 - [ ] Matrix view — tool taint/sensitivity/capability classification table, trigger table, risk matrix grid
 - [ ] Workspace explorer — file tree with taint/sensitivity/git status, file detail with git provenance
 - [ ] Audit log — query and display audit entries by date range

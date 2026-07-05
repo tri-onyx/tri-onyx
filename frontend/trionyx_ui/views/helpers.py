@@ -25,6 +25,12 @@ def escape(text: str) -> str:
     )
 
 
+def format_session_cost(cost: float) -> str:
+    """Format a USD session cost for display: tiny costs get extra
+    precision so they don't render as \"0.00\"."""
+    return f"{cost:.4f}" if cost < 0.005 else f"{cost:.2f}"
+
+
 def resolve_connected_agents(agent: dict) -> list[dict]:
     """Build the send/receive connectivity list for an agent, with live
     status from the gateway (defaulting to inactive when unreachable)."""

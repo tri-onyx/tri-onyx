@@ -1,6 +1,9 @@
 const prefs = {
   _key: 'trionyx_prefs',
-  _load() { return JSON.parse(localStorage.getItem(this._key)) || {}; },
+  _load() {
+    try { return JSON.parse(localStorage.getItem(this._key)) || {}; }
+    catch { return {}; }
+  },
   get(key, fallback) {
     const val = this._load()[key];
     return val === undefined ? fallback : val;

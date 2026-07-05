@@ -16,7 +16,7 @@ from trionyx_ui.tool_briefs import (
     get_brief_specs as _get_brief_specs,
 )
 from trionyx_ui.views.helpers import (
-    escape as _escape,
+    format_session_cost as _format_session_cost,
     resolve_connected_agents as _resolve_connected_agents,
 )
 
@@ -103,7 +103,7 @@ def agent_chat(request, name):
         "gateway_sse_url": gateway_sse_url,
         "last_timestamp": last_timestamp,
         "pending_approvals": pending_approvals,
-        "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
+        "session_cost": _format_session_cost(session_cost),
         "connected_agents": connected_agents,
         "viewing_history": False,
         "active_sessions": active_sessions if show_session_picker else [],
@@ -140,7 +140,7 @@ def _render_historical_session(request, agent, name, history_session_id):
         "viewing_history": True,
         "history_session_id": history_session_id,
         "history_session_start": session_start_ts,
-        "session_cost": f"{session_cost:.2f}" if session_cost < 0.005 else f"{session_cost:.4f}",
+        "session_cost": _format_session_cost(session_cost),
         "connected_agents": connected_agents,
     })
 

@@ -368,22 +368,26 @@
   function renderNetworkField(field) {
     var container = el('div', 'builder-network');
     var currentVal = formState[field.key];
-    var mode = 'none';
+    var mode = field.default || 'none';
     var hosts = [];
 
     if (Array.isArray(currentVal)) {
       mode = 'hosts';
       hosts = currentVal;
-    } else if (currentVal === 'outbound') {
-      mode = 'outbound';
+    } else if (typeof currentVal === 'string' && currentVal) {
+      mode = currentVal;
     }
 
+    // Scalar policy options come from the gateway schema; "hosts" is a
+    // client-side affordance for entering a hostname list.
+    var options = (field.options || []).concat([{value: 'hosts', label: 'Specific hosts...'}]);
+
     var select = el('select', 'builder-input');
-    [{v: 'none', l: 'Isolated (no network)'}, {v: 'outbound', l: 'Outbound (unrestricted)'}, {v: 'hosts', l: 'Specific hosts...'}].forEach(function(o) {
+    options.forEach(function(o) {
       var opt = document.createElement('option');
-      opt.value = o.v;
-      opt.textContent = o.l;
-      if (o.v === mode) opt.selected = true;
+      opt.value = o.value;
+      opt.textContent = o.label;
+      if (o.value === mode) opt.selected = true;
       select.appendChild(opt);
     });
 
@@ -396,7 +400,7 @@
     function updateState() {
       if (select.value === 'hosts') {
         var lines = hostsInput.value.split('\n').map(function(l) { return l.trim(); }).filter(Boolean);
-        formState[field.key] = lines.length > 0 ? lines : 'none';
+        formState[field.key] = lines.length > 0 ? lines : (field.default || 'none');
         hostsInput.style.display = 'block';
       } else {
         formState[field.key] = select.value;
@@ -612,11 +616,25 @@
         }
         btn.disabled = false;
         btn.textContent = 'Save';
-      }).catch(function() {
+      }).catch(function(err) {
+        showBuilderError('Save failed: ' + (err && err.message ? err.message : 'network error'));
         btn.disabled = false;
         btn.textContent = 'Save';
       });
     });
+  }
+
+  function showBuilderError(message) {
+    var errEl = document.getElementById('builder-errors');
+    if (!errEl) return;
+    var list = el('div', 'builder-error-list');
+    var item = el('div', 'builder-error-item');
+    var msg = el('span', 'builder-error-msg');
+    msg.textContent = message;
+    item.appendChild(msg);
+    list.appendChild(item);
+    errEl.innerHTML = '';
+    errEl.appendChild(list);
   }
 
   // --- Delete ---
@@ -645,6 +663,8 @@
           var errEl = document.getElementById('builder-errors');
           if (errEl) errEl.innerHTML = html;
         }
+      }).catch(function(err) {
+        showBuilderError('Delete failed: ' + (err && err.message ? err.message : 'network error'));
       });
     });
   }

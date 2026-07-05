@@ -181,7 +181,12 @@ function riskIcon(level) {
 }
 
 function escapeHtml(s) {
-  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function truncate(s, n) {
@@ -840,7 +845,7 @@ function updateMatrix() {
         const maxRank = Math.max(rank[link.taintLevel] || 0, rank[link.sensitivityLevel] || 0);
         if (maxRank >= 1) cls = 'warning';
       }
-      html += `<td class="${cls}" title="${writer} → ${reader}: ${link.paths.join(', ')}">${label}</td>`;
+      html += `<td class="${cls}" title="${escapeHtml(writer)} → ${escapeHtml(reader)}: ${escapeHtml(link.paths.join(', '))}">${label}</td>`;
     }
     html += '</tr>';
   }

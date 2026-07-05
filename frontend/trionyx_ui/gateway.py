@@ -53,8 +53,8 @@ def _request(
         resp = _client().request(method, path, json=json_body)
         resp.raise_for_status()
         return resp
-    except httpx.ConnectError:
-        logger.error("Gateway unreachable: %s %s", method, path)
+    except httpx.RequestError as e:
+        logger.error("Gateway unreachable: %s %s (%s)", method, path, type(e).__name__)
         raise GatewayError("Gateway unreachable")
     except httpx.HTTPStatusError as e:
         status = e.response.status_code
@@ -78,7 +78,7 @@ def _try_get_json(path: str, fallback):
         resp = _client().get(path)
         resp.raise_for_status()
         return resp.json()
-    except (httpx.ConnectError, httpx.HTTPStatusError):
+    except (httpx.RequestError, httpx.HTTPStatusError):
         return fallback
 
 
@@ -95,13 +95,12 @@ def get_health() -> dict:
 
 
 def get_approval_count() -> int:
-    bcp = _try_get_json("/bcp/approvals", None)
-    if bcp is None:
-        return 0
-    actions = _try_get_json("/actions/approvals", None)
-    if actions is None:
-        return 0
-    return len(bcp.get("approvals", [])) + len(actions.get("approvals", []))
+    count = 0
+    for path in ("/bcp/approvals", "/actions/approvals"):
+        data = _try_get_json(path, None)
+        if data is not None:
+            count += len(data.get("approvals", []))
+    return count
 
 
 def get_approvals() -> list[dict]:
@@ -220,7 +219,7 @@ def get_session_log(agent_name: str, session_id: str) -> list[dict]:
                 except json.JSONDecodeError:
                     continue
         return events
-    except (httpx.ConnectError, httpx.HTTPStatusError):
+    except (httpx.RequestError, httpx.HTTPStatusError):
         return []
 
 

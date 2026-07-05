@@ -398,7 +398,7 @@ function escapeHtml(text) {
 }
 
 function escapeAttr(text) {
-  return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(text ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 function renderMarkdown(text) {
@@ -414,7 +414,9 @@ function updateSessionCost(costUsd) {
   if (!el) return;
   const current = parseFloat(el.textContent.replace('$', '')) || 0;
   const total = current + costUsd;
-  el.textContent = '$' + (total < 0.005 ? total.toFixed(2) : total.toFixed(4));
+  // Tiny costs get extra precision so they don't render as "0.00"
+  // (mirrors format_session_cost in views/helpers.py).
+  el.textContent = '$' + (total < 0.005 ? total.toFixed(4) : total.toFixed(2));
 }
 
 function autoResize(el) {
