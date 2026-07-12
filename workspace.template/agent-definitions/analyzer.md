@@ -7,9 +7,8 @@ network: none
 docker_socket: true
 trionyx_repo: true
 fs_read:
-  - "/workspace/AGENTS.md"
-  - "/workspace/agents/**"
-fs_write:
+  - "/AGENTS.md"
+  - "/agents/**"
 idle_timeout: 30m
 base_taint: low
 cron_schedules:
@@ -128,6 +127,14 @@ End the report with an executive summary listing:
 1. Start by reading all agent definitions from `/repo/workspace/agent-definitions/`
 2. For each agent, read its HEARTBEAT.md, NOTES.md (if present), and the last 3-5 memory files
    - Glob is unreliable on FUSE-mounted paths under `/workspace/` — always use `find` via Bash for file existence checks (e.g., `find /workspace/agents -name NOTES.md -type f`). Never rely on Glob alone for pre-flight checks under `/workspace/`.
+   - **Save gateway logs to file first:** `docker logs --since 48h trionyx-gateway-1 > /tmp/gw_logs.txt 2>&1`, then process with Python or grep. Piping `docker logs` directly to Python is unreliable for regex matching.
+   - **Python f-strings in bash heredocs break on `{`.** When writing Python inside `<< 'PYEOF'` heredocs, use `.format()` instead of f-strings.
+   - **Session cost counting:** `session complete` events are cumulative per session. Always take the FIRST `session complete` for turn count and the LAST for cost. Use `grep "Received prompt"` for prompt counts — not `session complete` (which includes memory-save rounds).
+   - **`main.md` does NOT exist on disk** — do not attempt to read it.
+   - **Git index corruption is a known recurring bug:** Stale `index.lock` removal by the workspace committer corrupts `.git/index`. Symptoms: all `git add` calls fail, agent NOTES.md/memory files not committed, errors grow exponentially. A gateway restart temporarily rebuilds the index but corruption recurs. Flag as high-severity when error counts are growing.
+   - **Git error rate has plateaued at ~340k/hr** (confirmed stable as of S100). At this volume, 50k log lines covers only ~6 minutes. Use `--tail` only — do NOT pipe `docker logs` directly for full-log extraction (unreliable at this volume). Filter git noise with: `grep -v "index file smaller\|git add failed\|commit failed\|Workspace.Committer\|Workspace: git"`
+   - **`/workspace/AGENTS.md` returns EACCES from the analyzer container.** Do not attempt to read it — permission is denied. (confirmed 2026-06-26)
+   - **docker logs pipe extraction:** `docker logs container 2>&1 | grep pattern > /tmp/file.txt` runs as a background task. Wait ~30s then check the file before processing results. Do not assume the file is ready immediately.
 3. Cross-reference: does the definition match what the agent actually does at runtime?
 4. Look for patterns: repeated failures, growing backlogs, workaround accumulation
 5. Write a structured report per the format above

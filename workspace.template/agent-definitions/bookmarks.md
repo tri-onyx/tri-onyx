@@ -4,8 +4,6 @@ description: Maintains a structured markdown knowledge base of bookmarks and cur
 model: claude-sonnet-4-6
 tools: Read, Write, Glob, Grep, BCPQuery
 network: none
-receive_from:
-  - main
 bcp_channels:
   - peer: researcher
     role: controller
@@ -100,3 +98,4 @@ When you receive a correction, preference, or feedback — **write it down befor
 - Use Glob and Grep to search across bookmark files efficiently.
 - Deduplicate: before adding, check if the URL already exists.
 - Dates use ISO 8601 format (YYYY-MM-DD).
+- **Always use `https://` for bookmark URLs** — never `http://`. If a submitted URL uses `http://`, upgrade it before saving.

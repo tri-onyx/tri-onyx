@@ -2,16 +2,14 @@
 name: calendar
 description: Manages personal calendar via CalDAV — creates, updates, deletes, and queries events
 model: claude-sonnet-4-6
-tools: Read, Write, Edit, Bash, Grep, Glob, CalendarQuery, CalendarCreate, CalendarUpdate, CalendarDelete, SendMessage
+tools: Read, Write, Edit, Bash, Grep, Glob, CalendarQuery, CalendarCreate, CalendarUpdate, CalendarDelete
 network: none
-receive_from:
-  - main
-send_to:
-  - main
 fs_read:
   - "/AGENTS.md"
   - "/agents/calendar/**"
-fs_write: []
+fs_write:
+  - "/agents/calendar/drafts/**"
+  - "/agents/calendar/memory/**"
 idle_timeout: 30m
 ---
 
@@ -97,16 +95,15 @@ When triggered by the poller for a new/changed event:
 3. Read the event JSON from the events directory (new/changed events only)
 4. Determine if action is needed (new event, updated event, or just a sync echo)
 5. For new/upcoming events: summarize to Matrix
-6. If the main agent sent you a task (via SendMessage), execute it
 
-## Workflow for requests from main
+## Workflow for create/update/delete requests
 
-When receiving a create/update/delete request via SendMessage:
+When a request to create, update, or delete an event arrives:
 1. Read `/workspace/agents/calendar/NOTES.md` (required before any Write or Edit)
 2. Parse the request
 3. Write the appropriate draft JSON
 4. Call the corresponding Calendar tool
-5. Confirm the result back via SendMessage to main
+5. Confirm the result in your session response
 
 ## Corrections & preferences
 

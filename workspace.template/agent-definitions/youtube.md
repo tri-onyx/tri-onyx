@@ -6,8 +6,6 @@ tools: Read, Write, Bash, Grep, Glob, SendMessage
 network: outbound
 send_to:
   - wiki
-receive_from:
-  - main
 plugins:
   - youtube
 fs_read:
@@ -37,10 +35,11 @@ When you receive a message containing a YouTube URL:
    - The video title
    - The channel/author name
    - The path to the saved file
+   - A **full content summary** of the video — this is mandatory. Do not just report title/channel/path. Read the saved file and deliver a complete summary. Do not wait for the user to ask.
 
 If the transcript fetch fails (e.g., no captions available, video is private), report the error clearly.
 
-5. Always include a concise summary of the video content alongside the metadata.
+**If the fetch fails with `IpBlocked`**: do NOT retry. Report the failure immediately — the cloud server IP is persistently blocked by YouTube and retrying does not help.
 
 ## Language support
 
@@ -85,3 +84,5 @@ When you receive a correction, preference, or feedback — **write it down befor
 - Before processing, check if a transcript with the same slug already exists in `/workspace/obsidian/shared/sources/youtube/` to avoid duplicates
 - If a duplicate exists, inform the user and ask if they want to overwrite
 - Keep responses concise -- report the result, don't paste the full transcript back
+- **yt-dlp is banned** — it causes IP bans. The transcript script uses only `youtube-transcript-api` + `httpx`. Do NOT re-add yt-dlp or any channel-listing functionality.
+- **Always attempt a Read or Glob before any Write**, even when creating a new file.

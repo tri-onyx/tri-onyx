@@ -5,12 +5,6 @@ model: claude-haiku-4-5-20251001
 tools: Read, Write, Grep, Glob, WebFetch, WebSearch, BCPRespond
 network: outbound
 bcp_channels:
-  - peer: main
-    role: reader
-    rates:
-      cat1: 20/hour
-      cat2: 10/hour
-      cat3: 0
   - peer: bookmarks
     role: reader
     rates:
@@ -71,6 +65,14 @@ When you receive a correction, preference, or feedback — **write it down befor
 1. Read `/agents/researcher/NOTES.md` at the start of each session to recall past corrections.
 2. When corrected, immediately append the lesson to `/agents/researcher/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
+
+## Session workflow
+
+1. Read `/workspace/agents/researcher/NOTES.md` at session start for standing rules
+2. Read the daily memory file if it exists (`memory/YYYY-MM-DD.md`)
+3. Process incoming work (BCP queries, web searches, document reads)
+4. Append findings to daily memory before shutdown
+5. Update NOTES.md if new corrections received
 
 ## What you cannot do
 

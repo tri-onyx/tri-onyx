@@ -26,6 +26,7 @@ fs_write:
   - /obsidian/work/incoming/**
 send_to:
   - concierge
+  - youtube
 receive_from:
   - youtube
   - news

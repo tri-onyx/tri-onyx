@@ -12,8 +12,6 @@ cron_schedules:
     message: >
       Automated heartbeat. Fetch all configured news sources and curate
       articles against PREFERENCES.md.
-receive_from:
-  - main
 plugins:
   - newsagg
 fs_read:
@@ -112,4 +110,5 @@ When Sondre asks for a summary after a heartbeat session, always provide it. For
 - Never force a full refresh or clear the cache — let the dedup system handle what's been seen
 - Always include direct links in article submissions
 - **Articles from the `openai` source frequently have empty content — discard silently, this is normal**
+- **kode24.no has NO paywall.** If kode24 articles show thin/empty content, it's an extractor bug (wrong CSS selector), not a paywall block. The article body lives in `<div class="bodytext ...">`, not the first `<article>` tag.
 - **NEVER use Write tool on PREFERENCES.md without reading the ENTIRE file first.** It is 700+ lines. Read in two passes (lines 1-400, then 401-end) before any write. Use `>>` bash append for additive changes where possible. Partial reads before a Write will corrupt the file.
