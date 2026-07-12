@@ -14,10 +14,12 @@ defmodule TriOnyx.Workspace.Committer do
   until session end.
 
   Serializing all incremental git operations through one process also
-  prevents index-lock races between concurrently running sessions.
-  Paths whose commit fails stay dirty and are retried on the next
-  commit cycle; the `Workspace.Sweeper` remains the backstop for
-  anything left over after crashes.
+  prevents index-lock races between concurrently running sessions —
+  `sweep/1` and `commit_page/3` route the sweeper's and sessions' git
+  operations through here for the same reason. Paths whose commit fails
+  stay dirty and are retried on later commit cycles, up to
+  `@max_commit_attempts`; the `Workspace.Sweeper` remains the backstop
+  for anything dropped or left over after crashes.
   """
 
   use GenServer
@@ -28,6 +30,10 @@ defmodule TriOnyx.Workspace.Committer do
   alias TriOnyx.Workspace
 
   @default_debounce_ms 5_000
+
+  # A path whose commit keeps failing (e.g. a corrupted index) is dropped
+  # after this many attempts so retries can't become a hot loop.
+  @max_commit_attempts 5
 
   # --- Client API ---
 
@@ -56,6 +62,26 @@ defmodule TriOnyx.Workspace.Committer do
     GenServer.call(server, :flush, 30_000)
   end
 
+  @doc """
+  Runs a full workspace sweep from inside the committer process, so the
+  sweeper's git operations serialize with incremental commits instead of
+  racing them for the index.
+  """
+  @spec sweep(GenServer.server()) :: {:ok, term()} | {:error, term()}
+  def sweep(server \\ __MODULE__) do
+    GenServer.call(server, :sweep, :timer.minutes(2))
+  end
+
+  @doc """
+  Commits a single page artifact via `Workspace.commit_page/2`,
+  serialized through the committer for the same reason as `sweep/1`.
+  """
+  @spec commit_page(GenServer.server(), String.t(), String.t()) ::
+          {:ok, String.t()} | {:error, term()}
+  def commit_page(server \\ __MODULE__, agent_name, path) do
+    GenServer.call(server, {:commit_page, agent_name, path}, 30_000)
+  end
+
   # --- GenServer callbacks ---
 
   @impl GenServer
@@ -63,6 +89,7 @@ defmodule TriOnyx.Workspace.Committer do
     {:ok,
      %{
        dirty: %{},
+       fails: %{},
        timer: nil,
        debounce_ms: Keyword.get(opts, :debounce_ms, @default_debounce_ms)
      }}
@@ -91,6 +118,19 @@ defmodule TriOnyx.Workspace.Committer do
   @impl GenServer
   def handle_call(:flush, _from, state) do
     {:reply, :ok, commit_dirty(state)}
+  end
+
+  @impl GenServer
+  def handle_call(:sweep, _from, state) do
+    # Commit tracked dirty paths first so they land with provenance
+    # trailers rather than inside the anonymous sweep commit.
+    state = commit_dirty(state)
+    {:reply, Workspace.sweep_uncommitted(), state}
+  end
+
+  @impl GenServer
+  def handle_call({:commit_page, agent_name, path}, _from, state) do
+    {:reply, Workspace.commit_page(agent_name, path), state}
   end
 
   @impl GenServer
@@ -146,8 +186,22 @@ defmodule TriOnyx.Workspace.Committer do
         end
       end)
 
-    state = cancel_timer(%{state | dirty: failed})
-    if map_size(failed) > 0, do: schedule_commit(state), else: state
+    fails = Map.new(failed, fn {path, _} -> {path, Map.get(state.fails, path, 0) + 1} end)
+
+    {dropped, retained} =
+      Enum.split_with(failed, fn {path, _} -> fails[path] >= @max_commit_attempts end)
+
+    if dropped != [] do
+      Logger.error(
+        "Workspace.Committer: dropping #{length(dropped)} path(s) after " <>
+          "#{@max_commit_attempts} failed commit attempts (sweeper is the backstop): " <>
+          Enum.map_join(dropped, ", ", fn {path, _} -> path end)
+      )
+    end
+
+    retained = Map.new(retained)
+    state = cancel_timer(%{state | dirty: retained, fails: Map.take(fails, Map.keys(retained))})
+    if map_size(retained) > 0, do: schedule_commit(state), else: state
   end
 
   defp cancel_timer(%{timer: nil} = state), do: state

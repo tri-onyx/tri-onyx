@@ -8,8 +8,9 @@ defmodule TriOnyx.Workspace.Sweeper do
   deletions — accumulate as dirty state.
 
   This GenServer runs a sweep on a configurable interval (default 5 min)
-  and on startup, calling `Workspace.sweep_uncommitted/0` to stage and
-  commit anything left over.
+  and on startup, via `Workspace.Committer.sweep/1` (which wraps
+  `Workspace.sweep_uncommitted/0`) to stage and commit anything left
+  over.
   """
 
   use GenServer
@@ -34,7 +35,16 @@ defmodule TriOnyx.Workspace.Sweeper do
 
   @impl GenServer
   def handle_info(:sweep, state) do
-    case TriOnyx.Workspace.sweep_uncommitted() do
+    # Serialized through the committer so sweep git operations can't
+    # race incremental commits for the index.
+    result =
+      try do
+        TriOnyx.Workspace.Committer.sweep()
+      catch
+        :exit, reason -> {:error, {:committer_unavailable, reason}}
+      end
+
+    case result do
       {:ok, :clean} ->
         :ok
 

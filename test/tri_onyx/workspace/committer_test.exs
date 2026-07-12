@@ -158,6 +158,62 @@ defmodule TriOnyx.Workspace.CommitterTest do
     assert commit_count(repo) == 2
   end
 
+  test "zero-byte index is rebuilt from HEAD before committing", %{
+    repo: repo,
+    committer: committer
+  } do
+    # Seed a commit so HEAD exists, then truncate the index the way the
+    # live-lock race did.
+    write_file(repo, "agents/news/seed.md", "seed")
+    Committer.record_write(committer, "news", "sess-0", "agents/news/seed.md", :low, :low)
+    :ok = Committer.flush(committer)
+    assert commit_count(repo) == 1
+
+    File.write!(Path.join(repo, ".git/index"), "")
+
+    write_file(repo, "agents/news/notes.md", "content")
+    Committer.record_write(committer, "news", "sess-1", "agents/news/notes.md", :low, :low)
+    :ok = Committer.flush(committer)
+
+    assert commit_count(repo) == 2
+
+    # The rebuilt index must contain the full tree — the new commit only
+    # touches the newly written file, not a deletion of the seed file.
+    {out, 0} =
+      System.cmd("git", ["show", "--name-status", "--format=", "HEAD"],
+        cd: repo,
+        stderr_to_stdout: true
+      )
+
+    assert out =~ "agents/news/notes.md"
+    refute out =~ "seed.md"
+  end
+
+  test "persistently failing paths are dropped after the retry cap", %{
+    tmp_dir: tmp_dir,
+    committer: committer
+  } do
+    # Point the workspace at a directory whose .git is an invalid gitfile,
+    # so every commit attempt fails deterministically (a plain non-repo
+    # dir would let git walk up and discover an enclosing repository).
+    no_repo = Path.join(tmp_dir, "no-repo")
+    File.mkdir_p!(no_repo)
+    File.write!(Path.join(no_repo, ".git"), "")
+    Application.put_env(:tri_onyx, :workspace_dir, no_repo)
+
+    write_file(no_repo, "agents/news/notes.md", "content")
+    Committer.record_write(committer, "news", "sess-1", "agents/news/notes.md", :low, :low)
+
+    for _ <- 1..4 do
+      :ok = Committer.flush(committer)
+      assert map_size(:sys.get_state(committer).dirty) == 1
+    end
+
+    :ok = Committer.flush(committer)
+    assert :sys.get_state(committer).dirty == %{}
+    assert :sys.get_state(committer).fails == %{}
+  end
+
   test "debounce timer commits without an explicit flush", %{repo: repo} do
     name = :"committer_fast_#{System.unique_integer([:positive])}"
     start_supervised!({Committer, name: name, debounce_ms: 50}, id: name)

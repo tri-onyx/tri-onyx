@@ -143,6 +143,7 @@ defmodule TriOnyx.Workspace do
     dir = workspace_dir()
     safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
+    repair_corrupt_index(dir, safe)
 
     # Filter out paths that no longer exist on disk (files created then
     # deleted during the session, e.g. incoming articles that were reviewed
@@ -221,6 +222,7 @@ defmodule TriOnyx.Workspace do
     dir = workspace_dir()
     safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
+    repair_corrupt_index(dir, safe)
 
     full_path = Path.join(dir, path) |> Path.expand()
     safe_prefix = Path.expand(dir)
@@ -393,6 +395,7 @@ defmodule TriOnyx.Workspace do
     dir = workspace_dir()
     safe = git_safe_args(dir)
     clear_stale_index_lock(dir)
+    repair_corrupt_index(dir, safe)
 
     # Check for any dirty state (untracked, modified, or deleted)
     case System.cmd("git", safe ++ ["status", "--porcelain"], cd: dir, stderr_to_stdout: true) do
@@ -618,15 +621,46 @@ defmodule TriOnyx.Workspace do
   end
 
   # Removes a stale .git/index.lock left behind by a crashed git process.
-  # The gateway is the sole committer to the workspace repo, so a lock file
-  # with no running git process is always stale.
+  # Only locks older than @stale_lock_age_s are removed: a fresh lock
+  # belongs to a git process that is still running, and deleting a live
+  # lock lets two processes write the index at once — which truncates it
+  # ("index file smaller than expected").
+  @stale_lock_age_s 120
+
   @spec clear_stale_index_lock(String.t()) :: :ok
   defp clear_stale_index_lock(dir) do
     lock = Path.join(dir, ".git/index.lock")
 
-    if File.exists?(lock) do
-      Logger.warning("Workspace: removing stale index.lock")
+    with {:ok, %File.Stat{mtime: mtime}} <- File.stat(lock, time: :posix),
+         age = System.system_time(:second) - mtime,
+         true <- age > @stale_lock_age_s do
+      Logger.warning("Workspace: removing stale index.lock (#{age}s old)")
       File.rm(lock)
+    end
+
+    :ok
+  end
+
+  # Rebuilds the git index from HEAD when it has been truncated to zero
+  # bytes — git fails every operation with "index file smaller than
+  # expected" and never recovers on its own. `git read-tree HEAD`
+  # restages the full tree; starting from an empty index instead would
+  # make the next commit delete every file not explicitly re-added.
+  @spec repair_corrupt_index(String.t(), [String.t()]) :: :ok
+  defp repair_corrupt_index(dir, safe) do
+    index = Path.join(dir, ".git/index")
+
+    with {:ok, %File.Stat{size: 0}} <- File.stat(index) do
+      Logger.warning("Workspace: zero-byte git index detected — rebuilding from HEAD")
+      File.rm(index)
+
+      case System.cmd("git", safe ++ ["read-tree", "HEAD"], cd: dir, stderr_to_stdout: true) do
+        {_, 0} ->
+          :ok
+
+        {output, code} ->
+          Logger.error("Workspace: git read-tree HEAD failed (exit #{code}): #{output}")
+      end
     end
 
     :ok
