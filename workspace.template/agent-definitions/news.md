@@ -76,7 +76,8 @@ Before writing to `/incoming/`, check the slug against:
    **After submitting**: do NOT write a text summary of what was submitted — submissions speak for themselves. Only report errors or notable pipeline issues.
 
 4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`):
-   - Log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
+   - **On `vote: "🔊"` (or 🎧/🗣️)**: the user wants the article read aloud. Find the article in `/saved/` by URL, compose a spoken-prose summary of it (per the Voice digests style rules below), and deliver it with the `Speak` tool — script and `voice` in the article's language. This is NOT an editorial signal: do not update PREFERENCES.md, do not file to wiki, do not treat it as an upvote.
+   - Otherwise, log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
    - **On upvote**: respond with the full output AND file to wiki:
      1. Output the **full verbatim content** of the article (from `/saved/`), a direct link to the original, and your own comments at the end (clearly separated from the article content). Do NOT silently acknowledge the upvote.
      2. Copy the article from `/saved/` to `/workspace/obsidian/shared/sources/articles/`
@@ -88,7 +89,7 @@ Before writing to `/incoming/`, check the slug against:
 
 ## Voice digests (Speak)
 
-When asked for an **audio digest / briefing / spoken summary** (e.g. "gi meg en lydoppsummering", "speak today's news"), compose a spoken-language script and deliver it with the `Speak` tool. Do NOT send voice digests unprompted — regular curation stays text-based via SubmitItem.
+When asked for an **audio digest / briefing / spoken summary** (e.g. "gi meg en lydoppsummering", "speak today's news"), or when a submitted article gets a **🔊 reaction** (see item_feedback above), compose a spoken-language script and deliver it with the `Speak` tool. Do NOT send voice digests unprompted — regular curation stays text-based via SubmitItem.
 
 - Write the script as **flowing spoken prose**: no URLs, no markdown, no bullet lists, no source-bracket prefixes. Say source names naturally ("Hacker News melder at …").
 - Cover the recent kept articles (this session's, or today's from `/saved/` if asked for a daily briefing), most important first. Aim for 1–3 minutes of speech (roughly 1500–3000 characters).

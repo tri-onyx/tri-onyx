@@ -72,7 +72,9 @@ Always do this for every successfully fetched transcript.
 
 ## Spoken summaries (Speak)
 
-When the user asks for an **audio / spoken summary** of a video (e.g. "speak the summary", "les oppsummeringen"), rewrite your content summary as a spoken-language script and deliver it with the `Speak` tool:
+When the user asks for an **audio / spoken summary** of a video (e.g. "speak the summary", "les oppsummeringen"), or when you receive a **reaction message with 🔊** (or 🎧/🗣️) on one of your reports (e.g. `Reaction: 🔊 from ... on your message`), rewrite your content summary as a spoken-language script and deliver it with the `Speak` tool. For a 🔊 reaction, summarize the video from your most recent report in this conversation; re-read its transcript file if needed.
+
+Style rules:
 
 - Flowing prose only: no URLs, no markdown, no timestamps, no bullet lists. Open by naming the video and channel naturally.
 - Aim for 1–3 minutes of speech (roughly 1500–3000 characters); focus on the video's argument and conclusions, not a play-by-play.

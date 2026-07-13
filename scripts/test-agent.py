@@ -37,7 +37,8 @@ Turn-based usage:
             Send a reaction. If an approval_request is pending, sends
             it as an approval reaction (with approval_id). Otherwise
             sends a general reaction to the agent and waits for the
-            next agent_result.
+            next agent_result. Add "item_url" to emulate a reaction on
+            a submitted item (dispatched as item_feedback).
 
     Reactions to approval_request are sent immediately when the frame
     arrives (mid-session), not after agent_result, because the agent
@@ -103,13 +104,14 @@ async def run(
     trust: str = "verified",
     timeout: float = 120.0,
     auto_approve: bool = False,
+    room_id: str = "test-harness",
 ) -> int:
     """Connect as a test connector, execute turns, collect frames.
 
     Returns exit code: 0 on successful agent_result, 1 on error or timeout.
     """
     ws_url = gateway_url.rstrip("/") + "/connectors/ws"
-    channel = {"platform": "test", "room_id": "test-harness"}
+    channel = {"platform": "test", "room_id": room_id}
 
     async with websockets.connect(ws_url) as ws:
         # Authenticate
@@ -185,7 +187,8 @@ async def run(
                                 pending_approval = None
                             else:
                                 await _send_general_reaction(
-                                    ws, react_turn["emoji"], agent_name, channel, trust
+                                    ws, react_turn["emoji"], agent_name, channel, trust,
+                                    item_url=react_turn.get("item_url"),
                                 )
                             # Continue collecting to see what the agent does
                             # next — do NOT break here.
@@ -269,21 +272,26 @@ async def _send_general_reaction(
     agent_name: str,
     channel: dict,
     trust: str,
+    item_url: str | None = None,
 ) -> None:
-    """Send a general reaction to an agent's message (no approval_id)."""
-    await ws.send(
-        json.dumps(
-            {
-                "type": "reaction",
-                "emoji": emoji,
-                "sender": "test-harness",
-                "channel": channel,
-                "agent_name": agent_name,
-                "event_id": "",
-                "trust": {"level": trust, "sender": "test-harness"},
-            }
-        )
-    )
+    """Send a general reaction to an agent's message (no approval_id).
+
+    Pass *item_url* to emulate a reaction on a submitted item (the Matrix
+    adapter extracts it from the reacted-to message); the gateway then
+    dispatches it as item_feedback instead of a generic reaction.
+    """
+    frame = {
+        "type": "reaction",
+        "emoji": emoji,
+        "sender": "test-harness",
+        "channel": channel,
+        "agent_name": agent_name,
+        "event_id": "",
+        "trust": {"level": trust, "sender": "test-harness"},
+    }
+    if item_url:
+        frame["item_url"] = item_url
+    await ws.send(json.dumps(frame))
 
 
 # ---------------------------------------------------------------------------
@@ -370,6 +378,13 @@ def main() -> None:
         action="store_true",
         help="Automatically approve BCP approval_request frames with 👍",
     )
+    parser.add_argument(
+        "--room",
+        default="test-harness",
+        metavar="ROOM_ID",
+        help="Channel room_id (default: test-harness). A different room "
+        "gives a different session_key, forcing a fresh session.",
+    )
     args = parser.parse_args()
 
     if args.turns:
@@ -402,6 +417,7 @@ def main() -> None:
             trust=args.trust,
             timeout=args.timeout,
             auto_approve=args.auto_approve,
+            room_id=args.room,
         )
     )
     sys.exit(exit_code)
