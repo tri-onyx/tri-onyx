@@ -1043,10 +1043,17 @@ class MatrixAdapter(BaseAdapter):
         file_data: bytes,
         filename: str,
         mime_type: str,
+        extra: dict[str, Any] | None = None,
     ) -> None:
-        """Upload a file to the content repository and send it."""
+        """Upload a file to the content repository and send it.
+
+        Audio files are sent as ``m.audio`` so clients render an inline
+        player; when the gateway marks them ``kind: "voice"`` the MSC3245
+        voice-message flag is added (Element shows a voice-note bubble).
+        """
         assert self._client is not None
         room_id = channel.get("room_id", "")
+        extra = extra or {}
 
         import io
 
@@ -1061,15 +1068,27 @@ class MatrixAdapter(BaseAdapter):
             logger.error("File upload failed: %s", upload_resp)
             return
 
+        info: dict[str, Any] = {
+            "mimetype": mime_type,
+            "size": len(file_data),
+        }
+
         content: dict[str, Any] = {
-            "msgtype": "m.file",
+            "msgtype": "m.audio" if mime_type.startswith("audio/") else "m.file",
             "body": filename,
             "url": upload_resp.content_uri,
-            "info": {
-                "mimetype": mime_type,
-                "size": len(file_data),
-            },
+            "info": info,
         }
+
+        if mime_type.startswith("audio/"):
+            duration_ms = int(extra.get("duration_ms", 0) or 0)
+            if duration_ms > 0:
+                info["duration"] = duration_ms
+            if extra.get("kind") == "voice":
+                content["org.matrix.msc3245.voice"] = {}
+                content["org.matrix.msc1767.audio"] = (
+                    {"duration": duration_ms} if duration_ms > 0 else {}
+                )
 
         thread_id = channel.get("thread_id")
         if thread_id:

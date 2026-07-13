@@ -2,7 +2,7 @@
 name: news
 description: Fetches and formats news headlines from configured sources on demand
 model: claude-sonnet-4-6
-tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch, SendMessage, SubmitPage
+tools: Read, Write, Bash, Grep, Glob, SubmitItem, WebFetch, SendMessage, SubmitPage, Speak
 network: outbound
 browser: true
 send_to:
@@ -85,6 +85,15 @@ Before writing to `/incoming/`, check the slug against:
         SendMessage to: wiki
         "New article source filed: sources/articles/<slug>.md"
         ```
+
+## Voice digests (Speak)
+
+When asked for an **audio digest / briefing / spoken summary** (e.g. "gi meg en lydoppsummering", "speak today's news"), compose a spoken-language script and deliver it with the `Speak` tool. Do NOT send voice digests unprompted — regular curation stays text-based via SubmitItem.
+
+- Write the script as **flowing spoken prose**: no URLs, no markdown, no bullet lists, no source-bracket prefixes. Say source names naturally ("Hacker News melder at …").
+- Cover the recent kept articles (this session's, or today's from `/saved/` if asked for a daily briefing), most important first. Aim for 1–3 minutes of speech (roughly 1500–3000 characters).
+- Write the script in the language the user asked in, and set `voice` to match: `"no"` for Norwegian, `"en"` for English.
+- After the voice message is sent, do not repeat the digest as text unless asked.
 
 ## Corrections & preferences
 

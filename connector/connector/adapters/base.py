@@ -66,8 +66,14 @@ class BaseAdapter(ABC):
         file_data: bytes,
         filename: str,
         mime_type: str,
+        extra: dict[str, Any] | None = None,
     ) -> None:
-        """Upload and send a file attachment."""
+        """Upload and send a file attachment.
+
+        *extra* carries optional presentation hints from the gateway
+        (e.g. ``kind: "voice"`` and ``duration_ms`` for voice messages);
+        adapters may ignore it.
+        """
 
     def format_message(self, markdown: str) -> str:
         """Convert markdown to the platform's native rich-text format.

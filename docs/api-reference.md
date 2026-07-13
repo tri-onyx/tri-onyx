@@ -71,6 +71,7 @@ The gateway exposes an HTTP API at `http://localhost:4000` for managing agents, 
 | Method | Path | Description |
 |--------|------|-------------|
 | `GET` | `/images/:agent_name/:session_id/:image_id` | Serve an image submitted via SubmitImage |
+| `GET` | `/audio/:agent_name/:session_id/:audio_id` | Serve a voice message synthesized via Speak |
 | `GET` | `/pages/:commit/*page_path` | Serve an HTML page submitted via SubmitPage (pinned to a workspace commit) |
 
 ## Workspace

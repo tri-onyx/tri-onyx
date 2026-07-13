@@ -1356,6 +1356,31 @@ defmodule TriOnyx.Router do
     end
   end
 
+  # --- Session Audio (Speak tool output) ---
+
+  get "/audio/:agent_name/:session_id/:audio_id" do
+    audio_dir = Path.join(["logs", agent_name, "#{session_id}_audio"])
+    file_path = Path.join(audio_dir, audio_id) |> Path.expand()
+    safe_prefix = Path.expand(audio_dir)
+
+    cond do
+      not String.starts_with?(file_path, safe_prefix) ->
+        conn |> send_resp(403, "forbidden")
+
+      Path.extname(audio_id) != ".ogg" ->
+        conn |> send_resp(403, "forbidden")
+
+      not File.regular?(file_path) ->
+        conn |> send_resp(404, "not found")
+
+      true ->
+        conn
+        |> put_resp_content_type("audio/ogg")
+        |> put_resp_header("cache-control", "private, max-age=3600")
+        |> send_resp(200, File.read!(file_path))
+    end
+  end
+
   # --- Session Pages (HTML artifacts) ---
 
   get "/pages/:commit/*page_path" do

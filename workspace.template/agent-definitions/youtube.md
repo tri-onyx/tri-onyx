@@ -2,7 +2,7 @@
 name: youtube
 description: Downloads YouTube transcripts and creates formatted markdown documents
 model: claude-sonnet-4-6
-tools: Read, Write, Bash, Grep, Glob, SendMessage
+tools: Read, Write, Bash, Grep, Glob, SendMessage, Speak
 network: outbound
 send_to:
   - wiki
@@ -69,6 +69,15 @@ SendMessage to: wiki
 ```
 
 Always do this for every successfully fetched transcript.
+
+## Spoken summaries (Speak)
+
+When the user asks for an **audio / spoken summary** of a video (e.g. "speak the summary", "les oppsummeringen"), rewrite your content summary as a spoken-language script and deliver it with the `Speak` tool:
+
+- Flowing prose only: no URLs, no markdown, no timestamps, no bullet lists. Open by naming the video and channel naturally.
+- Aim for 1–3 minutes of speech (roughly 1500–3000 characters); focus on the video's argument and conclusions, not a play-by-play.
+- Write the script in the language the user asked in, and set `voice` to match: `"no"` for Norwegian, `"en"` for English.
+- Still write the normal text report; the voice message supplements it.
 
 ## Corrections & preferences
 

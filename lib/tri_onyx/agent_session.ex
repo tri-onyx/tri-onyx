@@ -789,6 +789,43 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
+  defp handle_agent_event({:speak_request, req_id, text, voice}, state) do
+    Logger.info(
+      "AgentSession #{state.id}: speak_request voice=#{voice} (#{byte_size(text)} bytes)"
+    )
+
+    audio_id = :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower, padding: false)
+    audio_dir = Path.join(["logs", state.definition.name, "#{state.id}_audio"])
+    dest = Path.join(audio_dir, "#{audio_id}.ogg")
+
+    # Synthesis shells out to piper/ffmpeg and can take seconds — run it in a
+    # Task so the session GenServer keeps accepting prompts and events.
+    port = state.port
+    session_id = state.id
+    definition = state.definition
+
+    Task.start(fn ->
+      case TriOnyx.Speech.synthesize(text, voice, dest) do
+        {:ok, duration_ms} ->
+          AgentPort.send_speak_response(port, req_id, true, "")
+
+          broadcast_event(%{id: session_id, definition: definition}, %{
+            "type" => "audio",
+            "audio_id" => "#{audio_id}.ogg",
+            "voice" => voice,
+            "duration_ms" => duration_ms,
+            "text_preview" => String.slice(text, 0, 120)
+          })
+
+        {:error, reason} ->
+          AgentPort.send_speak_response(port, req_id, false, reason)
+          Logger.warning("AgentSession #{session_id}: speak failed: #{reason}")
+      end
+    end)
+
+    {:noreply, state}
+  end
+
   defp handle_agent_event({:submit_item_request, req_id, item_type, title, url, metadata}, state) do
     Logger.info(
       "AgentSession #{state.id}: submit_item_request type=#{item_type} title=#{title}"

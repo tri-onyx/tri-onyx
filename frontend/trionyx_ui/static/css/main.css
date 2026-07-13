@@ -747,6 +747,22 @@ a:hover { text-decoration: underline; }
   margin-top: 4px;
 }
 
+/* ── Agent Audio (Speak tool) ── */
+
+.msg-audio audio {
+  display: block;
+  width: 320px;
+  max-width: 100%;
+}
+
+.audio-caption {
+  display: block;
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 4px;
+  font-style: italic;
+}
+
 /* ── Page cards (HTML artifacts) ── */
 
 .msg.msg-page {

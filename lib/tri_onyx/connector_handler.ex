@@ -478,6 +478,39 @@ defmodule TriOnyx.ConnectorHandler do
             {:push, [{:text, typing_frame}, {:text, text_frame}], state}
           end
 
+        "audio" ->
+          # Speak tool output: push the synthesized file to the chat platform
+          # as a voice message via the connector's send_file action. The data
+          # is base64-encoded for the JSON frame; the connector decodes it.
+          audio_id = Map.get(event, "audio_id", "")
+          audio_path = Path.join(["logs", agent_name, "#{session_id}_audio", audio_id])
+
+          case File.read(audio_path) do
+            {:ok, data} ->
+              frame =
+                Jason.encode!(%{
+                  "type" => "action_request",
+                  "action" => "send_file",
+                  "channel" => channel,
+                  "params" => %{
+                    "data" => Base.encode64(data),
+                    "filename" => "#{agent_name}-#{audio_id}",
+                    "mime_type" => "audio/ogg",
+                    "duration_ms" => Map.get(event, "duration_ms", 0),
+                    "kind" => "voice"
+                  }
+                })
+
+              {:push, [{:text, frame}], state}
+
+            {:error, reason} ->
+              Logger.warning(
+                "ConnectorHandler: cannot read audio #{audio_path}: #{inspect(reason)}"
+              )
+
+              {:ok, state}
+          end
+
         "ready" ->
 
 

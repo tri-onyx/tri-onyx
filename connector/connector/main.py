@@ -7,6 +7,8 @@ client, wires them together, and handles graceful shutdown.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import logging
 import signal
 import sys
@@ -192,11 +194,18 @@ async def _route_action(
     elif action == "delete":
         await adapter.delete_message(req.channel, params.get("message_id", ""))
     elif action == "send_file":
+        # File bytes arrive base64-encoded in the JSON frame from the gateway.
+        try:
+            file_data = base64.b64decode(params.get("data", ""))
+        except (ValueError, binascii.Error):
+            logger.error("send_file: invalid base64 data (channel=%s)", req.channel)
+            return
         await adapter.send_file(
             req.channel,
-            params.get("data", b""),
+            file_data,
             params.get("filename", "file"),
             params.get("mime_type", "application/octet-stream"),
+            extra={k: v for k, v in params.items() if k not in ("data", "filename", "mime_type")},
         )
     else:
         logger.warning("Unknown action: %s", action)

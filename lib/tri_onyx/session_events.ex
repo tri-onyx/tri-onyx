@@ -11,7 +11,7 @@ defmodule TriOnyx.SessionEvents do
 
   # Every event type AgentSession logs or broadcasts.
   @event_types ~w(
-    agent_log approval_request bcp_query bcp_response
+    agent_log approval_request audio bcp_query bcp_response
     bcp_subscription_publish calendar_create calendar_delete
     calendar_query calendar_update create_folder error github_command
     heartbeat_notification heartbeat_result idle_timeout image
@@ -24,7 +24,7 @@ defmodule TriOnyx.SessionEvents do
   # Other types are internal plumbing (BCP delivery, email/calendar
   # request forwarding, heartbeat fan-out) with no chat representation.
   @chat_visible ~w(
-    approval_request bcp_query error idle_timeout image interrupted
+    approval_request audio bcp_query error idle_timeout image interrupted
     page port_down ready result risk_escalation send_message
     session_start session_stop text tool_use tool_result user_prompt
   )

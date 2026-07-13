@@ -555,6 +555,7 @@ class SlackAdapter(BaseAdapter):
         file_data: bytes,
         filename: str,
         mime_type: str,
+        extra: dict[str, Any] | None = None,
     ) -> None:
         channel_id = self._channel_id_of(channel)
         if not channel_id or not self._web_client:

@@ -21,6 +21,7 @@ urlpatterns = [
     path("agents/<str:name>/prompt", chat.agent_prompt, name="agent-prompt"),
     path("agents/<str:name>/stop", chat.agent_stop, name="agent-stop"),
     path("workspace/images/<str:agent_name>/<str:session_id>/<str:image_id>", chat.session_image, name="session-image"),
+    path("workspace/audio/<str:agent_name>/<str:session_id>/<str:audio_id>", chat.session_audio, name="session-audio"),
     path("workspace/pages/<str:commit>/<path:page_path>", chat.session_page, name="session-page"),
     path("approvals/badge", approvals.approvals_badge, name="approvals-badge"),
     path("approvals/dropdown", approvals.approvals_dropdown, name="approvals-dropdown"),

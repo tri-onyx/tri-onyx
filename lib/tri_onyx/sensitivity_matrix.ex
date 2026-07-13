@@ -87,7 +87,8 @@ defmodule TriOnyx.SensitivityMatrix do
     "SaveDraft" => :low,
     "SubmitItem" => :low,
     "SubmitImage" => :low,
-    "SubmitPage" => :low
+    "SubmitPage" => :low,
+    "Speak" => :low
   }
 
   # Sensitivity levels for privileged mounts.

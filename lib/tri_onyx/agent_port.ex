@@ -62,6 +62,7 @@ defmodule TriOnyx.AgentPort do
           | {:calendar_delete_request, String.t(), String.t(), String.t()}
           | {:submit_item_request, String.t(), String.t(), String.t(), String.t(), map()}
           | {:submit_page_request, String.t(), String.t(), String.t()}
+          | {:speak_request, String.t(), String.t(), String.t()}
           | {:log, String.t(), String.t()}
           | {:port_down, atom()}
 
@@ -457,6 +458,23 @@ defmodule TriOnyx.AgentPort do
       {:send,
        %{
          "type" => "submit_image_response",
+         "request_id" => request_id,
+         "success" => success,
+         "detail" => detail
+       }}
+    )
+  end
+
+  @doc """
+  Sends a `speak_response` back to the runtime.
+  """
+  @spec send_speak_response(GenServer.server(), String.t(), boolean(), String.t()) :: :ok
+  def send_speak_response(server, request_id, success, detail \\ "") do
+    GenServer.cast(
+      server,
+      {:send,
+       %{
+         "type" => "speak_response",
          "request_id" => request_id,
          "success" => success,
          "detail" => detail
@@ -926,6 +944,16 @@ defmodule TriOnyx.AgentPort do
        }}
       when is_binary(req_id) and is_binary(path) and is_binary(title) ->
         {:ok, {:submit_page_request, req_id, path, title}}
+
+      {:ok,
+       %{
+         "type" => "speak_request",
+         "request_id" => req_id,
+         "text" => text,
+         "voice" => voice
+       }}
+      when is_binary(req_id) and is_binary(text) and is_binary(voice) ->
+        {:ok, {:speak_request, req_id, text, voice}}
 
       {:ok,
        %{

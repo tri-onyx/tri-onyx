@@ -248,6 +248,20 @@ def session_image(request, agent_name, session_id, image_id):
         return HttpResponse(status=404)
 
 
+def session_audio(request, agent_name, session_id, audio_id):
+    if os.path.splitext(audio_id)[1].lower() != ".ogg":
+        return HttpResponse(status=403)
+    try:
+        resp = gateway.get_session_audio(agent_name, session_id, audio_id)
+        return HttpResponse(
+            resp.content,
+            content_type=resp.headers.get("content-type", "audio/ogg"),
+            headers={"Cache-Control": "private, max-age=3600"},
+        )
+    except Exception:
+        return HttpResponse(status=404)
+
+
 _COMMIT_SHA_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
 
@@ -312,6 +326,12 @@ def classify_event(event: dict) -> dict:
         base["image_id"] = event.get("image_id", "")
         base["filename"] = event.get("filename", "")
         base["media_type"] = event.get("media_type", "")
+
+    elif etype == "audio":
+        base["audio_id"] = event.get("audio_id", "")
+        base["voice"] = event.get("voice", "")
+        base["duration_ms"] = event.get("duration_ms", 0)
+        base["text_preview"] = event.get("text_preview", "")
 
     elif etype == "page":
         base["path"] = event.get("path", "")

@@ -263,6 +263,13 @@ function renderEvent(type, data) {
         ` alt="${escapeAttr(data.filename || '')}" title="${escapeAttr(data.filename || '')}" loading="lazy">` +
         `<span class="image-caption">${escapeHtml(data.filename || '')}</span></div>`;
 
+    case 'audio': {
+      const audioUrl = `/workspace/audio/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${escapeAttr(data.audio_id)}`;
+      return `<div class="msg msg-agent msg-audio" data-ts="${escapeAttr(ts)}">` +
+        `<audio controls preload="metadata" src="${audioUrl}"></audio>` +
+        `<span class="audio-caption">${escapeHtml(data.text_preview || '')}</span></div>`;
+    }
+
     case 'page': {
       const pageUrl = `/workspace/pages/${encodeURIComponent(data.commit || '')}/${data.path || ''}`;
       const title = escapeHtml(data.title || data.filename || 'Page');

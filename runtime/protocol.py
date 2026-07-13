@@ -15,6 +15,7 @@ Gateway -> Runtime (stdin):
   submit_item_response -- gateway response after a submit_item_request
   submit_image_response -- gateway response after a submit_image_request
   submit_page_response -- gateway response after a submit_page_request
+  speak_response -- gateway response after a speak_request
   github_response      -- gateway response after a github_request
   bcp_query              -- BCP query delivered to a Reader agent
   bcp_response_delivery  -- validated BCP response delivered to a Controller agent
@@ -37,6 +38,7 @@ Runtime -> Gateway (stdout):
   submit_item_request -- request gateway to post an item to the connector
   submit_image_request -- request gateway to save and serve an image to the user
   submit_page_request -- request gateway to commit and serve an HTML page to the user
+  speak_request -- request gateway to synthesize text to speech and deliver it
   github_request      -- request gateway to run a gh/git command with repo credentials
   bcp_query_request     -- Controller requests a BCP query to a Reader
   bcp_response        -- Reader responds to a BCP query (query_id for queries,
@@ -489,6 +491,23 @@ class SubmitPageResponse:
         )
 
 
+@dataclass
+class SpeakResponse:
+    """Response from the gateway after a speak_request."""
+
+    request_id: str
+    success: bool
+    detail: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SpeakResponse:
+        return cls(
+            request_id=data.get("request_id", ""),
+            success=data.get("success", False),
+            detail=data.get("detail", ""),
+        )
+
+
 InboundMessage = (
     StartMessage
     | PromptMessage
@@ -513,6 +532,7 @@ InboundMessage = (
     | SubmitItemResponse
     | SubmitImageResponse
     | SubmitPageResponse
+    | SpeakResponse
 )
 
 _INBOUND_PARSERS: dict[str, type] = {
@@ -539,6 +559,7 @@ _INBOUND_PARSERS: dict[str, type] = {
     "submit_item_response": SubmitItemResponse,
     "submit_image_response": SubmitImageResponse,
     "submit_page_response": SubmitPageResponse,
+    "speak_response": SpeakResponse,
 }
 
 
@@ -875,6 +896,20 @@ def emit_submit_page_request(
         "request_id": request_id,
         "path": path,
         "title": title,
+    })
+
+
+def emit_speak_request(
+    request_id: str,
+    text: str,
+    voice: str,
+) -> None:
+    """Request the gateway to synthesize text to speech and deliver it."""
+    _emit({
+        "type": "speak_request",
+        "request_id": request_id,
+        "text": text,
+        "voice": voice,
     })
 
 

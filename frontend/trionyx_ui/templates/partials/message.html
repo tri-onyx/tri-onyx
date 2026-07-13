@@ -36,6 +36,13 @@
     <span class="image-caption">{{ msg.filename }}</span>
   </div>
 
+{% elif msg.type == "audio" %}
+  <div class="msg msg-agent msg-audio" data-ts="{{ msg.timestamp }}">
+    <audio controls preload="metadata"
+           src="{% url 'session-audio' agent_name=agent.name session_id=session_id audio_id=msg.audio_id %}"></audio>
+    <span class="audio-caption">{{ msg.text_preview }}</span>
+  </div>
+
 {% elif msg.type == "page" %}
   <div class="msg msg-agent msg-page" data-ts="{{ msg.timestamp }}">
     <div class="page-card" data-page-url="{% url 'session-page' commit=msg.commit page_path=msg.path %}">

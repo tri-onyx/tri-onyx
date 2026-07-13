@@ -80,7 +80,8 @@ defmodule TriOnyx.TaintMatrix do
     "SaveDraft" => :low,
     "SubmitItem" => :low,
     "SubmitImage" => :low,
-    "SubmitPage" => :low
+    "SubmitPage" => :low,
+    "Speak" => :low
   }
 
   # Taint levels for the two Read path contexts.

@@ -68,6 +68,7 @@ from protocol import (
     CalendarUpdateResponse,
     CalendarDeleteResponse,
     SubmitItemResponse,
+    SpeakResponse,
     SubmitImageResponse,
     SubmitPageResponse,
     _INBOUND_PARSERS,
@@ -94,6 +95,7 @@ from protocol import (
     emit_calendar_update_request,
     emit_calendar_delete_request,
     emit_submit_item_request,
+    emit_speak_request,
     emit_submit_image_request,
     emit_submit_page_request,
     emit_log,
@@ -314,6 +316,7 @@ class InboundDispatcher:
         self.submit_item_responses: asyncio.Queue[SubmitItemResponse] = asyncio.Queue()
         self.submit_image_responses: asyncio.Queue[SubmitImageResponse] = asyncio.Queue()
         self.submit_page_responses: asyncio.Queue[SubmitPageResponse] = asyncio.Queue()
+        self.speak_responses: asyncio.Queue[SpeakResponse] = asyncio.Queue()
         self.active_subscriptions: list[dict[str, Any]] = []
         self._task: asyncio.Task[None] | None = None
 
@@ -348,6 +351,7 @@ class InboundDispatcher:
             self.submit_item_responses,
             self.submit_image_responses,
             self.submit_page_responses,
+            self.speak_responses,
         ]
         for q in queues:
             while not q.empty():
@@ -472,6 +476,12 @@ class InboundDispatcher:
                     await self.submit_page_responses.put(response)
                 except Exception as exc:
                     log.error("Failed to parse submit_page_response: %s", exc)
+            elif msg_type == "speak_response":
+                try:
+                    response = SpeakResponse.from_dict(data)
+                    await self.speak_responses.put(response)
+                except Exception as exc:
+                    log.error("Failed to parse speak_response: %s", exc)
             elif msg_type == "interrupt":
                 # Route directly to interrupt_event (not control_queue) because
                 # the main loop is blocked awaiting run_prompt, not reading control.
@@ -777,6 +787,53 @@ class SubmitImageHandler:
 
         if response.success:
             return f"Image submitted: {filename}"
+        return f"Error: {response.detail}"
+
+
+_SPEAK_TIMEOUT_S = 120
+_SPEAK_MAX_TEXT_BYTES = 8000
+_SPEAK_VOICES = {"no", "en"}
+
+
+class SpeakHandler:
+    """Handles the Speak virtual tool for sending voice messages to the user.
+
+    Validates the text locally, then requests the gateway to synthesize it
+    (local Piper TTS) and deliver the audio to chat and the web UI.
+    """
+
+    def __init__(self, dispatcher: InboundDispatcher) -> None:
+        self._dispatcher = dispatcher
+
+    async def handle(self, text: str, voice: str = "no") -> str:
+        if not text.strip():
+            return "Error: 'text' is empty."
+
+        size = len(text.encode("utf-8"))
+        if size > _SPEAK_MAX_TEXT_BYTES:
+            return (
+                f"Error: text too long ({size} bytes). Maximum is "
+                f"{_SPEAK_MAX_TEXT_BYTES} bytes — shorten the spoken script."
+            )
+
+        if voice not in _SPEAK_VOICES:
+            return f"Error: unknown voice '{voice}'. Supported: {', '.join(sorted(_SPEAK_VOICES))}"
+
+        request_id = uuid.uuid4().hex
+        log.info("Speak voice=%r (%d bytes, request_id=%s)", voice, size, request_id)
+        emit_speak_request(request_id=request_id, text=text, voice=voice)
+
+        try:
+            response = await asyncio.wait_for(
+                _wait_for_matching_response(self._dispatcher.speak_responses, request_id),
+                timeout=_SPEAK_TIMEOUT_S,
+            )
+        except asyncio.TimeoutError:
+            log.error("Speak timed out (request_id=%s)", request_id)
+            return f"Error: Speak timed out after {_SPEAK_TIMEOUT_S}s"
+
+        if response.success:
+            return "Voice message sent."
         return f"Error: {response.detail}"
 
 
@@ -1329,6 +1386,10 @@ _SUBMIT_IMAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_IMAGE_TOOL}"
 _SUBMIT_PAGE_TOOL = "SubmitPage"
 _SUBMIT_PAGE_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SUBMIT_PAGE_TOOL}"
 
+# Speak tool name
+_SPEAK_TOOL = "Speak"
+_SPEAK_MCP_NAME = f"mcp__{_INTERAGENT_SERVER}__{_SPEAK_TOOL}"
+
 # Reverse map from MCP-prefixed name → logical name for the gateway.
 _MCP_TO_LOGICAL: dict[str, str] = {
     _SEND_MESSAGE_MCP_NAME: _SEND_MESSAGE_TOOL,
@@ -1348,6 +1409,7 @@ _MCP_TO_LOGICAL: dict[str, str] = {
     _SUBMIT_ITEM_MCP_NAME: _SUBMIT_ITEM_TOOL,
     _SUBMIT_IMAGE_MCP_NAME: _SUBMIT_IMAGE_TOOL,
     _SUBMIT_PAGE_MCP_NAME: _SUBMIT_PAGE_TOOL,
+    _SPEAK_MCP_NAME: _SPEAK_TOOL,
 }
 
 
@@ -2224,6 +2286,63 @@ def build_submit_image_tool(image_handler: SubmitImageHandler) -> Any:
     return submit_image
 
 
+def build_speak_tool(speak_handler: SpeakHandler) -> Any:
+    """Create Speak as an in-process SDK MCP tool."""
+
+    @tool(
+        _SPEAK_TOOL,
+        "Send a voice message to the user. The text is synthesized to speech "
+        "on the gateway (local TTS) and delivered as a playable audio message "
+        "in chat. Write flowing spoken-style prose: no URLs, no markdown, no "
+        "bullet lists.",
+        {
+            "type": "object",
+            "properties": {
+                "text": {
+                    "type": "string",
+                    "description": (
+                        "The script to speak, in natural spoken-language prose. "
+                        "Maximum 8000 bytes (roughly 5 minutes of audio)."
+                    ),
+                },
+                "voice": {
+                    "type": "string",
+                    "enum": ["no", "en"],
+                    "description": (
+                        "Voice language: 'no' for Norwegian, 'en' for English. "
+                        "Match the language the text is written in."
+                    ),
+                    "default": "no",
+                },
+            },
+            "required": ["text"],
+        },
+    )
+    async def speak(args: dict[str, Any]) -> dict[str, Any]:
+        text = args.get("text", "")
+
+        if not text:
+            return {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "Error: 'text' is required.",
+                    }
+                ],
+                "isError": True,
+            }
+
+        voice = args.get("voice", "no")
+        result = await speak_handler.handle(text=text, voice=voice)
+        is_error = result.startswith("Error:")
+        return {
+            "content": [{"type": "text", "text": result}],
+            "isError": is_error,
+        }
+
+    return speak
+
+
 def build_submit_page_tool(page_handler: SubmitPageHandler) -> Any:
     """Create SubmitPage as an in-process SDK MCP tool."""
 
@@ -2741,6 +2860,7 @@ async def main() -> None:
                 item_handler = SubmitItemHandler(dispatcher, config.name)
                 image_handler = SubmitImageHandler(dispatcher)
                 page_handler = SubmitPageHandler(dispatcher)
+                speak_handler = SpeakHandler(dispatcher)
                 log.info(
                     "Configured: agent=%r tools=%s model=%s max_turns=%d cwd=%s",
                     config.name,
@@ -2770,6 +2890,7 @@ async def main() -> None:
                     _SUBMIT_ITEM_TOOL,
                     _SUBMIT_IMAGE_TOOL,
                     _SUBMIT_PAGE_TOOL,
+                    _SPEAK_TOOL,
                 }
                 sdk_tools = [
                     t for t in config.tools if t not in _custom_tools
@@ -2810,6 +2931,10 @@ async def main() -> None:
                 if _SUBMIT_PAGE_TOOL in config.tools:
                     interagent_tools.append(build_submit_page_tool(page_handler))
                     sdk_tools.append(_SUBMIT_PAGE_MCP_NAME)
+
+                if _SPEAK_TOOL in config.tools:
+                    interagent_tools.append(build_speak_tool(speak_handler))
+                    sdk_tools.append(_SPEAK_MCP_NAME)
 
                 if interagent_tools:
                     server = create_sdk_mcp_server(

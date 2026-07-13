@@ -46,7 +46,8 @@ defmodule TriOnyx.ToolRegistry do
     "GitHub" => %{requires_auth: true, capability_level: :high, requires_approval: false},
     "SubmitItem" => %{requires_auth: false, capability_level: :low, requires_approval: false},
     "SubmitImage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
-    "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false}
+    "SubmitPage" => %{requires_auth: false, capability_level: :low, requires_approval: false},
+    "Speak" => %{requires_auth: false, capability_level: :low, requires_approval: false}
   }
 
   # The set of known tools is exactly the set with declared metadata —
@@ -83,7 +84,8 @@ defmodule TriOnyx.ToolRegistry do
     %{key: "GitHub", display: "GitHub", variant: nil, group: "GitHub",            note: "gateway-mediated gh/git against the agent's repository; per-command policy with approval gates"},
     %{key: "SubmitItem", display: "SubmitItem", variant: nil, group: "Messaging",         note: "posts formatted item to chat (articles, listings, etc.)"},
     %{key: "SubmitImage", display: "SubmitImage", variant: nil, group: "Output",           note: "displays a workspace image file in chat"},
-    %{key: "SubmitPage", display: "SubmitPage", variant: nil, group: "Output",            note: "renders self-contained HTML page in chat"}
+    %{key: "SubmitPage", display: "SubmitPage", variant: nil, group: "Output",            note: "renders self-contained HTML page in chat"},
+    %{key: "Speak", display: "Speak", variant: nil, group: "Output",            note: "synthesizes text to a voice message (local Piper TTS)"}
   ]
 
   # One-line brief specs for tool_use events, rendered by every UI surface
@@ -144,7 +146,11 @@ defmodule TriOnyx.ToolRegistry do
     ],
     "SubmitItem" => [%{"keys" => ["title"], "max_len" => 60}],
     "SubmitImage" => [%{"keys" => ["path"], "transform" => "path"}],
-    "SubmitPage" => [%{"keys" => ["title", "path"], "max_len" => 60}]
+    "SubmitPage" => [%{"keys" => ["title", "path"], "max_len" => 60}],
+    "Speak" => [
+      %{"keys" => ["voice"], "prefix" => "[", "suffix" => "] "},
+      %{"keys" => ["text"], "max_len" => 60}
+    ]
   }
 
   @doc """

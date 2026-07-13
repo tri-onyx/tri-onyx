@@ -269,6 +269,7 @@ failure) plus any extra fields listed.
 | `submit_item_request` | `item_type`, `title`, `url`, `metadata` | `submit_item_response` | — |
 | `submit_image_request` | `path`, `filename`, `media_type` | `submit_image_response` | — |
 | `submit_page_request` | `path`, `title` | `submit_page_response` | — |
+| `speak_request` | `text`, `voice` | `speak_response` | — |
 
 The BCP query flow uses the same correlation pattern but asymmetric
 messages: a Controller emits `bcp_query_request` (`request_id`, `to`,
