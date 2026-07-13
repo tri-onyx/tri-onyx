@@ -242,6 +242,87 @@ defmodule TriOnyx.AgentSessionTest do
     end
   end
 
+  describe "prompt queueing" do
+    defp queue_state(overrides) do
+      Map.merge(
+        %{
+          id: "queue-test-123",
+          definition: %{@test_definition | idle_timeout: nil},
+          port: self(),
+          status: :running,
+          prompt_queue: [],
+          idle_timer: nil,
+          prompt_from_connector: true,
+          pending_tools: %{}
+        },
+        overrides
+      )
+    end
+
+    test "reaction prompts queue without interrupting a running session" do
+      state = queue_state(%{})
+      metadata = %{"trigger_subtype" => "reaction", "source" => "connector"}
+      payload = ~s({"type":"item_feedback","url":"https://example.com/a","vote":"up"})
+
+      {:reply, :ok, new_state} =
+        AgentSession.handle_call({:prompt, payload, metadata}, {self(), make_ref()}, state)
+
+      assert new_state.prompt_queue == [{payload, metadata}]
+      refute_receive {:"$gen_cast", {:send, %{"type" => "interrupt"}}}
+    end
+
+    test "user messages still interrupt a running session" do
+      state = queue_state(%{})
+      metadata = %{"source" => "connector"}
+
+      {:reply, :ok, new_state} =
+        AgentSession.handle_call({:prompt, "hello", metadata}, {self(), make_ref()}, state)
+
+      assert new_state.prompt_queue == [{"hello", metadata}]
+      assert_receive {:"$gen_cast", {:send, %{"type" => "interrupt"}}}
+    end
+
+    test "rapid successive prompts all queue in order instead of overwriting" do
+      metadata = %{"trigger_subtype" => "reaction", "source" => "connector"}
+      state = queue_state(%{})
+
+      state =
+        Enum.reduce(["up-1", "up-2", "up-3"], state, fn payload, acc ->
+          {:reply, :ok, next} =
+            AgentSession.handle_call({:prompt, payload, metadata}, {self(), make_ref()}, acc)
+
+          next
+        end)
+
+      assert Enum.map(state.prompt_queue, &elem(&1, 0)) == ["up-1", "up-2", "up-3"]
+    end
+
+    test "prompts queue in order while the session is starting" do
+      state = queue_state(%{status: :starting, port: nil})
+
+      {:reply, :ok, state} =
+        AgentSession.handle_call({:prompt, "first", %{}}, {self(), make_ref()}, state)
+
+      {:reply, :ok, state} =
+        AgentSession.handle_call({:prompt, "second", %{}}, {self(), make_ref()}, state)
+
+      assert Enum.map(state.prompt_queue, &elem(&1, 0)) == ["first", "second"]
+    end
+
+    test "interrupted event flushes the next queued prompt and keeps the rest" do
+      state = queue_state(%{prompt_queue: [{"first", %{}}, {"second", %{}}]})
+
+      {:noreply, new_state} =
+        AgentSession.handle_info({:agent_event, self(), {:interrupted, "user_message"}}, state)
+
+      assert new_state.status == :running
+      assert new_state.prompt_queue == [{"second", %{}}]
+
+      expected = "[Previous task was interrupted by user]\n\nfirst"
+      assert_receive {:"$gen_cast", {:send, %{"type" => "prompt", "content" => ^expected}}}
+    end
+  end
+
   describe "idle timeout" do
     test "schedule_idle_timeout sends :idle_timeout after configured duration" do
       # Simulate the internal helper by sending :idle_timeout directly
@@ -261,7 +342,7 @@ defmodule TriOnyx.AgentSessionTest do
         workspace_writes: MapSet.new(),
         trigger_type: :external_message,
         last_text: nil,
-        pending_prompt: nil,
+        prompt_queue: [],
         pending_tools: %{},
         idle_timer: nil
       }
