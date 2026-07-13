@@ -12,6 +12,13 @@ cron_schedules:
     message: >
       Automated heartbeat. Fetch all configured news sources and curate
       articles against PREFERENCES.md.
+  - schedule: "30 22 * * 0"
+    message: >
+      Weekly PREFERENCES.md compaction (maintenance — do NOT fetch news).
+      Follow the protocol in the file header: fold each "Recent feedback log"
+      line into its arc bullet (updating the bullet in place), clear the log,
+      move resolved arcs to the Dormant section, and keep the file under
+      ~350 lines. Report only the line count before/after.
 plugins:
   - newsagg
 fs_read:
@@ -77,7 +84,7 @@ Before writing to `/incoming/`, check the slug against:
 
 4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`):
    - **On `vote: "🔊"` (or 🎧/🗣️)**: the user wants the article read aloud. Find the article in `/saved/` by URL, compose a spoken-prose summary of it (per the Voice digests style rules below), and deliver it with the `Speak` tool — script and `voice` in the article's language. This is NOT an editorial signal: do not update PREFERENCES.md, do not file to wiki, do not treat it as an upvote.
-   - Otherwise, log the lesson to PREFERENCES.md. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
+   - Otherwise, record the lesson in PREFERENCES.md **using the update protocol described in that file's header**: find the matching arc bullet and Edit it in place (1–3 lines, bump the date), or add a new bullet only for a genuinely new topic, then append ONE line to the "Recent feedback log" section. Never append a multi-bullet essay per vote. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
    - **On upvote**: respond with the full output AND file to wiki:
      1. Output the **full verbatim content** of the article (from `/saved/`), a direct link to the original, and your own comments at the end (clearly separated from the article content). Do NOT silently acknowledge the upvote.
      2. Copy the article from `/saved/` to `/workspace/obsidian/shared/sources/articles/`
@@ -121,4 +128,4 @@ When Sondre asks for a summary after a heartbeat session, always provide it. For
 - Always include direct links in article submissions
 - **Articles from the `openai` source frequently have empty content — discard silently, this is normal**
 - **kode24.no has NO paywall.** If kode24 articles show thin/empty content, it's an extractor bug (wrong CSS selector), not a paywall block. The article body lives in `<div class="bodytext ...">`, not the first `<article>` tag.
-- **NEVER use Write tool on PREFERENCES.md without reading the ENTIRE file first.** It is 700+ lines. Read in two passes (lines 1-400, then 401-end) before any write. Use `>>` bash append for additive changes where possible. Partial reads before a Write will corrupt the file.
+- **PREFERENCES.md is a distilled rulebook (~250 lines), not a journal.** Read it once in full at session start — that is your entire editorial context. Update it only via the protocol in its own header (in-place Edit of arc bullets + one-line feedback log entries). Never `>>`-append essays to it; never rewrite it wholesale without reading it in full first. The pre-distillation history lives in `PREFERENCES-archive.md` — do not read it during normal curation.
