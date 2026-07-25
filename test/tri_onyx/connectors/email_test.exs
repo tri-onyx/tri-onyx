@@ -128,9 +128,76 @@ defmodule TriOnyx.Connectors.EmailTest do
       agent_dir = Path.join(@tmp_dir, "agent-empty")
       File.mkdir_p!(agent_dir)
 
-      # Without IMAP configured, fails on IMAP check before reaching filesystem check
+      # The local scope check runs before the IMAP mutation, so a UID the
+      # caller does not hold locally fails here rather than after the server
+      # has already moved it.
       assert {:error, msg} = Email.move_email("99999", "inbox", "dest", agent_dir)
-      assert msg =~ "IMAP not configured"
+      assert msg =~ "source email directory not found"
+    end
+
+    test "rejects an IMAP sequence set as a uid" do
+      # `1:*` would move the entire mailbox.
+      assert {:error, msg} = Email.move_email("1:*", "inbox", "dest", @tmp_dir)
+      assert msg =~ "invalid email uid"
+    end
+
+    test "rejects a uid carrying a CRLF-injected IMAP command" do
+      assert {:error, msg} =
+               Email.move_email("1\r\nX001 DELETE Sent", "inbox", "dest", @tmp_dir)
+
+      assert msg =~ "invalid email uid"
+    end
+
+    test "rejects non-numeric, zero-prefixed, and out-of-range uids" do
+      for uid <- ["abc", "", "0", "007", " 12", "12 ", "99999999999", "4294967296"] do
+        assert {:error, msg} = Email.move_email(uid, "inbox", "dest", @tmp_dir),
+               "expected #{inspect(uid)} to be rejected"
+
+        assert msg =~ "invalid email uid"
+      end
+    end
+
+    test "uid validation runs before folder validation and before any IMAP call" do
+      # A bad uid must not depend on folder names or IMAP config to be caught.
+      assert {:error, msg} = Email.move_email("1:*", "../etc", "../etc", @tmp_dir)
+      assert msg =~ "invalid email uid"
+    end
+
+    test "accepts the maximum valid 32-bit uid (fails later, not on validation)" do
+      assert {:error, msg} = Email.move_email("4294967295", "inbox", "dest", @tmp_dir)
+      refute msg =~ "invalid email uid"
+      assert msg =~ "source email directory not found"
+    end
+  end
+
+  describe "Poller.parse_search_response/2" do
+    alias TriOnyx.Connectors.Email.Poller
+
+    test "returns only UIDs above the high-water mark, sorted" do
+      resp = "* SEARCH 12 15 13\r\nA003 OK SEARCH completed\r\n"
+      assert Poller.parse_search_response(resp, 11) == ["12", "13", "15"]
+    end
+
+    test "drops the reversed-range echo when the newest message was moved away" do
+      # `UID SEARCH UID 43:*` against a mailbox whose highest UID is now 40:
+      # the server evaluates the range reversed and answers with 40. That UID
+      # is already processed and must not be re-fetched.
+      resp = "* SEARCH 40\r\nA003 OK SEARCH completed\r\n"
+      assert Poller.parse_search_response(resp, 42) == []
+    end
+
+    test "excludes the high-water mark itself" do
+      resp = "* SEARCH 42\r\nA003 OK SEARCH completed\r\n"
+      assert Poller.parse_search_response(resp, 42) == []
+    end
+
+    test "ignores non-numeric tokens" do
+      resp = "* SEARCH 12 bogus 14\r\nA003 OK SEARCH completed\r\n"
+      assert Poller.parse_search_response(resp, 0) == ["12", "14"]
+    end
+
+    test "returns empty when the server reports no matches" do
+      assert Poller.parse_search_response("A003 OK SEARCH completed\r\n", 5) == []
     end
   end
 

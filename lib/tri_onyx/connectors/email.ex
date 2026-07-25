@@ -63,21 +63,24 @@ defmodule TriOnyx.Connectors.Email do
   Moves the email directory from `{workspace_agent_dir}/{source_folder}/{uid}/`
   to `{workspace_agent_dir}/{dest_folder}/{uid}/`.
 
-  Also performs the IMAP MOVE (or COPY + STORE \\Deleted + EXPUNGE).
+  Also performs the IMAP MOVE (or COPY + STORE \\Deleted + UID EXPUNGE).
+
+  The local source directory must exist, and that check runs *before* the IMAP
+  mutation: the caller's possession of the message in its own workspace is what
+  proves the UID is in scope, and the server-side move cannot be undone.
   """
   @spec move_email(String.t(), String.t(), String.t(), String.t()) ::
           {:ok, :moved} | {:error, String.t()}
   def move_email(uid, source_folder, dest_folder, workspace_agent_dir) do
-    source_dir = Path.join([workspace_agent_dir, source_folder, uid])
-    dest_parent = Path.join(workspace_agent_dir, dest_folder)
-    dest_dir = Path.join(dest_parent, uid)
-
-    with :ok <- validate_folder_name(source_folder),
+    with :ok <- validate_uid(uid),
+         :ok <- validate_folder_name(source_folder),
          :ok <- validate_folder_name(dest_folder),
+         source_dir = Path.join([workspace_agent_dir, source_folder, uid]),
+         dest_parent = Path.join(workspace_agent_dir, dest_folder),
+         :ok <- check_source_dir(source_dir),
          :ok <- imap_move(uid, source_folder, dest_folder),
-         true <- File.dir?(source_dir) || {:error, "source email directory not found: #{source_dir}"},
          :ok <- File.mkdir_p(dest_parent),
-         :ok <- rename_email_dir(source_dir, dest_dir) do
+         :ok <- rename_email_dir(source_dir, Path.join(dest_parent, uid)) do
       Logger.info("Email #{uid} moved from #{source_folder} to #{dest_folder}")
       {:ok, :moved}
     else
@@ -213,6 +216,30 @@ defmodule TriOnyx.Connectors.Email do
 
   defp validate_email_address(_), do: {:error, "email address must be a string"}
 
+  # IMAP UIDs are unsigned 32-bit integers. The value is interpolated straight
+  # into an IMAP command line, so anything else has to be rejected here: a
+  # sequence set like `1:*` would move the whole mailbox, and an embedded CRLF
+  # would carry a second, arbitrary command onto the wire.
+  @spec validate_uid(term()) :: :ok | {:error, String.t()}
+  defp validate_uid(uid) when is_binary(uid) do
+    if Regex.match?(~r/^[1-9][0-9]{0,9}$/, uid) and String.to_integer(uid) <= 4_294_967_295 do
+      :ok
+    else
+      {:error, "invalid email uid: #{inspect(uid)}"}
+    end
+  end
+
+  defp validate_uid(_), do: {:error, "email uid must be a string"}
+
+  @spec check_source_dir(String.t()) :: :ok | {:error, String.t()}
+  defp check_source_dir(source_dir) do
+    if File.dir?(source_dir) do
+      :ok
+    else
+      {:error, "source email directory not found: #{source_dir}"}
+    end
+  end
+
   @spec validate_folder_name(String.t()) :: :ok | {:error, String.t()}
   defp validate_folder_name(name) do
     cond do
@@ -302,64 +329,37 @@ defmodule TriOnyx.Connectors.Email do
 
     ssl? = Map.get(smtp_config, :ssl, true)
 
-    cacerts =
-      try do
-        :public_key.cacerts_get()
-      rescue
-        _ -> []
-      catch
-        _, _ -> []
+    with {:ok, ssl_opts} <- smtp_ssl_opts(ssl?, relay) do
+      options =
+        [
+          relay: relay,
+          port: port,
+          username: smtp_config.username,
+          password: smtp_config.password
+        ] ++ smtp_transport_opts(ssl?, port, ssl_opts)
+
+      case :gen_smtp_client.send_blocking({from, recipients, raw_message}, options) do
+        receipt when is_binary(receipt) ->
+          Logger.info("Email sent to #{to} (message_id=#{message_id})")
+          {:ok, message_id, raw_message}
+
+        {:error, reason} ->
+          {:error, "SMTP send failed: #{inspect(reason)}"}
+
+        {:error, type, detail} ->
+          {:error, "SMTP send failed: #{inspect(type)} — #{inspect(detail)}"}
       end
-
-    ssl_opts =
-      [
-        server_name_indication: relay,
-        depth: 3,
-        customize_hostname_check: [
-          match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
-        ]
-      ] ++
-        cond do
-          is_list(cacerts) and cacerts != [] ->
-            [verify: :verify_peer, cacerts: cacerts]
-
-          File.exists?("/etc/ssl/certs/ca-certificates.crt") ->
-            [verify: :verify_peer, cacertfile: ~c"/etc/ssl/certs/ca-certificates.crt"]
-
-          true ->
-            [verify: :verify_none]
-        end
-
-    options =
-      [
-        relay: relay,
-        port: port,
-        username: smtp_config.username,
-        password: smtp_config.password
-      ] ++
-        cond do
-          ssl? and port == 465 ->
-            [ssl: true, tls: :never, sockopts: ssl_opts]
-
-          ssl? ->
-            [tls: :always, tls_options: ssl_opts]
-
-          true ->
-            [tls: :never]
-        end
-
-    case :gen_smtp_client.send_blocking({from, recipients, raw_message}, options) do
-      receipt when is_binary(receipt) ->
-        Logger.info("Email sent to #{to} (message_id=#{message_id})")
-        {:ok, message_id, raw_message}
-
-      {:error, reason} ->
-        {:error, "SMTP send failed: #{inspect(reason)}"}
-
-      {:error, type, detail} ->
-        {:error, "SMTP send failed: #{inspect(type)} — #{inspect(detail)}"}
     end
   end
+
+  @spec smtp_ssl_opts(boolean(), charlist()) :: {:ok, keyword()} | {:error, String.t()}
+  defp smtp_ssl_opts(true, relay), do: tls_options(relay)
+  defp smtp_ssl_opts(false, _relay), do: {:ok, []}
+
+  @spec smtp_transport_opts(boolean(), integer(), keyword()) :: keyword()
+  defp smtp_transport_opts(true, 465, ssl_opts), do: [ssl: true, tls: :never, sockopts: ssl_opts]
+  defp smtp_transport_opts(true, _port, ssl_opts), do: [tls: :always, tls_options: ssl_opts]
+  defp smtp_transport_opts(false, _port, _ssl_opts), do: [tls: :never]
 
   @spec maybe_add_header([{String.t(), String.t()}], String.t(), String.t() | nil) ::
           [{String.t(), String.t()}]
@@ -450,8 +450,17 @@ defmodule TriOnyx.Connectors.Email do
   def with_imap_connection(imap, fun) do
     host = String.to_charlist(imap.host)
     port = imap.port
-    ssl_opts = if imap.ssl, do: [verify: :verify_none], else: []
 
+    with {:ok, ssl_opts} <- imap_ssl_opts(imap, host) do
+      do_with_imap_connection(host, port, imap, ssl_opts, fun)
+    end
+  end
+
+  @spec imap_ssl_opts(map(), charlist()) :: {:ok, keyword()} | {:error, String.t()}
+  defp imap_ssl_opts(%{ssl: true}, host), do: tls_options(host)
+  defp imap_ssl_opts(_imap, _host), do: {:ok, []}
+
+  defp do_with_imap_connection(host, port, imap, ssl_opts, fun) do
     try do
       {:ok, socket} =
         if imap.ssl do
@@ -518,6 +527,54 @@ defmodule TriOnyx.Connectors.Email do
     end
   end
 
+  # TLS options for the credential-bearing IMAP and SMTP connections.
+  #
+  # Verification is not optional here: the mailbox password is transmitted over
+  # this socket. If no trust store can be located the connection fails rather
+  # than silently downgrading to an unverified one.
+  @spec tls_options(charlist()) :: {:ok, keyword()} | {:error, String.t()}
+  defp tls_options(host) do
+    base = [
+      server_name_indication: host,
+      depth: 3,
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
+    ]
+
+    case trust_store() do
+      {:ok, trust} ->
+        {:ok, base ++ [verify: :verify_peer] ++ trust}
+
+      :error ->
+        {:error,
+         "no CA trust store available — refusing to connect without TLS certificate verification"}
+    end
+  end
+
+  @spec trust_store() :: {:ok, keyword()} | :error
+  defp trust_store do
+    cacerts =
+      try do
+        :public_key.cacerts_get()
+      rescue
+        _ -> []
+      catch
+        _, _ -> []
+      end
+
+    cond do
+      is_list(cacerts) and cacerts != [] ->
+        {:ok, [cacerts: cacerts]}
+
+      File.exists?("/etc/ssl/certs/ca-certificates.crt") ->
+        {:ok, [cacertfile: ~c"/etc/ssl/certs/ca-certificates.crt"]}
+
+      true ->
+        :error
+    end
+  end
+
   @spec get_imap_config() :: {:ok, map()} | :not_configured
   defp get_imap_config do
     case Application.get_env(:tri_onyx, :email) do
@@ -552,7 +609,8 @@ defmodule TriOnyx.Connectors.Email do
               if String.contains?(move_resp, "M002 OK") do
                 :ok
               else
-                # Fallback: COPY + STORE \Deleted + EXPUNGE for older servers
+                # Fallback for servers without RFC 6851 MOVE:
+                # COPY + STORE \Deleted + UID EXPUNGE
                 imap_send(socket, transport, "M003 UID COPY #{uid} #{imap_dest}")
                 {:ok, copy_resp} = imap_recv_until_tagged(socket, transport, "M003")
 
@@ -560,9 +618,27 @@ defmodule TriOnyx.Connectors.Email do
                   imap_send(socket, transport, "M004 UID STORE #{uid} +FLAGS (\\Deleted)")
                   {:ok, _} = imap_recv_until_tagged(socket, transport, "M004")
 
-                  imap_send(socket, transport, "M005 EXPUNGE")
-                  {:ok, _} = imap_recv_until_tagged(socket, transport, "M005")
-                  :ok
+                  # UID EXPUNGE (RFC 4315) removes only this message. A bare
+                  # EXPUNGE would permanently destroy every \Deleted-flagged
+                  # message in the folder — including ones another client
+                  # flagged and has not yet expunged.
+                  imap_send(socket, transport, "M005 UID EXPUNGE #{uid}")
+                  {:ok, expunge_resp} = imap_recv_until_tagged(socket, transport, "M005")
+
+                  if String.contains?(expunge_resp, "M005 OK") do
+                    :ok
+                  else
+                    # Server lacks UIDPLUS. Clear the flag again rather than
+                    # fall back to a bare EXPUNGE: the copy in the destination
+                    # already succeeded, so the failure mode is a duplicate
+                    # message rather than destroyed mail.
+                    imap_send(socket, transport, "M006 UID STORE #{uid} -FLAGS (\\Deleted)")
+                    {:ok, _} = imap_recv_until_tagged(socket, transport, "M006")
+
+                    {:error,
+                     "message copied to #{imap_dest} but the source copy could not be " <>
+                       "removed: server does not support UID EXPUNGE (RFC 4315)"}
+                  end
                 else
                   {:error, "IMAP MOVE/COPY failed: #{String.trim(copy_resp)}"}
                 end
@@ -864,12 +940,20 @@ defmodule TriOnyx.Connectors.Email.Poller do
       Email.imap_send(socket, transport, "A002 SELECT INBOX")
       {:ok, _select_resp} = Email.imap_recv_until_tagged(socket, transport, "A002")
 
-      # Search for new messages (IMAP UIDs start at 1, never 0)
-      search_from = if last_uid == "0", do: "1", else: last_uid
+      # Search for messages newer than the high-water mark. IMAP UIDs start at
+      # 1, never 0, so the first poll starts at 1.
+      #
+      # `N:*` is a *range*, not a lower bound: when N exceeds the highest UID
+      # in the mailbox — which happens as soon as the newest message is moved
+      # out or deleted — servers evaluate it reversed and return the highest
+      # remaining message instead of nothing. Results are therefore filtered
+      # numerically rather than trusted.
+      last_uid_int = String.to_integer(last_uid)
+      search_from = max(last_uid_int + 1, 1)
       Email.imap_send(socket, transport, "A003 UID SEARCH UID #{search_from}:*")
       {:ok, search_resp} = Email.imap_recv_until_tagged(socket, transport, "A003")
 
-      uids = parse_search_response(search_resp, last_uid)
+      uids = parse_search_response(search_resp, last_uid_int)
 
       # Fetch each new message
       emails =
@@ -881,22 +965,33 @@ defmodule TriOnyx.Connectors.Email.Poller do
         end)
         |> Enum.reject(fn {_uid, body} -> body == "" end)
 
+      # The high-water mark must never regress. Writing back a lower UID would
+      # make the next poll re-fetch and re-trigger every message above it —
+      # the re-processing loop the email agent works around by hand.
       new_last_uid =
-        case uids do
-          [] -> last_uid
-          _ -> List.last(uids)
-        end
+        [last_uid_int | Enum.map(uids, &String.to_integer/1)]
+        |> Enum.max()
+        |> Integer.to_string()
 
       {:ok, emails, new_last_uid}
     end)
   end
 
-  defp parse_search_response(response, last_uid) do
+  @doc false
+  @spec parse_search_response(String.t(), integer()) :: [String.t()]
+  def parse_search_response(response, last_uid_int) do
     case Regex.run(~r/\* SEARCH (.+)/, response) do
       [_, uid_str] ->
         uid_str
         |> String.split()
-        |> Enum.reject(fn uid -> uid == last_uid end)
+        |> Enum.flat_map(fn uid ->
+          case Integer.parse(uid) do
+            {n, ""} when n > last_uid_int -> [n]
+            _ -> []
+          end
+        end)
+        |> Enum.sort()
+        |> Enum.map(&Integer.to_string/1)
 
       _ ->
         []
