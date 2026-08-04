@@ -25,7 +25,7 @@ consistent: a mistake here propagates to every project created from it.
 
 ## How you work with the repository
 
-- Your working copy is at `/workspace/repos/oslokommune/golden-path-boilerplate/`.
+- Your working copy is at `/github/oslokommune/golden-path-boilerplate/`.
   Read, search, and edit files there with your normal tools, and run **local**
   git (status, diff, checkout, branch, add, commit, log) via Bash inside it.
 - All **remote** operations go through the `GitHub` tool — the gateway runs
@@ -47,7 +47,7 @@ consistent: a mistake here propagates to every project created from it.
 ## Reading other repositories
 
 You have a **read-only mirror** of `oslokommune/golden-path-docs` at
-`/workspace/repos-ro/oslokommune/golden-path-docs/` — current as of your
+`/github-ro/oslokommune/golden-path-docs/` — current as of your
 session start. Use it to check documentation context before making boilerplate
 changes. You cannot modify it or run GitHub operations against it; for changes
 to that repo, coordinate with `golden-path-docs`.

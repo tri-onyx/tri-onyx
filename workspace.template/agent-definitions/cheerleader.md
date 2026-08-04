@@ -4,8 +4,8 @@ description: Friendly agent that checks in periodically with encouragement and n
 model: claude-sonnet-4-6
 tools: Read, Write
 network: none
-fs_read:
-  - "/AGENTS.md"
+repos_read:
+  - core
 idle_timeout: 30m
 ---
 
@@ -25,8 +25,8 @@ Every time this heartbeat fires, share a unique motivational quote or uplifting 
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/cheerleader/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/cheerleader/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Tone

@@ -23,7 +23,6 @@ When building new features, follow these steps in order:
 
 3. **Run existing tests** — Always run the relevant test suite after making changes:
    - Elixir (gateway): `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
-   - Go (FUSE): `docker run --rm --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined -v $(pwd)/fuse:/src -w /src golang:1.22 bash -c "apt-get update -qq && apt-get install -y -qq fuse3 2>/dev/null && go test ./..."`
    - Python (connector): `docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run pytest`
 
 4. **Rebuild images and restart containers** — Before running end-to-end tests, rebuild any affected images and restart containers so the latest code is running (see Container Rebuilds below).
@@ -36,28 +35,22 @@ When building new features, follow these steps in order:
 
 ## Testing
 
-- **Always run tests inside Docker containers** — never run mix, go, or python tests directly on the host
+- **Always run tests inside Docker containers** — never run mix or python tests directly on the host
 - Elixir tests: `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
-- Go FUSE tests: `docker run --rm --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor=unconfined -v $(pwd)/fuse:/src -w /src golang:1.22 bash -c "apt-get update -qq && apt-get install -y -qq fuse3 2>/dev/null && go test ./..."`
-  - The `golang:1.22` image lacks `fusermount`, so `fuse3` must be installed for the `internal/fs` integration tests. The `pathtrie` and `policy` tests run without it.
 
-## FUSE Driver (`fuse/`)
+## Per-Agent Repos (`TriOnyx.RepoStore`)
 
-The FUSE driver (`tri-onyx-fs`) enforces per-agent filesystem access control inside agent containers. Key things to know:
+Every filesystem boundary is a git repository — there is no FUSE layer and no path-glob policy. **The mount set is the ACL.**
 
-- **The Dockerfile copies a pre-built binary** — `agent.Dockerfile` does `COPY fuse/tri-onyx-fs`. It does NOT compile from source. After changing Go code, you must recompile the binary before rebuilding the image:
-  ```
-  docker run --rm -v $(pwd)/fuse:/src -w /src golang:1.22 go build -o tri-onyx-fs ./cmd/tri-onyx-fs
-  docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .
-  ```
-- **The path trie is static, write globs are dynamic** — `policy.Expand()` walks the host directory at mount time and builds a trie of existing files. New files (that don't exist yet) are authorized by `checkWriteDynamic()` which matches against raw write glob patterns. Both `Opendir` and `Readdir` must fall back to `checkWriteDynamic` for directories that are writable but empty at mount time.
-- **Every agent gets `/agents/{name}/**` as a default write path** — injected by `Sandbox.build_fuse_policy/1` in Elixir. This is how agents write to their memory files without needing explicit `fs_write` entries.
-- **Symlinks are unconditionally denied** — they bypass path-based access control since the target is opaque.
+- Each agent owns a repo (bare at `workspace/bare/agents/<name>.git`) mounted read-write at `/workspace` in its container (its cwd). Shared repos (`core`, `definitions`, `knowledge`, ...) mount under `/repos/<name>` — rw for `repos_write` grants (the agent gets its own clone, synced through the bare repo at session boundaries), ro for `repos_read` grants (a shared `_ro` checkout of last-committed state).
+- **Gateway-only git**: no working tree contains `.git`; all git runs with explicit `--git-dir`/`--work-tree` from the gateway, so history is untamperable from inside a container.
+- **Session protocol**: trees are fast-forwarded before the container starts (`RepoStore.prepare_session/1`) and committed + pushed at session end (`Workspace.commit_session/4`) with `Taint-Level`/`Sensitivity-Level` trailers. Push conflicts on shared repos are parked on `conflict/<agent>/<session>` branches — main stays clean, nothing is lost.
+- The risk manifest keys files by canonical path: `agents/<name>/<path>` or `shared/<name>/<path>`.
 
 ## Container Rebuilds
 
 - **Always rebuild containers after making changes** that affect baked-in artifacts
-- The agent image (`tri-onyx-agent`) bakes in the FUSE binary. The `runtime/` directory (including `agent_runner.py`, `protocol.py`, `entrypoint.sh`) is bind-mounted read-only at `/opt/tri_onyx`, so **Python/runtime changes take effect on next container start without rebuilding**. Only rebuild the agent image if `agent.Dockerfile` changes or Go code changes. **Remember to recompile the FUSE binary first if Go code changed** (see FUSE Driver section above):
+- The `runtime/` directory (including `agent_runner.py`, `protocol.py`, `entrypoint.sh`) is bind-mounted read-only at `/opt/tri_onyx`, so **Python/runtime changes take effect on next container start without rebuilding**. Only rebuild the agent image if `agent.Dockerfile` changes:
   `docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .`
 - The gateway image (`tri-onyx-gateway`) mounts Elixir source at runtime, so it only needs rebuilding if `gateway.Dockerfile` itself changes:
   `docker build -t tri-onyx-gateway:latest -f gateway.Dockerfile .`

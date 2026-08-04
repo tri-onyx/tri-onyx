@@ -63,7 +63,7 @@ nav:
   - Architecture:
       - Agent Runtime: agent-runtime.md
       - Protocol: protocol.md
-      - FUSE Driver: fuse-driver-spec.md
+      - FUSE Driver (Historical): fuse-driver-spec.md
       - BCP: bcp.md
       - BCP Subscriptions: bcp-subscriptions.md
       - Web Dashboard: web-dashboard.md

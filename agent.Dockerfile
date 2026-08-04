@@ -1,10 +1,12 @@
 # Agent container image for TriOnyx
 #
 # Runs Python agents using the Claude Agent SDK inside a sandboxed
-# environment with FUSE-based filesystem access control.
+# environment. Filesystem access is defined entirely by the bind mounts
+# the gateway passes to `docker run` (per-repo working trees, rw or ro) —
+# the mount set is the ACL; there is no in-container policy engine.
 #
 # Runtime requirements:
-#   docker run --device /dev/fuse --cap-drop ALL --cap-add SYS_ADMIN ...
+#   docker run --cap-drop ALL --cap-add SETUID --cap-add SETGID ...
 #   (add --cap-add NET_ADMIN for network policy enforcement)
 
 # --- Build stages ---
@@ -23,12 +25,10 @@ RUN npm ci --production
 
 FROM python:3.12-slim
 
-# Install FUSE3 for the tri-onyx-fs driver, iptables for optional
-# network policy enforcement, tini as a minimal init process, and gosu
-# for dropping root privileges after sandbox setup.
+# Install iptables for optional network policy enforcement, tini as a
+# minimal init process, and gosu for dropping root privileges after
+# sandbox setup.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-      fuse3 \
-      libfuse3-dev \
       iptables \
       tini \
       gosu \
@@ -49,13 +49,9 @@ ADD https://download.docker.com/linux/static/stable/x86_64/docker-27.5.1.tgz /tm
 RUN tar -xzf /tmp/docker.tgz --strip-components=1 -C /usr/local/bin docker/docker \
     && rm /tmp/docker.tgz
 
-# Allow non-root FUSE mounts (the entrypoint runs as root for FUSE/iptables,
-# but this ensures fuse3 works correctly inside the container).
-RUN echo "user_allow_other" >> /etc/fuse.conf
-
 # Create a dedicated non-root user for running the agent process.
-# The entrypoint drops privileges to this user after FUSE mount and
-# iptables setup (which require root).
+# The entrypoint drops privileges to this user after iptables setup
+# (which requires root).
 # Default UID/GID 1000 matches the typical host user so bind-mounted
 # directories (e.g. browser session profiles) are accessible without
 # sudo chown.
@@ -67,10 +63,6 @@ RUN groupadd -g $HOST_GID tri_onyx \
 
 # Install UV for running the agent script with inline dependencies.
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /usr/local/bin/uv
-
-# Copy the FUSE driver binary.
-COPY fuse/tri-onyx-fs /usr/local/bin/tri-onyx-fs
-RUN chmod +x /usr/local/bin/tri-onyx-fs
 
 # Copy the Python agent runtime and browser stealth script.
 COPY runtime/agent_runner.py runtime/protocol.py runtime/browser-stealth.js /opt/tri_onyx/
@@ -117,8 +109,8 @@ RUN chown -R tri_onyx:tri_onyx /opt/uv-cache
 COPY runtime/entrypoint.sh /opt/tri_onyx/entrypoint.sh
 RUN chmod +x /opt/tri_onyx/entrypoint.sh
 
-# Create the FUSE mountpoint and bind mount target.
-RUN mkdir -p /workspace /mnt/host /etc/tri_onyx
+# Mount targets for the agent's own repo tree and granted repos.
+RUN mkdir -p /workspace /repos /github /github-ro
 
 WORKDIR /workspace
 

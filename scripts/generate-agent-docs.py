@@ -4,7 +4,9 @@
 # ///
 """Generate MkDocs pages for each agent definition.
 
-Reads workspace/agent-definitions/*.md, parses YAML frontmatter,
+Reads live definitions from the `definitions` shared repo's read-only
+checkout (workspace/trees/_ro/definitions/*.md), falling back to the
+checked-in template. Parses YAML frontmatter
 and writes docs/agents/<name>.md with a config table + system prompt.
 Also generates docs/agents/index.md and updates the Agents nav section
 in mkdocs.yml.
@@ -29,9 +31,9 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
-_WORKSPACE_DIR = ROOT / "workspace" / "agent-definitions"
+_LIVE_DIR = ROOT / "workspace" / "trees" / "_ro" / "definitions"
 _TEMPLATE_DIR = ROOT / "workspace.template" / "agent-definitions"
-DEFINITIONS_DIR = _WORKSPACE_DIR if _WORKSPACE_DIR.is_dir() else _TEMPLATE_DIR
+DEFINITIONS_DIR = _LIVE_DIR if any(_LIVE_DIR.glob("*.md")) else _TEMPLATE_DIR
 OUTPUT_DIR = ROOT / "docs" / "agents"
 MKDOCS_YML = ROOT / "mkdocs.yml"
 RISK_JSON = ROOT / "tmp" / "agent_risk.json"
@@ -149,7 +151,7 @@ def format_bcp_channels(channels: list[dict]) -> str:
         rates = ch.get('rates', {})
         rates_str = ", ".join(f"{k}: {v}" for k, v in rates.items()) if rates else "—"
         lines.append(
-            f"| `{ch['peer']}` | {ch['role']} | {ch['max_category']} | {rates_str} |"
+            f"| `{ch['peer']}` | {ch['role']} | {ch.get('max_category', '—')} | {rates_str} |"
         )
     return "\n".join(lines)
 
@@ -188,8 +190,8 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
     trionyx_repo = meta.get("trionyx_repo", False)
     base_taint = meta.get("base_taint", "low")
     heartbeat_every = meta.get("heartbeat_every", "")
-    fs_read = meta.get("fs_read") or []
-    fs_write = meta.get("fs_write") or []
+    repos_read = meta.get("repos_read") or []
+    repos_write = meta.get("repos_write") or []
     send_to = meta.get("send_to") or []
     receive_from = meta.get("receive_from") or []
     plugins = meta.get("plugins") or []
@@ -239,13 +241,17 @@ def generate_agent_page(meta: dict, body: str, risk: dict | None = None) -> str:
         sections.append(f"| {label} | {value} |")
     sections.append("")
 
-    # Filesystem access
-    if fs_read or fs_write:
-        sections.append("## Filesystem Access\n")
-        if fs_read:
-            sections.append("**Read:** " + ", ".join(f"`{p}`" for p in fs_read) + "\n")
-        if fs_write:
-            sections.append("**Write:** " + ", ".join(f"`{p}`" for p in fs_write) + "\n")
+    # Repository access
+    if repos_read or repos_write:
+        sections.append("## Repository Access\n")
+        if repos_read:
+            sections.append(
+                "**Repos (read-only):** " + ", ".join(f"`{r}`" for r in repos_read) + "\n"
+            )
+        if repos_write:
+            sections.append(
+                "**Repos (read-write):** " + ", ".join(f"`{r}`" for r in repos_write) + "\n"
+            )
 
     # Communication
     if send_to or receive_from or bcp_channels:

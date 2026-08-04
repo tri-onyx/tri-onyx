@@ -2,37 +2,41 @@ defmodule TriOnyx.GitProvenance do
   @moduledoc """
   Tracks file sensitivity through git commit metadata.
 
-  Every file in the workspace carries a sensitivity level derived from the
-  most recent TriOnyx commit that touched it. This is encoded as a
-  `Sc-Sensitivity:` trailer in the commit message.
+  Every file carries a sensitivity level derived from the most recent
+  commit that touched it in its owning repo. Session-end commits carry
+  `Sensitivity-Level:` trailers (see `TriOnyx.Workspace.commit_session/4`);
+  this module also honours the older `Sc-Sensitivity:` trailer for
+  history predating the repo split.
 
-  Read operations consult this provenance to determine the sensitivity of
-  the data entering the agent context. Write operations record the agent's
-  current taint and sensitivity levels in a new commit.
+  Files are addressed by canonical path (`agents/<name>/<path>` or
+  `shared/<name>/<path>`), resolved to the owning repo via
+  `TriOnyx.Workspace.resolve_canonical/1`.
 
-  A human operator can override any file's sensitivity to `:low` by
-  committing with `Sc-Override: non-sensitive`.
+  A human operator can override any file's sensitivity to `:low` via
+  `mark_non_sensitive/1`, which commits with `Sc-Override: non-sensitive`.
   """
 
   require Logger
 
-  @trailer_prefix "Sc-Sensitivity:"
+  alias TriOnyx.RepoStore
+  alias TriOnyx.Workspace
+
+  @sensitivity_trailers ["Sc-Sensitivity:", "Sensitivity-Level:"]
   @override_prefix "Sc-Override:"
 
   @doc """
-  Returns the git-provenance sensitivity level for a file.
+  Returns the git-provenance sensitivity level for a canonical path.
 
-  Parses the most recent commit message that touched `file_path` in the
-  given workspace directory, looking for a `Sc-Sensitivity:` trailer.
-  Returns `:low` if no trailer is found or if the file has no git history.
+  Parses the most recent commit message that touched the file in its
+  owning repo, looking for a sensitivity trailer. Returns `:low` if no
+  trailer is found, the file has no history, or the path is invalid.
 
-  If the most recent TriOnyx commit has `Sc-Override: non-sensitive`,
-  returns `:low` regardless of any prior sensitivity.
+  If the most recent commit has `Sc-Override: non-sensitive`, returns
+  `:low` regardless of any prior sensitivity.
   """
-  @spec file_sensitivity(String.t(), String.t()) :: :low | :medium | :high
-  def file_sensitivity(workspace_path, file_path)
-      when is_binary(workspace_path) and is_binary(file_path) do
-    case last_commit_message(workspace_path, file_path) do
+  @spec file_sensitivity(String.t()) :: :low | :medium | :high
+  def file_sensitivity(canonical_path) when is_binary(canonical_path) do
+    case last_commit_message(canonical_path) do
       {:ok, message} ->
         if has_override?(message) do
           :low
@@ -48,80 +52,70 @@ defmodule TriOnyx.GitProvenance do
   @doc """
   Returns true if the most recent commit for the file is an override commit.
   """
-  @spec non_sensitive_override?(String.t(), String.t()) :: boolean()
-  def non_sensitive_override?(workspace_path, file_path)
-      when is_binary(workspace_path) and is_binary(file_path) do
-    case last_commit_message(workspace_path, file_path) do
+  @spec non_sensitive_override?(String.t()) :: boolean()
+  def non_sensitive_override?(canonical_path) when is_binary(canonical_path) do
+    case last_commit_message(canonical_path) do
       {:ok, message} -> has_override?(message)
       :error -> false
     end
   end
 
   @doc """
-  Records an agent write by committing the file with sensitivity metadata.
+  Marks a file as non-sensitive by committing an override.
 
-  Stages the file, then commits with `Sc-Agent`, `Sc-Taint`, and
-  `Sc-Sensitivity` trailers in the commit message.
+  Touches the file in the appropriate working tree (the agent's own tree
+  for agent repos, the gateway tree for shared repos) so git records a
+  change, then commits with `Sc-Override: non-sensitive`.
   """
-  @spec record_write(String.t(), String.t(), String.t(), atom(), atom()) ::
-          :ok | {:error, term()}
-  def record_write(workspace_path, file_path, agent_name, taint, sensitivity)
-      when is_binary(workspace_path) and is_binary(file_path) and is_binary(agent_name) and
-             is_atom(taint) and is_atom(sensitivity) do
-    safe = safe_dir_args(workspace_path)
-
-    case System.cmd("git", safe ++ ["add", "--", file_path],
-           cd: workspace_path,
-           stderr_to_stdout: true
-         ) do
-      {_, 0} ->
-        commit_msg =
-          "[sc] agent write: #{agent_name}\n\n" <>
-            "Sc-Agent: #{agent_name}\n" <>
-            "Sc-Taint: #{taint}\n" <>
-            "Sc-Sensitivity: #{sensitivity}"
-
-        author = "#{agent_name} <#{agent_name}@tri_onyx>"
-
-        case System.cmd(
-               "git",
-               safe ++ ["commit", "--author=#{author}", "-m", commit_msg],
-               cd: workspace_path,
-               stderr_to_stdout: true,
-               env: committer_env()
-             ) do
-          {_, 0} ->
-            :ok
-
-          {output, code} ->
-            Logger.warning("GitProvenance: commit failed (exit #{code}): #{output}")
-            {:error, {:commit_failed, output}}
+  @spec mark_non_sensitive(String.t()) :: :ok | {:error, term()}
+  def mark_non_sensitive(canonical_path) when is_binary(canonical_path) do
+    with {:ok, {repo_id, rel_path}} <- resolve(canonical_path) do
+      principal =
+        case repo_id do
+          {:agent, name} -> name
+          {:shared, _} -> :gw
         end
 
-      {output, code} ->
-        Logger.warning("GitProvenance: git add failed (exit #{code}): #{output}")
-        {:error, {:add_failed, output}}
+      with :ok <- RepoStore.sync_tree(principal, repo_id),
+           :ok <- touch_file(RepoStore.tree_dir(principal, repo_id), rel_path) do
+        timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
+
+        case RepoStore.commit_and_push(principal, repo_id,
+               author: "user",
+               message: "[sc] sensitivity override: non-sensitive",
+               trailers: [
+                 "Sc-Override: non-sensitive",
+                 "Sc-Override-By: user",
+                 "Sc-Override-At: #{timestamp}"
+               ],
+               session_id: "override",
+               paths: [rel_path]
+             ) do
+          {:ok, sha} when is_binary(sha) -> :ok
+          {:ok, :no_changes} -> {:error, :no_changes}
+          {:ok, {:conflict, branch}} -> {:error, {:conflict, branch}}
+          {:error, reason} -> {:error, reason}
+        end
+      end
     end
   end
 
-  @doc """
-  Marks a file as non-sensitive by committing an override.
+  # --- Private ---
 
-  Creates a commit with `Sc-Override: non-sensitive` that overrides any
-  prior sensitivity recorded by agent writes.
-  """
-  @spec mark_non_sensitive(String.t(), String.t()) :: :ok | {:error, term()}
-  def mark_non_sensitive(workspace_path, file_path)
-      when is_binary(workspace_path) and is_binary(file_path) do
-    safe = safe_dir_args(workspace_path)
-    timestamp = DateTime.utc_now() |> DateTime.to_iso8601()
-    full_path = Path.join(workspace_path, file_path)
+  defp resolve(canonical_path) do
+    case Workspace.resolve_canonical(canonical_path) do
+      {:ok, resolved} -> {:ok, resolved}
+      :error -> {:error, :invalid_path}
+    end
+  end
 
-    # Touch the file so git records a change and the override commit appears
-    # in `git log -- <file_path>`. We read and re-write with a trailing newline.
+  # Toggle the trailing newline to guarantee a diff from the previous
+  # version so the override commit appears in `git log -- <path>`.
+  defp touch_file(tree, rel_path) do
+    full_path = Path.join(tree, rel_path)
+
     case File.read(full_path) do
       {:ok, content} ->
-        # Toggle trailing newline to guarantee a diff from the previous version
         touched =
           if String.ends_with?(content, "\n") do
             String.trim_trailing(content, "\n")
@@ -130,37 +124,7 @@ defmodule TriOnyx.GitProvenance do
           end
 
         File.write!(full_path, touched)
-
-        case System.cmd("git", safe ++ ["add", "--", file_path],
-               cd: workspace_path,
-               stderr_to_stdout: true
-             ) do
-          {_, 0} ->
-            commit_msg =
-              "[sc] sensitivity override: non-sensitive\n\n" <>
-                "Sc-Override: non-sensitive\n" <>
-                "Sc-Override-By: user\n" <>
-                "Sc-Override-At: #{timestamp}"
-
-            case System.cmd(
-                   "git",
-                   safe ++ ["commit", "-m", commit_msg],
-                   cd: workspace_path,
-                   stderr_to_stdout: true,
-                   env: committer_env()
-                 ) do
-              {_, 0} ->
-                :ok
-
-              {output, code} ->
-                Logger.warning("GitProvenance: override commit failed (exit #{code}): #{output}")
-                {:error, {:commit_failed, output}}
-            end
-
-          {output, code} ->
-            Logger.warning("GitProvenance: git add failed (exit #{code}): #{output}")
-            {:error, {:add_failed, output}}
-        end
+        :ok
 
       {:error, reason} ->
         Logger.warning("GitProvenance: cannot read file #{full_path}: #{inspect(reason)}")
@@ -168,27 +132,14 @@ defmodule TriOnyx.GitProvenance do
     end
   end
 
-  # --- Private ---
-
-  @spec last_commit_message(String.t(), String.t()) :: {:ok, String.t()} | :error
-  defp last_commit_message(workspace_path, file_path) do
-    safe = safe_dir_args(workspace_path)
-
-    case System.cmd(
-           "git",
-           safe ++ ["log", "--format=%B", "-1", "--", file_path],
-           cd: workspace_path,
-           stderr_to_stdout: true
-         ) do
-      {"", 0} ->
-        # No commits for this file
-        :error
-
-      {output, 0} ->
-        {:ok, String.trim(output)}
-
-      {_, _} ->
-        :error
+  @spec last_commit_message(String.t()) :: {:ok, String.t()} | :error
+  defp last_commit_message(canonical_path) do
+    with {:ok, {repo_id, rel_path}} <- resolve(canonical_path),
+         {:ok, output} when output != "" <-
+           RepoStore.log(repo_id, ["--format=%B", "-1", "--", rel_path]) do
+      {:ok, String.trim(output)}
+    else
+      _ -> :error
     end
   end
 
@@ -199,9 +150,11 @@ defmodule TriOnyx.GitProvenance do
     |> Enum.find_value(:low, fn line ->
       line = String.trim(line)
 
-      if String.starts_with?(line, @trailer_prefix) do
+      prefix = Enum.find(@sensitivity_trailers, &String.starts_with?(line, &1))
+
+      if prefix do
         line
-        |> String.trim_leading(@trailer_prefix)
+        |> String.trim_leading(prefix)
         |> String.trim()
         |> String.downcase()
         |> case do
@@ -227,16 +180,5 @@ defmodule TriOnyx.GitProvenance do
         |> String.trim()
         |> String.downcase() == "non-sensitive"
     end)
-  end
-
-  @spec safe_dir_args(String.t()) :: [String.t()]
-  defp safe_dir_args(workspace_path), do: TriOnyx.Workspace.git_safe_args(workspace_path)
-
-  @spec committer_env() :: [{String.t(), String.t()}]
-  defp committer_env do
-    [
-      {"GIT_COMMITTER_NAME", "TriOnyx"},
-      {"GIT_COMMITTER_EMAIL", "gateway@tri_onyx"}
-    ]
   end
 end

@@ -71,12 +71,12 @@ defmodule Mix.Tasks.TriOnyx.Status do
     Mix.shell().info("    Effective risk: #{RiskScorer.format_risk(effective_risk)}")
     Mix.shell().info("    Network:        #{format_network(definition.network)}")
 
-    if definition.fs_read != [] do
-      Mix.shell().info("    FS read:        #{Enum.join(definition.fs_read, ", ")}")
+    if definition.repos_read != [] do
+      Mix.shell().info("    Repos (ro):     #{Enum.join(definition.repos_read, ", ")}")
     end
 
-    if definition.fs_write != [] do
-      Mix.shell().info("    FS write:       #{Enum.join(definition.fs_write, ", ")}")
+    if definition.repos_write != [] do
+      Mix.shell().info("    Repos (rw):     #{Enum.join(definition.repos_write, ", ")}")
     end
 
     Mix.shell().info("")

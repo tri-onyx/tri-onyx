@@ -63,14 +63,8 @@ lib/tri_onyx/               Elixir gateway (OTP application)
 runtime/                      Python agent runtime (bind-mounted into containers)
   agent_runner.py               Claude Agent SDK bridge (stdin/stdout JSON Lines)
   protocol.py                   Message types and emitters
-  entrypoint.sh                 Container startup (FUSE mount, iptables, exec agent)
+  entrypoint.sh                 Container startup (iptables, exec agent)
   browser-stealth.js            Headless browser anti-detection patches
-
-fuse/                         Go FUSE driver
-  cmd/tri-onyx-fs/              CLI entry point
-  internal/fs/                  FUSE node implementation
-  internal/policy/              JSON policy parser and glob expansion
-  internal/pathtrie/            Path trie for O(1) access checks
 
 connector/                    Chat platform bridge (Python)
   connector/main.py             Connector entry point
@@ -105,6 +99,17 @@ scripts/                      Utility scripts
   install-hooks.sh              Install pre-commit hooks (secret leak prevention)
   safe-push.sh                  Pre-push safety checks
 
-workspace/agent-definitions/  Agent definitions (markdown + YAML frontmatter)
-workspace/plugins/            Installed plugins (newsagg, bookmarks, diary, etc.)
+workspace/                    Gateway-managed git repositories (agent state)
+  bare/                         Bare repos — source of truth (per-agent + shared:
+                                core, definitions, knowledge)
+  trees/                        Working trees the gateway manages and mounts
+                                (trees/<agent>/self, trees/_ro/..., trees/_gw/...)
+  gitdirs/                      Git metadata kept outside the working trees
+  data/                         Non-repo data (browser-sessions, github clones at
+                                data/github + data/github-ro)
+  archive/                      Archived legacy single-repo workspace
 ```
+
+Agent definitions live in the shared `definitions` repo; plugins live inside the
+owning agent's repo (`/workspace/plugins/<name>`) or a shared repo
+(`/repos/knowledge/plugins/<name>`).

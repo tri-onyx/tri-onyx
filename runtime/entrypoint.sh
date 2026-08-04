@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
 # TriOnyx agent container entrypoint
 #
-# Prepares the sandbox environment and starts the agent runner:
-#   1. Write FUSE policy from environment variable
-#   2. Mount tri-onyx-fs FUSE driver
-#   3. (Optional) Apply iptables network policy
-#   4. Lock down /mnt/host bind mount (chmod 700)
-#   5. Drop root privileges via gosu and exec the agent runner
+# The container's filesystem access is fully defined by its bind mounts
+# (the gateway mounts exactly the repo working trees this agent is granted,
+# rw or ro — see TriOnyx.Sandbox). There is no in-container filesystem
+# policy: the mount set is the ACL.
 #
-# Required environment variables:
-#   TRI_ONYX_FS_POLICY  — JSON object with fs_read/fs_write arrays
+# Startup sequence:
+#   1. Install plugin Python dependencies (network still unrestricted)
+#   2. Apply iptables network policy
+#   3. (Optional) Configure browser capability
+#   4. Drop root privileges via gosu and exec the agent runner
 #
 # Required environment variables:
 #   TRI_ONYX_NETWORK_POLICY — "none", "outbound", or comma-separated
@@ -31,78 +32,27 @@ if [ -n "${TRI_ONYX_MODE:-}" ]; then
 fi
 
 # -----------------------------------------------------------------------
-# 1. FUSE filesystem policy
-# -----------------------------------------------------------------------
-
-POLICY_FILE="/etc/tri_onyx/fs-policy.json"
-
-if [ -z "${TRI_ONYX_FS_POLICY:-}" ]; then
-    die "TRI_ONYX_FS_POLICY environment variable is not set"
-fi
-
-# Write the policy JSON to a file for the FUSE driver.
-echo "$TRI_ONYX_FS_POLICY" > "$POLICY_FILE"
-
-# Validate it is parseable JSON.
-if ! python3 -c "import json, sys; json.load(open(sys.argv[1]))" "$POLICY_FILE" 2>/dev/null; then
-    die "TRI_ONYX_FS_POLICY is not valid JSON"
-fi
-
-log "FUSE policy written to $POLICY_FILE"
-
-# -----------------------------------------------------------------------
-# 2. Mount FUSE filesystem
-# -----------------------------------------------------------------------
-
-# Start the FUSE driver in the background. It mirrors /mnt/host to
-# /workspace with access control from the policy file.
-tri-onyx-fs \
-    --config "$POLICY_FILE" \
-    --source /mnt/host \
-    --mountpoint /workspace \
-    --allow-other 2>&1 1>/dev/null &
-
-FUSE_PID=$!
-log "tri-onyx-fs started (pid=$FUSE_PID)"
-
-# Wait for the FUSE mount to become ready by checking if /workspace is a
-# mountpoint. Poll every 100ms with a 10-second timeout.
-MOUNT_TIMEOUT_ITERATIONS=100  # 100 * 0.1s = 10s
-WAITED=0
-while ! mountpoint -q /workspace 2>/dev/null; do
-    if ! kill -0 "$FUSE_PID" 2>/dev/null; then
-        die "tri-onyx-fs exited before mount was ready"
-    fi
-    if [ "$WAITED" -ge "$MOUNT_TIMEOUT_ITERATIONS" ]; then
-        die "Timed out waiting for FUSE mount on /workspace (10s)"
-    fi
-    sleep 0.1
-    WAITED=$((WAITED + 1))
-done
-
-log "FUSE mount ready at /workspace"
-
-# -----------------------------------------------------------------------
-# 2.5. Install plugin Python dependencies
+# 1. Install plugin Python dependencies
 # -----------------------------------------------------------------------
 # Plugins with a pyproject.toml need their dependencies available in the
-# container. Install them into the system Python (no venv, no symlinks)
-# BEFORE network lockdown so PyPI is reachable. Uses /mnt/host (raw bind
-# mount) to avoid FUSE symlink restrictions during the build/install.
+# container. TRI_ONYX_PLUGIN_PATHS is a comma-separated list of
+# name=container-path pairs pointing into the mounted repo trees. Install
+# into the system Python BEFORE network lockdown so PyPI is reachable.
 
-if [ -n "${TRI_ONYX_PLUGINS:-}" ]; then
-    IFS=',' read -ra PLUGINS <<< "$TRI_ONYX_PLUGINS"
-    for plugin in "${PLUGINS[@]}"; do
-        pyproject="/mnt/host/plugins/${plugin}/pyproject.toml"
-        if [ -f "$pyproject" ]; then
-            log "Installing Python deps for plugin '${plugin}'"
-            uv pip install --system "/mnt/host/plugins/${plugin}" 2>&1 | while read -r line; do log "  $line"; done
+if [ -n "${TRI_ONYX_PLUGIN_PATHS:-}" ]; then
+    IFS=',' read -ra PLUGIN_ENTRIES <<< "$TRI_ONYX_PLUGIN_PATHS"
+    for entry in "${PLUGIN_ENTRIES[@]}"; do
+        plugin="${entry%%=*}"
+        plugin_path="${entry#*=}"
+        if [ -f "${plugin_path}/pyproject.toml" ]; then
+            log "Installing Python deps for plugin '${plugin}' from ${plugin_path}"
+            uv pip install --system "$plugin_path" 2>&1 | while read -r line; do log "  $line"; done
         fi
     done
 fi
 
 # -----------------------------------------------------------------------
-# 2.6. Ensure Playwright browsers match the Python playwright package
+# 1.5. Ensure Playwright browsers match the Python playwright package
 # -----------------------------------------------------------------------
 # The Docker image pre-installs Chromium for the Node.js playwright-cli,
 # but plugins may use the Python playwright package which tracks a
@@ -118,7 +68,7 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
 fi
 
 # -----------------------------------------------------------------------
-# 3. Network policy
+# 2. Network policy
 # -----------------------------------------------------------------------
 
 if [ -z "${TRI_ONYX_NETWORK_POLICY:-}" ]; then
@@ -218,7 +168,7 @@ else
 fi
 
 # -----------------------------------------------------------------------
-# 3.5. Browser capability (playwright-cli)
+# 3. Browser capability (playwright-cli)
 # -----------------------------------------------------------------------
 
 if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
@@ -235,10 +185,10 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
     chown -R tri_onyx:tri_onyx /home/tri_onyx/.browser-sessions 2>/dev/null || true
     chmod -R u+rwX,g+rX,o+rX /home/tri_onyx/.browser-sessions 2>/dev/null || true
 
-    # Create snapshot output directory inside the FUSE-mounted workspace.
-    # This path is covered by the default write policy /agents/<name>/**
-    # so the agent can read snapshots via the Read tool.
-    BROWSER_OUTPUT_DIR="/workspace/agents/${AGENT_NAME}/.playwright-cli"
+    # Create snapshot output directory inside the agent's own repo tree
+    # (mounted rw at /workspace) so the agent can read snapshots via the
+    # Read tool.
+    BROWSER_OUTPUT_DIR="/workspace/.playwright-cli"
     mkdir -p "$BROWSER_OUTPUT_DIR"
     chown tri_onyx:tri_onyx "$BROWSER_OUTPUT_DIR" 2>/dev/null || true
 
@@ -248,8 +198,8 @@ if [ "${TRI_ONYX_BROWSER:-}" = "true" ]; then
     cp /opt/tri_onyx/browser-stealth.js /home/tri_onyx/.browser-stealth.js
     chown tri_onyx:tri_onyx /home/tri_onyx/.browser-stealth.js
 
-    # Generate playwright-cli config outside the FUSE mount so it does not
-    # require a FUSE policy entry. The wrapper script passes --config.
+    # Generate playwright-cli config in the tri_onyx home directory. The
+    # wrapper script passes --config.
     CONFIG_PATH="/home/tri_onyx/.playwright-cli.config.json"
     cat > "$CONFIG_PATH" <<PCEOF
 {
@@ -299,29 +249,15 @@ BEOF
 fi
 
 # -----------------------------------------------------------------------
-# 4. Hide /mnt/host and drop privileges
+# 4. Drop privileges
 # -----------------------------------------------------------------------
 
-# The FUSE driver (already running as a background process) retains its
-# original mount namespace and continues to access /mnt/host normally.
-#
-# For the agent process, we create a NEW mount namespace (unshare --mount)
-# and overmount /mnt/host with an empty tmpfs. This makes the real bind
-# mount invisible to the agent, preventing bypass via direct path access,
-# /proc/self/cwd tricks, or any other route to the backing filesystem.
-#
-# After hiding /mnt/host, gosu drops root privileges so the agent runs
-# as the unprivileged tri_onyx user with no capabilities.
-
-# Repo clones under /workspace/repos are owned by the gateway (root) but
-# accessed as tri_onyx through FUSE; git refuses to operate on repos with
-# mismatched ownership unless marked safe.
+# GitHub clones under /github are created by the gateway (possibly as a
+# different UID); git refuses to operate on repos with mismatched
+# ownership unless marked safe.
 if command -v git >/dev/null 2>&1; then
     gosu tri_onyx git config --global --add safe.directory '*' || true
 fi
 
 log "Dropping privileges to tri_onyx user"
-exec unshare --mount -- sh -c '
-    mount -t tmpfs none /mnt/host &&
-    exec gosu tri_onyx uv run --script /opt/tri_onyx/agent_runner.py
-'
+exec gosu tri_onyx uv run --script /opt/tri_onyx/agent_runner.py

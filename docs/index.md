@@ -88,11 +88,11 @@ graph TB
         direction LR
         subgraph agentA["Agent A"]
             PA[Python + Claude SDK]
-            FA[FUSE Driver]
+            FA[Per-agent repo mounts]
         end
         subgraph agentB["Agent B"]
             PB[Python + Claude SDK]
-            FB[FUSE Driver]
+            FB[Per-agent repo mounts]
         end
     end
 
@@ -114,7 +114,7 @@ graph TB
 <small style="color: #8b949e;">
 <strong>Gateway</strong> &mdash; Non-agentic control plane. No LLM. No autonomy. Deterministic security boundary.<br/>
 <strong>Agents</strong> &mdash; Python + Claude SDK inside Docker. Communicate with the gateway over JSON Lines.<br/>
-<strong>FUSE</strong> &mdash; Go driver enforcing per-file read/write policies. Logs all access.<br/>
+<strong>Repo mounts</strong> &mdash; per-agent git repositories bind-mounted read-write or read-only. The mount set is the ACL.<br/>
 <strong>Connector</strong> &mdash; Bridges the gateway to Matrix, Slack, or email.
 </small>
 </div>
@@ -126,14 +126,14 @@ graph TB
 </div>
 
 <div class="tx-features">
-<div class="tx-feature"><span class="tx-feature__icon">&#x1F4E6;</span><h3>Isolated containers</h3><p>Each agent runs in its own Docker container with a per-agent FUSE filesystem, network rules, and no shared state.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F4E6;</span><h3>Isolated containers</h3><p>Each agent runs in its own Docker container with per-agent repo mounts, network rules, and no shared state.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F6E1;</span><h3>Taint tracking</h3><p>Biba integrity model tracks what each agent has been exposed to. Untrusted web data, user uploads, and API responses all carry taint.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F512;</span><h3>Sensitivity labels</h3><p>Bell-LaPadula confidentiality tracks access to secrets, credentials, and private data. The two axes are independent.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F504;</span><h3>Information flow enforcement</h3><p>The gateway intercepts all inter-agent messages and blocks flows that violate integrity or confidentiality constraints.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F4AC;</span><h3>Bandwidth-Constrained Protocol</h3><p>Tainted agents communicate with clean agents through structured, bandwidth-limited, human-approvable message formats.</p></div>
-<div class="tx-feature"><span class="tx-feature__icon">&#x1F4C2;</span><h3>FUSE filesystem</h3><p>Custom Go driver enforces per-file read/write policies inside each container. O(1) path-trie lookups, structured access logging.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F4C2;</span><h3>Per-agent git repositories</h3><p>Each agent owns a git repo mounted read-write at <code>/workspace</code>; shared repos mount at <code>/repos/&lt;name&gt;</code>. The mount set is the ACL, and the gateway commits every session with provenance trailers.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F310;</span><h3>Browser sessions</h3><p>Agents can get a headless Chromium browser with persistent login sessions from the host. No credential sharing.</p></div>
-<div class="tx-feature"><span class="tx-feature__icon">&#x1F9E9;</span><h3>Plugin system</h3><p>Reusable agent extensions (news aggregation, bookmarks, diary) installable from git repos with FUSE-enforced access.</p></div>
+<div class="tx-feature"><span class="tx-feature__icon">&#x1F9E9;</span><h3>Plugin system</h3><p>Reusable agent extensions (news aggregation, bookmarks, diary) that live inside an agent's own repo or a shared repo — access follows the repo mounts.</p></div>
 <div class="tx-feature"><span class="tx-feature__icon">&#x1F50D;</span><h3>Auditable everything</h3><p>Structured logs for file access, tool calls, message routing, and policy violations. Queryable audit API.</p></div>
 </div>
 
@@ -149,15 +149,12 @@ graph TB
     # Gateway image (Elixir/OTP)
     docker build -f gateway.Dockerfile -t tri-onyx-gateway:latest .
 
-    # Agent runtime image (Python + FUSE sandbox)
+    # Agent runtime image (Python + Claude SDK)
     docker build -f agent.Dockerfile -t tri-onyx-agent:latest .
 
     # Connector image (Python, for Matrix chat bridge)
     docker build -f connector.Dockerfile -t trionyx-connector:latest .
     ```
-
-    The agent image requires a pre-built FUSE driver binary at `fuse/tri-onyx-fs`.
-    See the [FUSE Driver spec](fuse-driver-spec.md) for build instructions.
 
 === "Run"
 
@@ -182,14 +179,6 @@ graph TB
     # Elixir gateway tests
     docker run --rm -v $(pwd):/app -w /app \
       tri-onyx-gateway:latest mix test
-
-    # Go FUSE driver tests
-    docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
-      --security-opt apparmor=unconfined \
-      -v $(pwd)/fuse:/src -w /src golang:1.22 \
-      bash -c "apt-get update -qq && \
-        apt-get install -y -qq fuse3 2>/dev/null && \
-        go test ./..."
 
     # Python connector tests
     docker run --rm -v $(pwd)/connector:/app -w /app \

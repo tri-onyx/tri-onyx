@@ -50,19 +50,19 @@
   </div>
 </div>
 
-{% if agent.fs_read or agent.fs_write %}
+{% if agent.repos_read or agent.repos_write %}
 <div class="ctx-section">
-  <div class="ctx-section-title">Filesystem</div>
-  {% if agent.fs_read %}
-    <div class="ctx-fs-label">Read</div>
-    {% for path in agent.fs_read %}
-      <div class="ctx-path">{{ path }}</div>
+  <div class="ctx-section-title">Repos</div>
+  {% if agent.repos_write %}
+    <div class="ctx-fs-label">Read-write</div>
+    {% for repo in agent.repos_write %}
+      <div class="ctx-path">{{ repo }}</div>
     {% endfor %}
   {% endif %}
-  {% if agent.fs_write %}
-    <div class="ctx-fs-label">Write</div>
-    {% for path in agent.fs_write %}
-      <div class="ctx-path">{{ path }}</div>
+  {% if agent.repos_read %}
+    <div class="ctx-fs-label">Read-only</div>
+    {% for repo in agent.repos_read %}
+      <div class="ctx-path">{{ repo }}</div>
     {% endfor %}
   {% endif %}
 </div>

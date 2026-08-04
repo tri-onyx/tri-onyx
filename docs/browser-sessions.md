@@ -6,7 +6,7 @@ Agents with `browser: true` get a headless Chromium browser inside their contain
 
 ```
 Host                                    Agent Container
-workspace/browser-sessions/<agent>/  →  /home/tri_onyx/.browser-sessions/  (volume mount)
+workspace/data/browser-sessions/<agent>/  →  /home/tri_onyx/.browser-sessions/  (volume mount)
 ```
 
 The gateway mounts the agent's session directory into the container. The entrypoint generates a `playwright-cli` config that points to this directory as `userDataDir`. A wrapper script at `/usr/local/bin/browser` passes the config automatically, so agents just run `browser open`, `browser goto https://...`, etc.
@@ -26,19 +26,19 @@ This installs the Playwright npm package and downloads the Chromium browser bina
 ### 2. Create the session directory
 
 ```bash
-mkdir -p workspace/browser-sessions/<agent-name>
+mkdir -p workspace/data/browser-sessions/<agent-name>
 ```
 
 For example, for the `twitter` agent:
 
 ```bash
-mkdir -p workspace/browser-sessions/twitter
+mkdir -p workspace/data/browser-sessions/twitter
 ```
 
 ### 3. Open a browser with a persistent profile
 
 ```bash
-node playwright-cli/playwright-cli.js open --browser=chromium --headed --persistent --profile=workspace/browser-sessions/twitter
+node playwright-cli/playwright-cli.js open --browser=chromium --headed --persistent --profile=workspace/data/browser-sessions/twitter
 ```
 
 This opens a visible Chromium window using the profile directory for storage. All cookies, localStorage, and session data are written to this directory.
@@ -47,7 +47,7 @@ For convenience, you can alias this:
 
 ```bash
 alias pcli='node playwright-cli/playwright-cli.js'
-pcli open --browser=chromium --persistent --profile=workspace/browser-sessions/twitter
+pcli open --browser=chromium --persistent --profile=workspace/data/browser-sessions/twitter
 ```
 
 ### 4. Log in
@@ -67,7 +67,7 @@ Or just close the window. The profile directory now contains the authenticated s
 Re-open to confirm:
 
 ```bash
-node playwright-cli/playwright-cli.js open --browser=chromium --headed --persistent --profile=workspace/browser-sessions/twitter
+node playwright-cli/playwright-cli.js open --browser=chromium --headed --persistent --profile=workspace/data/browser-sessions/twitter
 node playwright-cli/playwright-cli.js goto https://x.com/home
 node playwright-cli/playwright-cli.js snapshot
 node playwright-cli/playwright-cli.js close
@@ -111,7 +111,7 @@ Each command returns a snapshot of the page's accessibility tree with element re
 ## Directory layout
 
 ```
-workspace/browser-sessions/
+workspace/data/browser-sessions/
   twitter/              # Chromium profile for the twitter agent
     Default/
       Cookies
@@ -133,4 +133,4 @@ These are standard Chromium user data directories. Do not manually edit files in
 
 **Chromium crashes inside container** — The entrypoint passes `--no-sandbox` and `--disable-dev-shm-usage` flags to Chromium. If crashes persist, check that the container has enough memory (Chromium needs ~200-300MB).
 
-**Empty session directory** — If `workspace/browser-sessions/<agent>/` doesn't exist on the host, the volume mount creates an empty directory and the agent gets a fresh (unauthenticated) browser. Create the directory and run the setup steps.
+**Empty session directory** — If `workspace/data/browser-sessions/<agent>/` doesn't exist on the host, the volume mount creates an empty directory and the agent gets a fresh (unauthenticated) browser. Create the directory and run the setup steps.

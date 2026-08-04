@@ -742,7 +742,6 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
   alias TriOnyx.Connectors.Email
   alias TriOnyx.TriggerRouter
-  alias TriOnyx.Workspace.Committer
 
   defstruct [
     :imap_config,
@@ -806,8 +805,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
       :error ->
         # Backwards compat: derive from inbox contents if no state file yet
-        workspace_dir = TriOnyx.Workspace.workspace_dir()
-        inbox_dir = Path.join([workspace_dir, "agents", agent_name, "inbox"])
+        inbox_dir = Path.join(TriOnyx.Workspace.agent_dir(agent_name), "inbox")
 
         case File.ls(inbox_dir) do
           {:ok, entries} ->
@@ -829,8 +827,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
   @spec last_uid_state_path(String.t()) :: String.t()
   defp last_uid_state_path(agent_name) do
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    Path.join([workspace_dir, "agents", agent_name, "state", "last_uid"])
+    Path.join([TriOnyx.Workspace.agent_dir(agent_name), "state", "last_uid"])
   end
 
   @spec read_last_uid_file(String.t()) :: {:ok, String.t()} | :error
@@ -871,8 +868,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
 
     case connect_and_fetch(imap, state.last_uid) do
       {:ok, emails, new_last_uid} ->
-        workspace_dir = TriOnyx.Workspace.workspace_dir()
-        inbox_dir = Path.join([workspace_dir, "agents", state.agent_name, "inbox"])
+        inbox_dir = Path.join(TriOnyx.Workspace.agent_dir(state.agent_name), "inbox")
 
         Enum.each(emails, fn {uid, raw_email} ->
           email_dir = Path.join(inbox_dir, uid)
@@ -887,12 +883,12 @@ defmodule TriOnyx.Connectors.Email.Poller do
               case Email.write_email_dir(inbox_dir, uid, message, attachment_data) do
                 {:ok, _files} ->
                   # Record provenance: labels the message file in the risk
-                  # manifest and queues a trailer-carrying commit so the
-                  # labels survive a manifest rebuild from git history.
-                  Committer.record_write(
+                  # manifest and commits with trailers so the labels
+                  # survive a manifest rebuild from git history.
+                  TriOnyx.Workspace.record_external_write(
                     state.agent_name,
-                    "connector-email",
-                    "agents/#{state.agent_name}/inbox/#{uid}/message.json",
+                    "email-connector",
+                    ["inbox/#{uid}"],
                     :high,
                     :low
                   )
@@ -903,7 +899,7 @@ defmodule TriOnyx.Connectors.Email.Poller do
                       "UID: #{uid}\n" <>
                       "From: #{message["from"]}\n" <>
                       "Subject: #{message["subject"]}\n" <>
-                      "Path: /workspace/agents/#{state.agent_name}/inbox/#{uid}/message.json"
+                      "Path: /workspace/inbox/#{uid}/message.json"
 
                   TriggerRouter.dispatch(%{
                     type: :unverified_input,

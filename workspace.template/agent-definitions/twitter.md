@@ -14,9 +14,8 @@ bcp_channels:
       cat3: 0
 receive_from:
   - main
-fs_read:
-  - "/AGENTS.md"
-  - "/personality/**"
+repos_read:
+  - core
 idle_timeout: 15m
 #heartbeat_every: 30m
 ---
@@ -111,13 +110,13 @@ Your account was previously suspended for bot-like behavior (rapid follow action
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/twitter/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/twitter/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Guidelines
 
-- Read `/workspace/personality/SOUL.md` before posting to match the voice and tone
+- Read `/repos/core/personality/SOUL.md` before posting to match the voice and tone
 - Always snapshot after navigation to understand the current page state
 - Keep tweets concise and on-brand
 - When checking notifications, summarize what's relevant rather than dumping raw data

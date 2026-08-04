@@ -1,21 +1,18 @@
 defmodule TriOnyx.RiskManifestTest do
   use ExUnit.Case, async: false
 
+  alias TriOnyx.RepoStore
   alias TriOnyx.RiskManifest
   alias TriOnyx.Workspace
 
   @moduletag :tmp_dir
 
   setup %{tmp_dir: tmp_dir} do
-    repo = Path.join(tmp_dir, "workspace")
-    File.mkdir_p!(repo)
-
-    {_, 0} = System.cmd("git", ["init"], cd: repo, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["config", "user.email", "test@test"], cd: repo, stderr_to_stdout: true)
-    {_, 0} = System.cmd("git", ["config", "user.name", "Test"], cd: repo, stderr_to_stdout: true)
+    ws = Path.join(tmp_dir, "workspace")
+    File.mkdir_p!(ws)
 
     previous = Application.get_env(:tri_onyx, :workspace_dir)
-    Application.put_env(:tri_onyx, :workspace_dir, repo)
+    Application.put_env(:tri_onyx, :workspace_dir, ws)
 
     on_exit(fn ->
       if previous do
@@ -25,34 +22,45 @@ defmodule TriOnyx.RiskManifestTest do
       end
     end)
 
-    %{repo: repo}
+    %{ws: ws}
   end
 
-  defp write_file(repo, rel_path, content) do
-    abs = Path.join(repo, rel_path)
-    File.mkdir_p!(Path.dirname(abs))
-    File.write!(abs, content)
+  # Writes files into an agent's tree and commits them with provenance
+  # trailers, exactly like a session-end commit.
+  defp commit_write(agent, rel_paths, taint, sensitivity, content \\ "content") do
+    repo = {:agent, agent}
+    :ok = RepoStore.ensure_tree(agent, repo)
+    tree = RepoStore.tree_dir(agent, repo)
+
+    Enum.each(rel_paths, fn rel ->
+      abs = Path.join(tree, rel)
+      File.mkdir_p!(Path.dirname(abs))
+      File.write!(abs, content)
+    end)
+
+    {:ok, sha} =
+      RepoStore.commit_and_push(agent, repo,
+        author: agent,
+        message: "#{agent} session test",
+        trailers: ["Taint-Level: #{taint}", "Sensitivity-Level: #{sensitivity}"],
+        session_id: "test"
+      )
+
+    sha
   end
 
-  defp git!(repo, args) do
-    {out, 0} = System.cmd("git", args, cd: repo, stderr_to_stdout: true)
-    out
-  end
+  # Sweep-style commit without trailers.
+  defp commit_plain(agent, fun) do
+    repo = {:agent, agent}
+    tree = RepoStore.tree_dir(agent, repo)
+    fun.(tree)
 
-  defp commit_write(repo, agent, paths, taint, sensitivity, content \\ "content") do
-    Enum.each(paths, &write_file(repo, &1, content))
-    git!(repo, ["add", "-A"])
-
-    msg =
-      "#{agent} session test\n\nTaint-Level: #{taint}\nSensitivity-Level: #{sensitivity}"
-
-    git!(repo, ["commit", "--author=#{agent} <#{agent}@tri_onyx>", "-m", msg])
-  end
-
-  defp commit_delete(repo, paths) do
-    Enum.each(paths, &File.rm!(Path.join(repo, &1)))
-    git!(repo, ["add", "-A"])
-    git!(repo, ["commit", "-m", "[sweep] uncommitted workspace changes"])
+    {:ok, _} =
+      RepoStore.commit_and_push(agent, repo,
+        author: "sweep",
+        message: "[sweep] uncommitted changes",
+        session_id: "sweep"
+      )
   end
 
   defp start_manifest! do
@@ -61,9 +69,9 @@ defmodule TriOnyx.RiskManifestTest do
     name
   end
 
-  describe "rebuild from git history" do
-    test "loads labels from provenance commit trailers", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/digest.md"], :high, :medium)
+  describe "rebuild from repo histories" do
+    test "loads labels from provenance commit trailers under canonical paths" do
+      commit_write("news", ["digest.md"], :high, :medium)
 
       name = start_manifest!()
 
@@ -75,33 +83,34 @@ defmodule TriOnyx.RiskManifestTest do
       assert is_binary(entry["updated_at"])
     end
 
-    test "the most recent provenance commit wins", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/digest.md"], :low, :low, "v1")
-      commit_write(repo, "wiki", ["agents/news/digest.md"], :high, :medium, "v2")
+    test "the most recent provenance commit wins" do
+      commit_write("news", ["digest.md"], :low, :low, "v1")
+      commit_write("news", ["digest.md"], :high, :medium, "v2")
 
       name = start_manifest!()
 
       assert {:ok, entry} = RiskManifest.lookup(name, "agents/news/digest.md")
       assert entry["taint_level"] == "high"
-      assert entry["agent"] == "wiki"
     end
 
-    test "deleted files have no entry", %{repo: repo} do
-      commit_write(repo, "news", ["incoming/article.md"], :high, :low)
-      commit_delete(repo, ["incoming/article.md"])
+    test "deleted files have no entry" do
+      commit_write("news", ["incoming/article.md"], :high, :low)
+
+      commit_plain("news", fn tree ->
+        File.rm!(Path.join(tree, "incoming/article.md"))
+      end)
 
       name = start_manifest!()
 
-      assert :error = RiskManifest.lookup(name, "incoming/article.md")
+      assert :error = RiskManifest.lookup(name, "agents/news/incoming/article.md")
     end
 
-    test "commits without provenance trailers keep older labels", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/notes.md"], :medium, :low, "v1")
+    test "commits without provenance trailers keep older labels" do
+      commit_write("news", ["notes.md"], :medium, :low, "v1")
 
-      # Sweep-style commit (no trailers) touches the same file.
-      write_file(repo, "agents/news/notes.md", "manually edited")
-      git!(repo, ["add", "-A"])
-      git!(repo, ["commit", "-m", "[sweep] uncommitted workspace changes"])
+      commit_plain("news", fn tree ->
+        File.write!(Path.join(tree, "notes.md"), "manually edited")
+      end)
 
       name = start_manifest!()
 
@@ -110,14 +119,15 @@ defmodule TriOnyx.RiskManifestTest do
       assert entry["agent"] == "news"
     end
 
-    test "review commits reset taint but keep sensitivity", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/digest.md"], :high, :medium)
+    test "review commits reset taint but keep sensitivity" do
+      commit_write("news", ["digest.md"], :high, :medium)
 
-      msg =
-        "review by sondre\n\n" <>
-          "Taint-Level: low\nReviewed-By: sondre\nReviewed-Path: agents/news/digest.md"
-
-      git!(repo, ["commit", "--allow-empty", "--author=sondre <sondre@tri_onyx>", "-m", msg])
+      {:ok, _} =
+        RepoStore.empty_commit({:agent, "news"}, "sondre", "review by sondre", [
+          "Taint-Level: low",
+          "Reviewed-By: sondre",
+          "Reviewed-Path: agents/news/digest.md"
+        ])
 
       name = start_manifest!()
 
@@ -128,13 +138,16 @@ defmodule TriOnyx.RiskManifestTest do
       assert entry["reviewed_by"] == "sondre"
     end
 
-    test "a write after a review re-taints the file", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/digest.md"], :high, :low, "v1")
+    test "a write after a review re-taints the file" do
+      commit_write("news", ["digest.md"], :high, :low, "v1")
 
-      msg = "review by sondre\n\nReviewed-By: sondre\nReviewed-Path: agents/news/digest.md"
-      git!(repo, ["commit", "--allow-empty", "-m", msg])
+      {:ok, _} =
+        RepoStore.empty_commit({:agent, "news"}, "sondre", "review by sondre", [
+          "Reviewed-By: sondre",
+          "Reviewed-Path: agents/news/digest.md"
+        ])
 
-      commit_write(repo, "news", ["agents/news/digest.md"], :high, :low, "v2")
+      commit_write("news", ["digest.md"], :high, :low, "v2")
 
       name = start_manifest!()
 
@@ -143,20 +156,40 @@ defmodule TriOnyx.RiskManifestTest do
       refute Map.has_key?(entry, "reviewed_by")
     end
 
-    test "legacy .tri-onyx manifest file commits are ignored", %{repo: repo} do
-      commit_write(repo, "news", [".tri-onyx/risk-manifest.json"], :high, :high, "{}")
+    test "entries from several repos coexist" do
+      commit_write("news", ["a.md"], :high, :low)
+      commit_write("wiki", ["b.md"], :low, :medium)
 
       name = start_manifest!()
 
+      assert {:ok, _} = RiskManifest.lookup(name, "agents/news/a.md")
+      assert {:ok, _} = RiskManifest.lookup(name, "agents/wiki/b.md")
+    end
+
+    test "starts empty without any repos" do
+      name = start_manifest!()
       assert RiskManifest.snapshot(name) == %{}
     end
 
-    test "starts empty without a workspace git repository" do
-      Application.put_env(:tri_onyx, :workspace_dir, "test/tmp/does-not-exist")
+    test "migration snapshot seeds paths without live history", %{ws: ws} do
+      commit_write("news", ["fresh.md"], :low, :low)
+
+      snapshot = %{
+        "agents/news/fresh.md" => %{"taint_level" => "high", "sensitivity_level" => "high"},
+        "agents/legacy/old.md" => %{"taint_level" => "medium", "sensitivity_level" => "low"}
+      }
+
+      File.mkdir_p!(Path.join(ws, "data"))
+      File.write!(Path.join(ws, "data/risk-manifest-snapshot.json"), Jason.encode!(snapshot))
 
       name = start_manifest!()
 
-      assert RiskManifest.snapshot(name) == %{}
+      # Live history wins for fresh.md; snapshot fills the legacy path.
+      assert {:ok, %{"taint_level" => "low"}} =
+               RiskManifest.lookup(name, "agents/news/fresh.md")
+
+      assert {:ok, %{"taint_level" => "medium"}} =
+               RiskManifest.lookup(name, "agents/legacy/old.md")
     end
   end
 
@@ -164,45 +197,58 @@ defmodule TriOnyx.RiskManifestTest do
     test "put and lookup round-trip" do
       name = start_manifest!()
 
-      :ok = RiskManifest.put(name, "news", ["a.md", "b.md"], :high, :low)
+      :ok = RiskManifest.put(name, "news", ["agents/news/a.md", "agents/news/b.md"], :high, :low)
 
-      assert {:ok, entry} = RiskManifest.lookup(name, "a.md")
+      assert {:ok, entry} = RiskManifest.lookup(name, "agents/news/a.md")
       assert entry["taint_level"] == "high"
       assert entry["sensitivity_level"] == "low"
       assert entry["risk_level"] == "high"
       assert entry["agent"] == "news"
-      assert {:ok, _} = RiskManifest.lookup(name, "b.md")
+      assert {:ok, _} = RiskManifest.lookup(name, "agents/news/b.md")
     end
 
     test "review resets taint and keeps sensitivity" do
       name = start_manifest!()
 
-      :ok = RiskManifest.put(name, "news", ["a.md"], :high, :medium)
-      :ok = RiskManifest.review(name, ["a.md"], "sondre")
+      :ok = RiskManifest.put(name, "news", ["agents/news/a.md"], :high, :medium)
+      :ok = RiskManifest.review(name, ["agents/news/a.md"], "sondre")
 
-      assert {:ok, entry} = RiskManifest.lookup(name, "a.md")
+      assert {:ok, entry} = RiskManifest.lookup(name, "agents/news/a.md")
       assert entry["taint_level"] == "low"
       assert entry["sensitivity_level"] == "medium"
       assert entry["risk_level"] == "medium"
       assert entry["reviewed_by"] == "sondre"
     end
 
-    test "reload drops live entries that are not in git history", %{repo: repo} do
-      commit_write(repo, "news", ["committed.md"], :medium, :low)
+    test "reload drops live entries that are not in git history" do
+      commit_write("news", ["committed.md"], :medium, :low)
 
       name = start_manifest!()
-      :ok = RiskManifest.put(name, "news", ["uncommitted.md"], :high, :low)
+      :ok = RiskManifest.put(name, "news", ["agents/news/uncommitted.md"], :high, :low)
 
       :ok = RiskManifest.reload(name)
 
-      assert {:ok, _} = RiskManifest.lookup(name, "committed.md")
-      assert :error = RiskManifest.lookup(name, "uncommitted.md")
+      assert {:ok, _} = RiskManifest.lookup(name, "agents/news/committed.md")
+      assert :error = RiskManifest.lookup(name, "agents/news/uncommitted.md")
+    end
+
+    test "max_labels_for_prefixes aggregates over repo prefixes" do
+      name = start_manifest!()
+
+      :ok = RiskManifest.put(name, "news", ["agents/news/a.md"], :high, :low)
+      :ok = RiskManifest.put(name, "wiki", ["shared/knowledge/b.md"], :low, :medium)
+      :ok = RiskManifest.put(name, "finn", ["agents/finn/c.md"], :medium, :high)
+
+      assert {:high, :medium, _} =
+               RiskManifest.max_labels_for_prefixes(name, ["agents/news/", "shared/knowledge/"])
+
+      assert {:low, :low, nil} = RiskManifest.max_labels_for_prefixes(name, ["agents/nobody/"])
     end
   end
 
   describe "review_artifacts integration" do
-    test "reviews persist through a git-history rebuild", %{repo: repo} do
-      commit_write(repo, "news", ["agents/news/digest.md"], :high, :medium)
+    test "reviews persist through a git-history rebuild" do
+      commit_write("news", ["digest.md"], :high, :medium)
 
       # review_artifacts updates the globally named instance and records
       # the review as an empty commit with Reviewed-Path trailers.
@@ -217,7 +263,12 @@ defmodule TriOnyx.RiskManifestTest do
     end
 
     test "rejects paths containing newlines" do
-      assert {:error, :invalid_path} = Workspace.review_artifacts(["a\nReviewed-Path: b"], "sondre")
+      assert {:error, :invalid_path} =
+               Workspace.review_artifacts(["agents/news/a\nReviewed-Path: b"], "sondre")
+    end
+
+    test "rejects non-canonical paths" do
+      assert {:error, :invalid_path} = Workspace.review_artifacts(["notes.md"], "sondre")
     end
   end
 end

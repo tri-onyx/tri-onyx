@@ -12,6 +12,7 @@ Usage:
 
 import argparse
 import re
+import shutil
 import sys
 from pathlib import Path
 
@@ -299,15 +300,47 @@ def redact_connector_config(src: Path) -> str:
     return "\n".join(result) + "\n"
 
 
+# Scaffold entries from the pre-repo workspace layout. No longer generated;
+# pruned from workspace.template/ if a previous run left them behind.
+OBSOLETE_TEMPLATE_PATHS = [
+    "agents",
+    "data",
+    "plugins",
+    "browser-sessions",
+    "plugins.yaml",
+]
+
+
+def live_definitions_dir(workspace: Path) -> Path:
+    """Live agent definitions: the definitions shared repo's _ro checkout,
+    falling back to the pre-migration workspace/agent-definitions/."""
+    repo_defs = workspace / "trees" / "_ro" / "definitions"
+    if any(repo_defs.glob("*.md")):
+        return repo_defs
+    return workspace / "agent-definitions"
+
+
+def live_agents_md(workspace: Path) -> Path:
+    """Live AGENTS.md: the core shared repo's _ro checkout, falling back to
+    the pre-migration workspace/AGENTS.md."""
+    repo_agents_md = workspace / "trees" / "_ro" / "core" / "AGENTS.md"
+    if repo_agents_md.exists():
+        return repo_agents_md
+    return workspace / "AGENTS.md"
+
+
 def generate_workspace_template(workspace: Path, template_dir: Path) -> dict[str, str]:
     """Generate a workspace template directory structure.
 
     Returns a dict of {relative_path: content} for all template files.
+    The template only carries agent-definitions/, personality/ placeholders,
+    and AGENTS.md — per-agent/shared repo content is provisioned by the
+    gateway, not scaffolded here.
     """
     files = {}
 
     # Agent definitions — copy as-is (no secrets)
-    defs_dir = workspace / "agent-definitions"
+    defs_dir = live_definitions_dir(workspace)
     if defs_dir.exists():
         for f in sorted(defs_dir.iterdir()):
             if f.is_file() and f.suffix == ".md":
@@ -315,7 +348,7 @@ def generate_workspace_template(workspace: Path, template_dir: Path) -> dict[str
                 files[rel] = f.read_text()
 
     # AGENTS.md — copy as-is
-    agents_md = workspace / "AGENTS.md"
+    agents_md = live_agents_md(workspace)
     if agents_md.exists():
         files["AGENTS.md"] = agents_md.read_text()
 
@@ -323,19 +356,6 @@ def generate_workspace_template(workspace: Path, template_dir: Path) -> dict[str
     files["personality/SOUL.md"] = "# Soul\n\nDefine your agent personality here.\n"
     files["personality/IDENTITY.md"] = "# Identity\n\nDefine your agent identity here.\n"
     files["personality/USER.md"] = "# User\n\nDescribe the user profile and preferences here.\n"
-
-    # Skeleton directories via .gitkeep
-    skeleton_dirs = [
-        "agents",
-        "data",
-        "plugins",
-        "browser-sessions",
-    ]
-    for d in skeleton_dirs:
-        files[f"{d}/.gitkeep"] = ""
-
-    # plugins.yaml — empty
-    files["plugins.yaml"] = "plugins: {}\n"
 
     return files
 
@@ -349,6 +369,17 @@ def write_workspace_template(workspace: Path, template_dir: Path) -> list[str]:
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content)
         written.append(str(dest.relative_to(ROOT)))
+
+    # Prune scaffold entries from the old workspace layout
+    for rel_path in OBSOLETE_TEMPLATE_PATHS:
+        stale = template_dir / rel_path
+        if stale.is_dir():
+            shutil.rmtree(stale)
+            print(f"Removed obsolete {stale.relative_to(ROOT)}/")
+        elif stale.exists():
+            stale.unlink()
+            print(f"Removed obsolete {stale.relative_to(ROOT)}")
+
     return written
 
 
@@ -365,6 +396,11 @@ def check_workspace_template(workspace: Path, template_dir: Path) -> list[str]:
         if rel_path.startswith("agent-definitions/") or rel_path == "AGENTS.md":
             if dest.read_text() != expected_content:
                 stale.append(str(dest.relative_to(ROOT)))
+    # Scaffold leftovers from the old workspace layout count as drift
+    for rel_path in OBSOLETE_TEMPLATE_PATHS:
+        leftover = template_dir / rel_path
+        if leftover.exists():
+            stale.append(f"{leftover.relative_to(ROOT)} (obsolete, should be removed)")
     return stale
 
 

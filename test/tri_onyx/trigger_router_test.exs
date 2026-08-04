@@ -11,8 +11,6 @@ defmodule TriOnyx.TriggerRouterTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Grep"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "You are a test agent."
   }
 
@@ -22,8 +20,6 @@ defmodule TriOnyx.TriggerRouterTest do
     model: "claude-haiku-4-5",
     tools: ["Read"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "You handle webhooks."
   }
 

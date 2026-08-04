@@ -11,8 +11,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
       model: "claude-sonnet-4-20250514",
       tools: ["Read"],
       network: :none,
-      fs_read: [],
-      fs_write: [],
+      repos_read: [],
+      repos_write: [],
       send_to: [],
       receive_from: [],
       system_prompt: "test prompt",
@@ -31,8 +31,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
       model: merged.model,
       tools: merged.tools,
       network: merged.network,
-      fs_read: merged.fs_read,
-      fs_write: merged.fs_write,
+      repos_read: merged.repos_read,
+      repos_write: merged.repos_write,
       send_to: merged.send_to,
       receive_from: merged.receive_from,
       system_prompt: merged.system_prompt,
@@ -49,9 +49,9 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert %{} == GraphAnalyzer.analyze([], %{})
     end
 
-    test "two agents with no path overlap produce no edges" do
-      agent_a = make_def(%{name: "writer", fs_write: ["/output/a/**"], fs_read: []})
-      agent_b = make_def(%{name: "reader", fs_read: ["/input/b/**"], fs_write: []})
+    test "two agents with disjoint repos produce no edges" do
+      agent_a = make_def(%{name: "writer", repos_write: ["out-a"], repos_read: []})
+      agent_b = make_def(%{name: "reader", repos_read: ["in-b"], repos_write: []})
 
       result = GraphAnalyzer.analyze([agent_a, agent_b], %{})
 
@@ -63,12 +63,12 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert result["reader"].max_input_sensitivity == :low
     end
 
-    test "agent A writes to paths agent B reads creates edge A -> B" do
-      agent_a = make_def(%{name: "producer", fs_write: ["src/output/**"], fs_read: []})
-      agent_b = make_def(%{name: "consumer", fs_read: ["src/**"], fs_write: []})
+    test "agent A writes to a shared repo agent B reads creates edge A -> B" do
+      agent_a = make_def(%{name: "producer", repos_write: ["exchange"], repos_read: []})
+      agent_b = make_def(%{name: "consumer", repos_read: ["exchange"], repos_write: []})
 
       manifest = %{
-        "src/output/**" => %{
+        "shared/exchange/output/report.json" => %{
           "taint_level" => "high",
           "sensitivity_level" => "low",
           "risk_level" => "high",
@@ -90,22 +90,22 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
 
     test "transitive chain A -> B -> C propagates risk" do
-      agent_a = make_def(%{name: "source", fs_write: ["/data/raw/**"], fs_read: []})
+      agent_a = make_def(%{name: "source", repos_write: ["raw"], repos_read: []})
 
       agent_b =
-        make_def(%{name: "processor", fs_read: ["/data/raw/**"], fs_write: ["/data/processed/**"]})
+        make_def(%{name: "processor", repos_read: ["raw"], repos_write: ["processed"]})
 
-      agent_c = make_def(%{name: "sink", fs_read: ["/data/processed/**"], fs_write: []})
+      agent_c = make_def(%{name: "sink", repos_read: ["processed"], repos_write: []})
 
       manifest = %{
-        "/data/raw/**" => %{
+        "shared/raw/dump.json" => %{
           "taint_level" => "high",
           "sensitivity_level" => "low",
           "risk_level" => "high",
           "agent" => "source",
           "updated_at" => "now"
         },
-        "/data/processed/**" => %{
+        "shared/processed/summary.json" => %{
           "taint_level" => "medium",
           "sensitivity_level" => "medium",
           "risk_level" => "medium",
@@ -126,7 +126,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
     end
 
     test "single agent with no connections" do
-      agent = make_def(%{name: "loner", fs_read: ["/solo/**"], fs_write: ["/solo/out/**"]})
+      agent = make_def(%{name: "loner", repos_read: ["solo"], repos_write: ["solo-out"]})
 
       result = GraphAnalyzer.analyze([agent], %{})
 
@@ -143,8 +143,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "web-scraper",
           tools: ["WebFetch"],
           network: :outbound,
-          fs_write: ["/data/scraped/**"],
-          fs_read: []
+          repos_write: ["scraped"],
+          repos_read: []
         })
 
       reader =
@@ -152,12 +152,12 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "formatter",
           tools: ["Read"],
               network: :none,
-          fs_read: ["/data/scraped/**"],
-          fs_write: []
+          repos_read: ["scraped"],
+          repos_write: []
         })
 
       manifest = %{
-        "/data/scraped/**" => %{
+        "shared/scraped/page.html" => %{
           "taint_level" => "high",
           "sensitivity_level" => "low",
           "risk_level" => "high",
@@ -186,16 +186,16 @@ defmodule TriOnyx.GraphAnalyzerTest do
         make_def(%{
           name: "a",
           tools: ["Read"],
-              fs_write: ["/shared/**"],
-          fs_read: []
+              repos_write: ["exchange"],
+          repos_read: []
         })
 
       agent_b =
         make_def(%{
           name: "b",
           tools: ["Read"],
-              fs_read: ["/shared/**"],
-          fs_write: []
+              repos_read: ["exchange"],
+          repos_write: []
         })
 
       analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
@@ -213,16 +213,16 @@ defmodule TriOnyx.GraphAnalyzerTest do
         make_def(%{
           name: "writer",
           tools: ["Write"],
-          fs_write: ["/shared/**"],
-          fs_read: []
+          repos_write: ["exchange"],
+          repos_read: []
         })
 
       agent_b =
         make_def(%{
           name: "reader",
           tools: ["Read"],
-              fs_read: ["/shared/**"],
-          fs_write: []
+              repos_read: ["exchange"],
+          repos_write: []
         })
 
       analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
@@ -238,10 +238,10 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
     test "backward compat: works with single-axis level atoms" do
       agent_a =
-        make_def(%{name: "a", fs_write: ["/shared/**"], fs_read: []})
+        make_def(%{name: "a", repos_write: ["exchange"], repos_read: []})
 
       agent_b =
-        make_def(%{name: "b", fs_read: ["/shared/**"], fs_write: []})
+        make_def(%{name: "b", repos_read: ["exchange"], repos_write: []})
 
       analysis = GraphAnalyzer.analyze([agent_a, agent_b], %{})
       info_levels = %{"a" => :high, "b" => :low}
@@ -258,8 +258,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "secret-handler",
           tools: ["Read", "Write", "Bash"],
           network: :outbound,
-          fs_write: ["/data/secrets/**"],
-          fs_read: []
+          repos_write: ["secrets"],
+          repos_read: []
         })
 
       reader =
@@ -267,8 +267,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "reporter",
           tools: ["Read", "WebFetch"],
           network: :outbound,
-          fs_read: ["/data/**"],
-          fs_write: []
+          repos_read: ["secrets"],
+          repos_write: []
         })
 
       manifest = %{}
@@ -293,8 +293,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "writer",
           tools: ["Write"],
           network: :outbound,
-          fs_write: ["/data/**"],
-          fs_read: []
+          repos_write: ["data"],
+          repos_read: []
         })
 
       reader =
@@ -302,8 +302,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "reader",
           tools: ["Read"],
               network: :none,
-          fs_read: ["/data/**"],
-          fs_write: []
+          repos_read: ["data"],
+          repos_write: []
         })
 
       info_levels = %{
@@ -315,17 +315,16 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert violations == []
     end
 
-    test "detects violation via the implicit /agents/{name}/** write path" do
-      # Writer declares NO explicit fs_write — but the sandbox always injects
-      # /agents/{name}/** as a writable path, so a network-capable reader
-      # with overlapping fs_read is still an exfiltration channel.
+    test "detects violation via the implicit agents/<name> repo write" do
+      # Writer declares NO repos_write — but every agent's own repo is
+      # always mounted read-write, so a network-capable reader granted
+      # read access to that repo is still an exfiltration channel.
       writer =
         make_def(%{
           name: "secret-keeper",
           tools: ["Read", "Write"],
           network: :none,
-          fs_write: [],
-          fs_read: []
+          repos_read: []
         })
 
       reader =
@@ -333,8 +332,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "exfil-reader",
           tools: ["Read", "WebFetch"],
           network: :outbound,
-          fs_read: ["/agents/secret-keeper/**"],
-          fs_write: []
+          repos_read: ["agents/secret-keeper"],
+          repos_write: []
         })
 
       info_levels = %{
@@ -349,7 +348,7 @@ defmodule TriOnyx.GraphAnalyzerTest do
       assert violation["writer"] == "secret-keeper"
       assert violation["reader"] == "exfil-reader"
       assert violation["edge_type"] == "filesystem"
-      assert "/agents/secret-keeper/**" in violation["paths"]
+      assert "agents/secret-keeper" in violation["paths"]
     end
 
     test "BLP ignores taint differences" do
@@ -358,8 +357,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "tainted-writer",
           tools: ["Write"],
           network: :outbound,
-          fs_write: ["/data/**"],
-          fs_read: []
+          repos_write: ["data"],
+          repos_read: []
         })
 
       reader =
@@ -367,8 +366,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
           name: "network-reader",
           tools: ["Read", "WebFetch"],
           network: :outbound,
-          fs_read: ["/data/**"],
-          fs_write: []
+          repos_read: ["data"],
+          repos_write: []
         })
 
       # High taint difference, but same sensitivity — should produce no BLP violation
@@ -640,8 +639,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
   describe "trace_risk_chain/3 cycle handling" do
     test "A -> B -> A does not infinite loop" do
       edges = %{
-        "A" => [%{from: "B", paths: ["/shared/**"]}],
-        "B" => [%{from: "A", paths: ["/shared/**"]}]
+        "A" => [%{from: "B", paths: ["shared/exchange"]}],
+        "B" => [%{from: "A", paths: ["shared/exchange"]}]
       }
 
       chain_a = GraphAnalyzer.trace_risk_chain("A", edges, MapSet.new())
@@ -759,13 +758,13 @@ defmodule TriOnyx.GraphAnalyzerTest do
 
   describe "propagate_levels/3" do
     test "transitive propagation A→B→C propagates taint through chain" do
-      agent_a = make_def(%{name: "source", fs_write: ["/data/raw/**"], fs_read: []})
-      agent_b = make_def(%{name: "middle", fs_read: ["/data/raw/**"], fs_write: ["/data/out/**"]})
-      agent_c = make_def(%{name: "sink", fs_read: ["/data/out/**"], fs_write: []})
+      agent_a = make_def(%{name: "source", repos_write: ["raw"], repos_read: []})
+      agent_b = make_def(%{name: "middle", repos_read: ["raw"], repos_write: ["out"]})
+      agent_c = make_def(%{name: "sink", repos_read: ["out"], repos_write: []})
 
       manifest = %{
-        "/data/raw/**" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"},
-        "/data/out/**" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"}
+        "shared/raw/dump.json" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"},
+        "shared/out/result.json" => %{"taint_level" => "low", "sensitivity_level" => "low", "risk_level" => "low"}
       }
 
       definitions = [agent_a, agent_b, agent_c]
@@ -850,8 +849,8 @@ defmodule TriOnyx.GraphAnalyzerTest do
       c = make_def(%{name: "c"})
 
       edges = %{
-        "b" => [%{from: "a", paths: ["/data/**"], edge_type: :filesystem}],
-        "c" => [%{from: "b", paths: ["/out/**"], edge_type: :filesystem}]
+        "b" => [%{from: "a", paths: ["shared/data"], edge_type: :filesystem}],
+        "c" => [%{from: "b", paths: ["shared/out"], edge_type: :filesystem}]
       }
 
       base_levels = %{

@@ -421,17 +421,21 @@ defmodule TriOnyx.GraphAnalyzer do
     |> Enum.reduce(:low, &InformationClassifier.higher_level/2)
   end
 
+  # A filesystem edge exists when a repo the writer can write is readable
+  # by the reader (repo grants are the only filesystem sharing mechanism —
+  # there are no path globs). Edge paths carry canonical repo prefixes
+  # ("agents/<name>", "shared/<name>") so manifest lookups aggregate the
+  # labels recorded under that repo.
   @spec build_filesystem_edges([map()], map()) :: %{String.t() => [map()]}
   defp build_filesystem_edges(definitions, _risk_manifest) do
+    all_names = Enum.map(definitions, & &1.name)
+
     for writer <- definitions,
         reader <- definitions,
         writer.name != reader.name,
-        effective_writes = effective_write_paths(writer),
-        effective_writes != [],
-        reader.fs_read != [],
         reduce: %{} do
       acc ->
-        overlapping = find_overlapping_paths(effective_writes, reader.fs_read)
+        overlapping = shared_repo_refs(writer, reader, all_names)
 
         if overlapping != [] do
           edge = %{
@@ -727,12 +731,41 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
-  # Returns the effective write paths for an agent, including the implicit
-  # /agents/{name}/** path injected by the sandbox (see Sandbox.build_fuse_policy/1).
-  @spec effective_write_paths(map()) :: [String.t()]
-  defp effective_write_paths(definition) do
-    implicit = "/agents/#{definition.name}/**"
-    Enum.uniq([implicit | definition.fs_write])
+  # Repos an agent can write: its own (always mounted rw) plus each
+  # repos_write grant.
+  @spec writable_repo_refs(map()) :: [String.t()]
+  defp writable_repo_refs(definition) do
+    ["agents/#{definition.name}" | normalize_shared_refs(Map.get(definition, :repos_write, []))]
+    |> Enum.uniq()
+  end
+
+  # Repos an agent can read: everything it can write plus each repos_read
+  # grant, with agents/* expanded against the analyzed definitions.
+  @spec readable_repo_refs(map(), [String.t()]) :: [String.t()]
+  defp readable_repo_refs(definition, all_names) do
+    reads =
+      definition
+      |> Map.get(:repos_read, [])
+      |> Enum.flat_map(fn
+        "agents/*" -> Enum.map(all_names, &"agents/#{&1}")
+        ref -> [normalize_ref(ref)]
+      end)
+
+    (writable_repo_refs(definition) ++ reads) |> Enum.uniq()
+  end
+
+  defp normalize_shared_refs(refs), do: Enum.map(refs, &normalize_ref/1)
+
+  # Shared repo names are canonicalized to "shared/<name>" so they align
+  # with risk-manifest keys; agent refs already match.
+  defp normalize_ref("agents/" <> _ = ref), do: ref
+  defp normalize_ref(name), do: "shared/#{name}"
+
+  @spec shared_repo_refs(map(), map(), [String.t()]) :: [String.t()]
+  defp shared_repo_refs(writer, reader, all_names) do
+    writable = writable_repo_refs(writer)
+    readable = MapSet.new(readable_repo_refs(reader, all_names))
+    Enum.filter(writable, &MapSet.member?(readable, &1))
   end
 
   @spec merge_edges(map(), map()) :: map()
@@ -746,10 +779,11 @@ defmodule TriOnyx.GraphAnalyzer do
         has_network?(def.network)
       end)
 
-    # Every agent is a potential writer: effective_write_paths/1 includes
-    # the implicit /agents/{name}/** path injected by the sandbox, so an
-    # empty fs_write does not mean the agent cannot write. This mirrors
-    # build_filesystem_edges/2.
+    all_names = Enum.map(definitions, & &1.name)
+
+    # Every agent is a potential writer: its own repo is always mounted
+    # rw, so an empty repos_write does not mean the agent cannot write.
+    # This mirrors build_filesystem_edges/2.
     Enum.flat_map(definitions, fn writer ->
       writer_sensitivity = extract_sensitivity(sensitivity_levels, writer.name)
 
@@ -757,7 +791,7 @@ defmodule TriOnyx.GraphAnalyzer do
         reader_sensitivity = extract_sensitivity(sensitivity_levels, reader.name)
 
         if writer.name != reader.name and level_rank(writer_sensitivity) > level_rank(reader_sensitivity) do
-          overlapping = find_overlapping_paths(effective_write_paths(writer), reader.fs_read)
+          overlapping = shared_repo_refs(writer, reader, all_names)
 
           if overlapping != [] do
             [
@@ -812,42 +846,12 @@ defmodule TriOnyx.GraphAnalyzer do
     end
   end
 
-  @spec find_overlapping_paths([String.t()], [String.t()]) :: [String.t()]
-  defp find_overlapping_paths(write_patterns, read_patterns) do
-    for write_pat <- write_patterns,
-        read_pat <- read_patterns,
-        paths_overlap?(write_pat, read_pat),
-        reduce: [] do
-      acc ->
-        overlap_pat = shorter_pattern(write_pat, read_pat)
-        [overlap_pat | acc]
-    end
-    |> Enum.uniq()
-  end
-
-  # Two glob patterns overlap if one is a prefix of the other (stripping glob
-  # suffixes), or they share a common directory prefix. This is intentionally
-  # conservative — it flags potential overlaps for human review.
-  @spec paths_overlap?(String.t(), String.t()) :: boolean()
-  defp paths_overlap?(pattern_a, pattern_b) do
-    dir_a = strip_glob(pattern_a)
-    dir_b = strip_glob(pattern_b)
-
-    String.starts_with?(dir_a, dir_b) or
-      String.starts_with?(dir_b, dir_a)
-  end
-
   @spec strip_glob(String.t()) :: String.t()
   defp strip_glob(pattern) do
     pattern
     |> String.replace(~r/\*\*.*$/, "")
     |> String.replace(~r/\*.*$/, "")
     |> String.trim_trailing("/")
-  end
-
-  @spec shorter_pattern(String.t(), String.t()) :: String.t()
-  defp shorter_pattern(a, b) do
-    if String.length(a) <= String.length(b), do: a, else: b
   end
 
   # Accepts a pre-stripped manifest: list of {stripped_dir, entry} tuples.

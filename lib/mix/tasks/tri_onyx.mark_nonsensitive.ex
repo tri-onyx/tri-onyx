@@ -5,11 +5,12 @@ defmodule Mix.Tasks.TriOnyx.MarkNonsensitive do
   Commits an override that marks a file as non-sensitive, regardless of
   any prior sensitivity assigned by agent writes.
 
-      $ mix tri_onyx.mark_nonsensitive <file_path>
+      $ mix tri_onyx.mark_nonsensitive <canonical_path>
 
-  The file path is relative to the workspace directory. The override is
-  recorded as a git commit with `Sc-Override: non-sensitive` so that
-  subsequent Read operations classify the file as `:low` sensitivity.
+  The path is canonical: `agents/<name>/<path>` for an agent repo or
+  `shared/<name>/<path>` for a shared repo. The override is recorded as
+  a git commit with `Sc-Override: non-sensitive` so that subsequent Read
+  operations classify the file as `:low` sensitivity.
 
   This is the human operator's escape hatch — if an agent incorrectly
   marks a file as sensitive, the operator can override it.
@@ -17,7 +18,7 @@ defmodule Mix.Tasks.TriOnyx.MarkNonsensitive do
   ## Examples
 
       $ mix tri_onyx.mark_nonsensitive agents/researcher/output.txt
-      $ mix tri_onyx.mark_nonsensitive shared/report.md
+      $ mix tri_onyx.mark_nonsensitive shared/knowledge/report.md
   """
 
   use Mix.Task
@@ -26,25 +27,16 @@ defmodule Mix.Tasks.TriOnyx.MarkNonsensitive do
 
   @impl Mix.Task
   def run([]) do
-    Mix.shell().error("Usage: mix tri_onyx.mark_nonsensitive <file_path>")
+    Mix.shell().error("Usage: mix tri_onyx.mark_nonsensitive <canonical_path>")
     Mix.shell().info("")
-    Mix.shell().info("  file_path — path relative to the workspace directory")
+    Mix.shell().info("  canonical_path — agents/<name>/<path> or shared/<name>/<path>")
   end
 
   def run([file_path | _rest]) do
-    workspace_path = TriOnyx.Workspace.workspace_dir()
-
-    full_path = Path.join(workspace_path, file_path)
-
-    unless File.exists?(full_path) do
-      Mix.shell().error("File not found: #{full_path}")
-      exit({:shutdown, 1})
-    end
-
-    current = GitProvenance.file_sensitivity(workspace_path, file_path)
+    current = GitProvenance.file_sensitivity(file_path)
     Mix.shell().info("Current sensitivity: #{current}")
 
-    case GitProvenance.mark_non_sensitive(workspace_path, file_path) do
+    case GitProvenance.mark_non_sensitive(file_path) do
       :ok ->
         Mix.shell().info("Marked #{file_path} as non-sensitive (override committed)")
 

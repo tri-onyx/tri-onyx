@@ -7,14 +7,10 @@ This guide walks you through setting up a working TriOnyx instance from a fresh 
 ## Prerequisites
 
 - **Docker** with Compose v2 (`docker compose`)
-- **Go 1.22+** (for compiling the FUSE driver)
 - **UV** ([astral.sh/uv](https://docs.astral.sh/uv/)) — Python package manager used throughout the project
 - **Git**
 - A **Claude API key** or OAuth token (from [console.anthropic.com](https://console.anthropic.com))
 - A **Matrix account** for the bot (see [Matrix Setup](matrix-guide.md) for details), or a **Slack workspace** with a bot app
-
-!!! warning "Linux recommended"
-    The FUSE driver requires `/dev/fuse`, which is available natively on Linux. macOS works for gateway and connector development but cannot run agent containers with FUSE sandboxing without a Linux VM.
 
 ---
 
@@ -47,10 +43,12 @@ cp .env.example .env
 # Connector configuration (Matrix/Slack room mappings)
 mkdir -p secrets
 cp secrets/connector-config.yaml.example secrets/connector-config.yaml
-
-# Workspace (agent definitions, personality, directory structure)
-cp -r workspace.template/ workspace/
 ```
+
+You do **not** need to copy `workspace.template/` by hand. On first start the
+gateway seeds the workspace automatically (`Workspace.ensure_initialized`),
+creating the shared `core` (AGENTS.md + personality) and `definitions` (agent
+definitions) git repos from the template.
 
 !!! tip "Secrets are safe"
     The `.env` and `secrets/` directory are gitignored — your secrets will never be committed.
@@ -113,27 +111,27 @@ adapters:
         show_steps: true
 ```
 
-Each room maps to an agent by name. The agent name must match a file in `workspace/agent-definitions/` (without the `.md` extension).
+Each room maps to an agent by name. The agent name must match a definition file in the `definitions` repo (without the `.md` extension).
 
 ---
 
 ## 3. Set up the workspace
 
-The workspace template gives you the full set of agent definitions and an empty directory structure. Customize it for your setup:
+The workspace is a set of **git repositories** managed by the gateway. On first start it seeds two shared repos from `workspace.template/`: `core` (AGENTS.md + personality) and `definitions` (agent definition files). On the host they live under `workspace/bare/` (bare repos, the source of truth) with gateway-managed working trees under `workspace/trees/`. Customize them for your setup:
 
 ### Personality (optional)
 
-The `workspace/personality/` directory shapes how your agents communicate. Edit these files to set the tone:
+The personality files in the `core` repo shape how your agents communicate. Edit these files to set the tone:
 
 - **`SOUL.md`** — Core behavioral principles and communication style
 - **`IDENTITY.md`** — Agent name, role description, and how it introduces itself
 - **`USER.md`** — User profile and preferences (auto-generated from session logs)
 
-These files are read by agents that have `personality` in their `fs_read` paths. You can leave them as-is to start with the defaults.
+These files are read by agents that have `core` in their `repos_read` list. You can leave them as-is to start with the defaults.
 
 ### Agent definitions
 
-The template includes all built-in agent definitions in `workspace/agent-definitions/`. Each is a markdown file with YAML frontmatter:
+The template includes all built-in agent definitions, seeded into the `definitions` repo. Each is a markdown file with YAML frontmatter:
 
 ```markdown
 ---
@@ -141,49 +139,40 @@ name: main
 model: claude-sonnet-4-6
 tools: Read, Write, Edit, Bash, Grep, Glob
 network: none
-fs_read:
-  - "/code/**"
-fs_write:
-  - "/code/**"
+repos_read:
+  - core
+  - knowledge
+repos_write:
+  - knowledge
 ---
 
 You are the main agent. Handle general tasks...
 ```
 
+Each agent's own repo is always mounted read-write at `/workspace` (its working directory) — no frontmatter needed for that. `repos_read`/`repos_write` mount additional repos at `/repos/<name>`: shared repo names (`core`, `definitions`, `knowledge`), another agent's repo (`agents/<name>`), or the wildcard `agents/*`.
+
 You can start with just the `main.md` agent and add more as needed. Remove any agent definitions you don't plan to use.
 
-### Agent runtime directories
+### Agent repos
 
-When an agent runs for the first time, the gateway creates a runtime directory under `workspace/agents/<name>/` with:
+When an agent runs for the first time, the gateway creates a git repo for it. Inside the container it is mounted at `/workspace` and holds the agent's persistent state:
 
-- `HEARTBEAT.md` — Agent status, updated periodically
-- `memory/` — Persistent memory files
-- `TODO.md` — Agent task list
+- `/workspace/HEARTBEAT.md` — Agent status, updated periodically
+- `/workspace/NOTES.md` — Agent notes
+- `/workspace/memory/<date>.md` — Persistent memory files
+- `/workspace/reflections/` — Reflection output
 
-These are created automatically — you don't need to set them up manually.
+These are created automatically — you don't need to set them up manually. Working trees contain no `.git`; the gateway commits each session's changes (with taint/sensitivity provenance trailers) and pushes them to the bare repo at session end.
 
 ---
 
 ## 4. Build images
 
-### FUSE driver
-
-The agent image requires a pre-compiled FUSE binary. Build it inside a Go container:
-
-```bash
-docker run --rm -v $(pwd)/fuse:/src -w /src golang:1.22 \
-  go build -o tri-onyx-fs ./cmd/tri-onyx-fs
-```
-
-This produces `fuse/tri-onyx-fs`, which gets copied into the agent image.
-
-### Docker images
-
 ```bash
 # Gateway (Elixir/OTP)
 docker build -f gateway.Dockerfile -t tri-onyx-gateway:latest .
 
-# Agent runtime (Python + FUSE sandbox)
+# Agent runtime (Python + Claude SDK)
 docker build --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) \
   -f agent.Dockerfile -t tri-onyx-agent:latest .
 
@@ -292,9 +281,8 @@ uv run scripts/generate-templates.py --check
 ## Troubleshooting
 
 ??? question "Agent container fails to start"
-    - Check that `fuse/tri-onyx-fs` exists and was compiled for Linux (not macOS)
-    - Ensure Docker has access to `/dev/fuse`: `ls -la /dev/fuse`
     - Verify `HOST_UID`/`HOST_GID` match your user: `id -u && id -g`
+    - Check the gateway logs for mount errors — the gateway prepares each agent's working trees under `workspace/trees/` before starting the container
 
 ??? question "connector_token mismatch"
     `TRI_ONYX_CONNECTOR_TOKEN` must be identical in `.env` (read by both services via Docker Compose) and in `secrets/connector-config.yaml` under `gateway.token`.

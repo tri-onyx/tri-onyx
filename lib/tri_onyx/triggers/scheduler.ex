@@ -412,7 +412,7 @@ defmodule TriOnyx.Triggers.Scheduler do
 
   @spec heartbeat_content_empty?(String.t()) :: boolean()
   defp heartbeat_content_empty?(agent_name) do
-    case Workspace.read_file("agents/#{agent_name}/HEARTBEAT.md") do
+    case Workspace.read_agent_file(agent_name, "HEARTBEAT.md") do
       {:ok, content} -> String.trim(content) == String.trim(@heartbeat_template)
       {:error, _} -> true
     end

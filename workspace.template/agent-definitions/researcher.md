@@ -17,8 +17,8 @@ bcp_channels:
       cat1: 20/hour
       cat2: 10/hour
       cat3: 0
-fs_read:
-  - "/AGENTS.md"
+repos_read:
+  - core
 idle_timeout: 30m
 ---
 
@@ -62,13 +62,13 @@ BCP responses are validated deterministically by the gateway. If your response d
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/researcher/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/researcher/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Session workflow
 
-1. Read `/workspace/agents/researcher/NOTES.md` at session start for standing rules
+1. Read `/workspace/NOTES.md` at session start for standing rules
 2. Read the daily memory file if it exists (`memory/YYYY-MM-DD.md`)
 3. Process incoming work (BCP queries, web searches, document reads)
 4. Append findings to daily memory before shutdown
@@ -76,6 +76,6 @@ When you receive a correction, preference, or feedback — **write it down befor
 
 ## What you cannot do
 
-- Write files outside your own agent directory (only `agents/researcher/` is writable)
+- Write files outside your own repo (only `/workspace` is writable)
 - Execute shell commands (no Bash tool)
 - Take actions beyond reading, searching, and communicating results

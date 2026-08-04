@@ -2,7 +2,11 @@
 # requires-python = ">=3.11"
 # dependencies = ["anthropic>=0.52", "claude-agent-sdk==0.1.37", "pyyaml>=6"]
 # ///
-"""Generate workspace/personality/USER.md from agent session logs.
+"""Generate the personality/USER.md profile from agent session logs.
+
+Writes to the gateway's working tree of the `core` shared repo
+(workspace/trees/_gw/core/personality/USER.md) and commits + pushes the
+change; falls back to workspace/personality/USER.md pre-migration.
 
 Two-phase pipeline:
   Phase 1: Summarize each session into per-user signals (parallel via anthropic SDK, Haiku)
@@ -17,6 +21,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -26,8 +31,20 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 LOGS_DIR = ROOT / "logs"
 CACHE_DIR = ROOT / ".cache" / "user-profile"
-OUTPUT_PATH = ROOT / "workspace" / "personality" / "USER.md"
-DEFINITIONS_DIR = ROOT / "workspace" / "agent-definitions"
+WORKSPACE = ROOT / "workspace"
+
+# The gateway's working tree of the `core` shared repo (post-migration)
+CORE_TREE = WORKSPACE / "trees" / "_gw" / "core"
+CORE_GITDIR = WORKSPACE / "gitdirs" / "_gw" / "core.git"
+LEGACY_OUTPUT_PATH = WORKSPACE / "personality" / "USER.md"
+
+# Agent definitions from the `definitions` shared repo's read-only checkout,
+# falling back to the pre-migration location
+_RO_DEFINITIONS_DIR = WORKSPACE / "trees" / "_ro" / "definitions"
+_LEGACY_DEFINITIONS_DIR = WORKSPACE / "agent-definitions"
+DEFINITIONS_DIR = (
+    _RO_DEFINITIONS_DIR if any(_RO_DEFINITIONS_DIR.glob("*.md")) else _LEGACY_DEFINITIONS_DIR
+)
 
 SUMMARIZER_MODEL = "claude-haiku-4-5-20251001"
 AGGREGATOR_MODEL = os.environ.get("PROFILE_AGGREGATOR_MODEL", "claude-sonnet-4-6")
@@ -86,6 +103,55 @@ Guidelines:
 - Omit signals that are too vague or trivial
 - Keep the total length under 800 words
 - Do NOT include any preamble or explanation — output only the Markdown profile"""
+
+
+def resolve_output_path() -> tuple[Path, bool]:
+    """Return (output_path, in_core_repo). Prefers the _gw core tree."""
+    if CORE_TREE.is_dir():
+        return CORE_TREE / "personality" / "USER.md", True
+    return LEGACY_OUTPUT_PATH, False
+
+
+def commit_and_push_core(rel_path: str) -> None:
+    """Commit + push the profile in the core repo via explicit git-dir/work-tree."""
+
+    def git(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+        env = os.environ.copy()
+        env.update(
+            GIT_AUTHOR_NAME="TriOnyx",
+            GIT_AUTHOR_EMAIL="gateway@tri_onyx",
+            GIT_COMMITTER_NAME="TriOnyx",
+            GIT_COMMITTER_EMAIL="gateway@tri_onyx",
+        )
+        cmd = [
+            "git",
+            "-c",
+            "safe.directory=*",
+            f"--git-dir={CORE_GITDIR}",
+            f"--work-tree={CORE_TREE}",
+            *args,
+        ]
+        # cwd inside the tree so pathspec args resolve against the work tree
+        return subprocess.run(
+            cmd, check=check, env=env, cwd=CORE_TREE, capture_output=True, text=True
+        )
+
+    if not CORE_GITDIR.is_dir():
+        print(f"Warning: {CORE_GITDIR} not found — profile written but not committed.")
+        return
+
+    git("add", rel_path)
+    status = git("status", "--porcelain", "--", rel_path)
+    if not status.stdout.strip():
+        print("No profile changes to commit.")
+        return
+    git("commit", "-m", "chore(personality): regenerate USER.md")
+    result = git("push", "origin", "main", check=False)
+    if result.returncode != 0:
+        print("Warning: push of core repo failed:", file=sys.stderr)
+        print(result.stderr or result.stdout, file=sys.stderr)
+        sys.exit(1)
+    print("Committed and pushed USER.md to the core repo.")
 
 
 def get_anthropic_client():
@@ -415,9 +481,12 @@ async def main():
     profile = await phase2(signals)
 
     if profile:
-        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        OUTPUT_PATH.write_text(profile + "\n")
-        print(f"\nProfile written to {OUTPUT_PATH}")
+        output_path, in_core_repo = resolve_output_path()
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(profile + "\n")
+        print(f"\nProfile written to {output_path}")
+        if in_core_repo:
+            commit_and_push_core("personality/USER.md")
     else:
         print("\nNo profile generated (no signals).")
 

@@ -56,8 +56,8 @@ defmodule TriOnyx.Connectors.GitHubTest do
   end
 
   describe "repo_dir/1" do
-    test "builds the clone path under the workspace" do
-      assert GitHub.repo_dir("o/r") =~ ~r"/repos/o/r\z"
+    test "builds the clone path under the workspace data dir" do
+      assert GitHub.repo_dir("o/r") =~ ~r"/data/github/o/r\z"
     end
   end
 end

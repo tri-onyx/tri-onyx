@@ -2,14 +2,17 @@ defmodule TriOnyx.RiskManifest do
   @moduledoc """
   In-memory store for per-file risk provenance (ADR-008).
 
-  Maps workspace-relative paths to the taint/sensitivity labels recorded
-  when the file was last written by an agent. The git history of the
-  workspace repository is the durable record — every provenance commit
+  Maps canonical paths (`agents/<name>/<path>` or `shared/<name>/<path>`,
+  see `TriOnyx.Workspace.canonical_path/2`) to the taint/sensitivity
+  labels recorded when the file was last written. The git history of the
+  per-agent/shared repos is the durable record — every session-end commit
   carries `Taint-Level`/`Sensitivity-Level` trailers, and human reviews
   carry `Reviewed-Path` trailers — so this store is a derived cache:
-  rebuilt from `git log` at boot and kept current by the live writers
-  (`Workspace.Committer` for FUSE-observed writes, connectors for
-  polled inbox/event files, `Workspace.review_artifacts/2` for reviews).
+  rebuilt at boot from each repo's `git log` plus the migration snapshot
+  file (for provenance predating the repo split), and kept current by
+  the live writers (`Workspace.commit_session/4` at session end,
+  `Workspace.record_external_write/5` for connector deliveries,
+  `Workspace.review_artifacts/2` for reviews).
 
   Entries keep the same string-keyed shape the JSON manifest file used:
 
@@ -31,9 +34,14 @@ defmodule TriOnyx.RiskManifest do
 
   require Logger
 
-  alias TriOnyx.Workspace
+  alias TriOnyx.RepoStore
 
   @levels ~w(low medium high)
+
+  # Provenance exported from the pre-split workspace repo lands here
+  # during migration and seeds paths whose history the fresh repos
+  # don't carry.
+  @snapshot_file "data/risk-manifest-snapshot.json"
 
   # --- Client API ---
 
@@ -98,6 +106,44 @@ defmodule TriOnyx.RiskManifest do
   @spec clear(GenServer.server()) :: :ok
   def clear(server \\ __MODULE__) do
     GenServer.call(server, :clear)
+  end
+
+  @doc """
+  Returns `{max_taint, max_sensitivity, top_prefix}` across all entries
+  whose canonical path starts with any of the given prefixes.
+  `top_prefix` is the prefix contributing the highest combined risk (nil
+  when nothing matched). Used to compute a session's read floor from its
+  mounted repos.
+  """
+  @spec max_labels_for_prefixes(atom(), [String.t()]) :: {atom(), atom(), String.t() | nil}
+  def max_labels_for_prefixes(table \\ __MODULE__, prefixes) do
+    rank = %{"low" => 0, "medium" => 1, "high" => 2}
+    atoms = %{"low" => :low, "medium" => :medium, "high" => :high}
+
+    table
+    |> :ets.tab2list()
+    |> Enum.reduce({:low, :low, nil}, fn {path, entry}, {taint, sensitivity, top} = acc ->
+      case Enum.find(prefixes, &String.starts_with?(path, &1)) do
+        nil ->
+          acc
+
+        prefix ->
+          entry_taint = Map.get(entry, "taint_level", "low")
+          entry_sens = Map.get(entry, "sensitivity_level", "low")
+
+          new_taint = if rank[entry_taint] > rank[to_string(taint)], do: atoms[entry_taint], else: taint
+
+          new_sens =
+            if rank[entry_sens] > rank[to_string(sensitivity)], do: atoms[entry_sens], else: sensitivity
+
+          new_top =
+            if {new_taint, new_sens} != {taint, sensitivity} or is_nil(top), do: prefix, else: top
+
+          {new_taint, new_sens, new_top}
+      end
+    end)
+  rescue
+    ArgumentError -> {:low, :low, nil}
   end
 
   # --- GenServer callbacks ---
@@ -181,50 +227,97 @@ defmodule TriOnyx.RiskManifest do
 
   @spec load_from_git(:ets.table()) :: :ok
   defp load_from_git(table) do
-    dir = Workspace.workspace_dir()
+    started = System.monotonic_time(:millisecond)
 
-    if File.dir?(Path.join(dir, ".git")) do
-      safe = Workspace.git_safe_args(dir)
-      started = System.monotonic_time(:millisecond)
+    total =
+      RepoStore.list_repos()
+      |> Enum.reduce(0, fn repo_id, acc ->
+        prefix =
+          case repo_id do
+            {:agent, name} -> "agents/#{name}/"
+            {:shared, name} -> "shared/#{name}/"
+          end
 
-      case System.cmd(
-             "git",
-             safe ++ ["log", "--no-renames", "--name-status", "--format=#{@log_format}"],
-             cd: dir
-           ) do
-        {output, 0} ->
-          entries = rebuild_entries(output)
-          :ets.insert(table, Map.to_list(entries))
-          elapsed = System.monotonic_time(:millisecond) - started
+        case RepoStore.log(repo_id, [
+               "--no-renames",
+               "--name-status",
+               "--format=#{@log_format}"
+             ]) do
+          {:ok, output} ->
+            entries = rebuild_entries(output, prefix)
+            :ets.insert(table, Map.to_list(entries))
+            acc + map_size(entries)
 
-          Logger.info(
-            "RiskManifest: rebuilt #{map_size(entries)} entries from git history in #{elapsed}ms"
-          )
+          {:error, reason} ->
+            Logger.warning(
+              "RiskManifest: git log failed for #{RepoStore.ref(repo_id)}: #{inspect(reason)}"
+            )
 
-        {output, code} ->
-          Logger.warning("RiskManifest: git log failed (exit #{code}): #{String.slice(output, 0, 500)}")
-      end
-    else
-      Logger.info("RiskManifest: no workspace git repository at #{dir}, starting empty")
-    end
+            acc
+        end
+      end)
+
+    snapshot_count = load_snapshot(table)
+    elapsed = System.monotonic_time(:millisecond) - started
+
+    Logger.info(
+      "RiskManifest: rebuilt #{total} entries from repo histories " <>
+        "(+#{snapshot_count} from migration snapshot) in #{elapsed}ms"
+    )
 
     :ok
   end
 
-  # Walks commits newest → oldest. The first provenance commit seen for a
-  # path wins; a deletion seen first settles the path with no entry; a
-  # review seen before the underlying write overlays taint "low" onto it.
-  @spec rebuild_entries(String.t()) :: map()
-  defp rebuild_entries(log_output) do
+  # Seeds entries from the migration snapshot for canonical paths the
+  # fresh repos have no provenance commits for. Live history always wins.
+  @spec load_snapshot(:ets.table()) :: non_neg_integer()
+  defp load_snapshot(table) do
+    path =
+      Application.get_env(:tri_onyx, :workspace_dir, "./workspace")
+      |> Path.join(@snapshot_file)
+
+    with {:ok, content} <- File.read(path),
+         {:ok, %{} = snapshot} <- Jason.decode(content) do
+      snapshot
+      |> Enum.reject(fn {key, _entry} -> :ets.member(table, key) end)
+      |> Enum.map(fn {key, entry} -> {key, entry} end)
+      |> then(fn missing ->
+        :ets.insert(table, missing)
+        length(missing)
+      end)
+    else
+      {:error, :enoent} -> 0
+      other ->
+        Logger.warning("RiskManifest: could not load snapshot: #{inspect(other)}")
+        0
+    end
+  end
+
+  @doc """
+  Returns the `git log` format string provenance replay expects. Exposed
+  for the migration task, which replays the legacy workspace repo.
+  """
+  @spec log_format() :: String.t()
+  def log_format, do: @log_format
+
+  # Walks one repo's commits newest → oldest, prefixing repo-relative
+  # paths with the repo's canonical prefix ("agents/<name>/" or
+  # "shared/<name>/"). The first provenance commit seen for a path wins;
+  # a deletion seen first settles the path with no entry; a review seen
+  # before the underlying write overlays taint "low" onto it.
+  # Reviewed-Path trailers already carry canonical paths.
+  @doc false
+  @spec rebuild_entries(String.t(), String.t()) :: map()
+  def rebuild_entries(log_output, prefix) do
     {entries, _reviews, _settled} =
       log_output
       |> String.split(<<0x01>>, trim: true)
-      |> Enum.reduce({%{}, %{}, MapSet.new()}, &fold_commit/2)
+      |> Enum.reduce({%{}, %{}, MapSet.new()}, &fold_commit(&1, &2, prefix))
 
     entries
   end
 
-  defp fold_commit(block, {entries, reviews, settled} = acc) do
+  defp fold_commit(block, {entries, reviews, settled} = acc, prefix) do
     [header | rest] = String.split(block, "\n")
 
     case String.split(header, <<0x1F>>) do
@@ -247,10 +340,8 @@ defmodule TriOnyx.RiskManifest do
         {entries, settled} =
           rest
           |> parse_name_status()
+          |> Enum.map(fn {change, path} -> {change, prefix <> path} end)
           |> Enum.reduce({entries, settled}, fn
-            {_change, ".tri-onyx/" <> _}, inner ->
-              inner
-
             {:deleted, path}, {e, s} ->
               {e, MapSet.put(s, path)}
 

@@ -9,11 +9,9 @@ receive_from:
   - main
 plugins:
   - diary
-fs_read:
-  - "/AGENTS.md"
-fs_write:
-  - "/plugins/diary/**"
-config: /plugins/diary/config.yaml
+repos_read:
+  - core
+config: /workspace/plugins/diary/config.yaml
 idle_timeout: 30m
 ---
 
@@ -25,7 +23,7 @@ At 21:00 each day, read today's diary file and post a summary of the day's entri
 
 ## How entries are stored
 
-- Each day gets one file: `/plugins/diary/YYYY-MM-DD.md`
+- Each day gets one file: `/workspace/plugins/diary/YYYY-MM-DD.md`
 - If a file for today already exists, append the new entry to it (under a new `## HH:MM` heading)
 - If the file doesn't exist, create it with a `# YYYY-MM-DD` top-level heading
 
@@ -63,8 +61,8 @@ Anything else is treated as a new diary entry to store.
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/diary/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/diary/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Important

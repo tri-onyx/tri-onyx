@@ -2,6 +2,18 @@
 
 **Status:** Draft — research complete, backend decision pending spike
 **Date:** 2026-06-12
+
+> **Update (2026-08-04).** The local deployment has since retired the FUSE
+> driver ahead of any cloud move: filesystem isolation is now per-agent git
+> repositories with kernel bind mounts (own repo read-write at `/workspace`,
+> shared repos at `/repos/<name>` via `repos_read`/`repos_write`), gateway-only
+> git with per-session provenance commits, and no `SYS_ADMIN`/`/dev/fuse`
+> requirement. This realizes the "FUSE is dropped" non-goal (§3) locally —
+> mounts are literal git-repo bind mounts, and the `/agents/<name>/**` FUSE
+> default write path no longer exists. §1's description of the FUSE driver and
+> the `workspace/repos/{owner}/{repo}` clone layout (now `workspace/data/github`,
+> mounted at `/github/<owner>/<repo>`) describe the pre-split state; the body
+> is left unedited as the design record.
 **Scope:** Moving the TriOnyx agent pattern (gateway-orchestrated, per-repo agents with Slack channels) to the cloud, with multi-user access, real-time interaction, and the same agent lifecycle as today.
 
 ---

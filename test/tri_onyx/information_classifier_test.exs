@@ -57,8 +57,8 @@ defmodule TriOnyx.InformationClassifierTest do
       assert reason =~ "controlled path"
     end
 
-    test "Read from /mnt/host path has low taint" do
-      result = InformationClassifier.classify_tool_result("Read", %{"file_path" => "/mnt/host/project/file.txt"})
+    test "Read from a mounted repo path has low taint" do
+      result = InformationClassifier.classify_tool_result("Read", %{"file_path" => "/repos/knowledge/obsidian/index.md"})
       assert %{taint: :low} = result
     end
 

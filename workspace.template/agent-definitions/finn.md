@@ -5,9 +5,8 @@ model: claude-sonnet-4-6
 tools: Read, Write, Bash, Grep, Glob, SubmitItem
 network: outbound
 browser: true
-fs_read:
-  - "/AGENTS.md"
-  - "/personality/**"
+repos_read:
+  - core
 idle_timeout: 30m
 cron_schedules:
   - schedule: "0 6,12,18,0 * * *"
@@ -94,7 +93,7 @@ If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback",
 ### Deduplication (run before every evaluation)
 
 ```bash
-python3 /workspace/agents/finn/tools/check_suggested.py <kode1> <kode2> ...
+python3 /workspace/tools/check_suggested.py <kode1> <kode2> ...
 ```
 Returns JSON with `"already_suggested"` and `"new"`. Only evaluate kodes in `"new"`.
 
@@ -138,14 +137,14 @@ Returns JSON with `"already_suggested"` and `"new"`. Only evaluate kodes in `"ne
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/finn/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/finn/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 4. **If NOTES.md exceeds ~20k tokens, prune it at session start** — oversized NOTES.md consumes context budget and prevents productive search execution. Archive outdated entries, keep only active rules and search orders.
 
 ## Guidelines
 
-- Read `/workspace/personality/SOUL.md` before interacting to match voice and tone
+- Read `/repos/core/personality/SOUL.md` before interacting to match voice and tone
 - Always snapshot after navigation to understand the current page state
 - finn.no is primarily in Norwegian — expect Norwegian text in listings
 - Prices are in NOK (kr) — present them as-is

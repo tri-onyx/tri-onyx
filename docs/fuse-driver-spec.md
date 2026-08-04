@@ -1,5 +1,17 @@
 # TriOnyx FUSE Driver — Agent Build Prompt
 
+!!! warning "Historical — superseded (2026-08-04)"
+    The FUSE driver described here has been **removed from TriOnyx**. Filesystem
+    isolation is now implemented with **per-agent git repositories and kernel bind
+    mounts** — "the mount set is the ACL". Each agent's own repo is mounted
+    read-write at `/workspace`, and shared repos are mounted at `/repos/<name>`
+    (read-write or read-only per the `repos_write`/`repos_read` definition fields,
+    which replaced `fs_read`/`fs_write`). Agent containers no longer need
+    `SYS_ADMIN`, `/dev/fuse`, or AppArmor overrides, and the `fuse/` source tree
+    and `tri-onyx-fs` binary no longer exist. This page is kept unchanged as a
+    historical record of the retired design. See the
+    [Architecture Decisions](decisions.md) page (ADR 012) for the replacement.
+
 You are building `tri-onyx-fs`, a FUSE filesystem driver for the TriOnyx agent sandboxing system. This driver enforces fine-grained file access control inside Docker containers where AI agents run.
 
 ## Context

@@ -29,7 +29,7 @@ and creating pull requests, and making documentation changes when asked.
 
 ## How you work with the repository
 
-- Your working copy is at `/workspace/repos/oslokommune/golden-path-docs/`.
+- Your working copy is at `/github/oslokommune/golden-path-docs/`.
   Read, search, and edit files there with your normal tools, and run **local**
   git (status, diff, checkout, branch, add, commit, log) via Bash inside it.
 - All **remote** operations go through the `GitHub` tool — the gateway runs
@@ -51,7 +51,7 @@ and creating pull requests, and making documentation changes when asked.
 ## Reading other repositories
 
 You have a **read-only mirror** of `oslokommune/golden-path-boilerplate` at
-`/workspace/repos-ro/oslokommune/golden-path-boilerplate/` — current as of your
+`/github-ro/oslokommune/golden-path-boilerplate/` — current as of your
 session start. Use it to verify that documentation matches the actual
 boilerplate. You cannot modify it or run GitHub operations against it; for
 changes to that repo, coordinate with `golden-path-boilerplate`.

@@ -6,7 +6,7 @@ import Config
 # Only override from env vars when not in test (test uses config/test.exs values)
 unless config_env() == :test do
   config :tri_onyx,
-    agents_dir: System.get_env("TRI_ONYX_AGENTS_DIR", "./workspace/agent-definitions"),
+    agents_dir: System.get_env("TRI_ONYX_AGENTS_DIR", "./workspace/trees/_ro/definitions"),
     audit_dir: System.get_env("TRI_ONYX_AUDIT_DIR", "~/.tri-onyx/audit"),
     workspace_dir: System.get_env("TRI_ONYX_WORKSPACE_DIR", "./workspace"),
     port: String.to_integer(System.get_env("TRI_ONYX_PORT", "4000"))

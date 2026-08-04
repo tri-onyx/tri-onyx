@@ -15,8 +15,7 @@ defmodule TriOnyx.RouterTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Grep"],
     network: :none,
-    fs_read: ["/workspace/repo/src/**"],
-    fs_write: [],
+    repos_read: ["core"],
     system_prompt: "You are a test agent."
   }
 
@@ -99,7 +98,7 @@ defmodule TriOnyx.RouterTest do
       body = Jason.decode!(conn.resp_body)
       assert body["name"] == "test-agent"
       assert body["tools"] == ["Read", "Grep"]
-      assert body["fs_read"] == ["/workspace/repo/src/**"]
+      assert body["repos_read"] == ["core"]
       assert body["status"] == "inactive"
     end
 

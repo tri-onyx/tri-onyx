@@ -75,13 +75,12 @@ defmodule TriOnyx.Application do
       # 9. Unified approval queue — human approval for BCP and action tools
       TriOnyx.BCP.ApprovalQueue,
 
-      # 10. Workspace committer — incremental provenance (risk manifest + debounced commits)
-      TriOnyx.Workspace.Committer,
+      # 10. Repo sweeper — crash-recovery commit of dirty working trees
+      # (sessions and gateway writers commit their own changes; this is
+      # the backstop)
+      TriOnyx.RepoStore.Sweeper,
 
-      # 11. Workspace sweeper — periodic commit of non-FUSE changes
-      TriOnyx.Workspace.Sweeper,
-
-      # 12. HTTP server
+      # 11. HTTP server
       {Bandit, plug: TriOnyx.Router, port: port}
     ]
     |> Enum.reject(&is_nil/1)
@@ -113,8 +112,10 @@ defmodule TriOnyx.Application do
         # (long-lived) so it survives across Task processes that insert/pop queries
         TriOnyx.BCP.Channel.ensure_table()
 
-        load_and_display_agents()
+        # Bootstrap repos before loading definitions — the agents dir
+        # lives inside the definitions repo's gateway tree.
         TriOnyx.Workspace.ensure_initialized()
+        load_and_display_agents()
         Logger.info("TriOnyx gateway ready on port #{port}")
         {:ok, pid}
 

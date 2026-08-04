@@ -17,13 +17,22 @@ defmodule TriOnyx.AgentDefinition do
   - `description` — human-readable purpose
   - `model` — LLM model ID (must start with "claude-", e.g. "claude-sonnet-4-20250514")
   - `network` — network access policy: "none", "outbound", or list of hosts
-  - `fs_read` — glob patterns for filesystem read access
-  - `fs_write` — glob patterns for filesystem write access (implies read)
+  - `repos_read` — repos mounted read-only at `/repos/<name>`. Entries are shared
+    repo names (`core`, `knowledge`, ...), `agents/<name>` for another agent's
+    repo, or the `agents/*` wildcard (all agent repos). Read-only mounts show
+    last-committed state, refreshed after every push.
+  - `repos_write` — shared repos mounted read-write at `/repos/<name>` (the
+    agent gets its own clone, synced through the bare repo at session
+    boundaries). The agent's own repo is always mounted read-write at
+    `/workspace` and never needs declaring.
   - `send_to` — list of agent names this agent is allowed to send messages to
   - `receive_from` — list of agent names this agent is allowed to receive messages from
   - `idle_timeout` — duration after which an idle session auto-stops (e.g. "30s", "5m", "1h")
   - `skills` — list of Claude Code skill names to load (from `.claude/skills/<name>/SKILL.md`)
-  - `plugins` — list of workspace plugin names (auto-injects FUSE read paths for `/plugins/<name>/**`)
+  - `plugins` — list of plugin names. Plugins live inside a repo the agent
+    already mounts (its own repo at `/workspace/plugins/<name>` or a shared
+    repo at `/repos/<repo>/plugins/<name>`); the entrypoint installs their
+    Python dependencies at container start.
   - `base_taint` — inherent taint floor from model provenance: "low", "medium", or "high" (default: "low")
   - `max_effective_risk` — permitted effective risk ceiling: "low", "moderate", "high", or
     "critical" (default: "critical"). The session is killed immediately when its effective
@@ -74,6 +83,15 @@ defmodule TriOnyx.AgentDefinition do
           subscriptions: [bcp_subscription()]
         }
 
+  @type feedback_action :: %{
+          content_dir: String.t() | nil,
+          copy_to: String.t() | nil,
+          notify: String.t() | nil,
+          notify_message: String.t() | nil
+        }
+
+  @type feedback :: %{upvote: feedback_action() | nil}
+
   @type cron_schedule :: %{
           schedule: String.t(),
           message: String.t(),
@@ -86,8 +104,8 @@ defmodule TriOnyx.AgentDefinition do
           model: String.t(),
           tools: [String.t()],
           network: network_policy(),
-          fs_read: [String.t()],
-          fs_write: [String.t()],
+          repos_read: [String.t()],
+          repos_write: [String.t()],
           send_to: [String.t()],
           receive_from: [String.t()],
           restart_targets: [String.t()],
@@ -108,7 +126,8 @@ defmodule TriOnyx.AgentDefinition do
           github_repo: String.t() | nil,
           github_read_repos: [String.t()],
           slack_channel: String.t() | nil,
-          reflection: String.t() | nil
+          reflection: String.t() | nil,
+          feedback: feedback() | nil
         }
 
   @default_model "claude-sonnet-4-20250514"
@@ -125,8 +144,8 @@ defmodule TriOnyx.AgentDefinition do
     model: @default_model,
     tools: [],
     network: :none,
-    fs_read: [],
-    fs_write: [],
+    repos_read: [],
+    repos_write: [],
     send_to: [],
     receive_from: [],
     restart_targets: [],
@@ -146,7 +165,8 @@ defmodule TriOnyx.AgentDefinition do
     github_repo: nil,
     github_read_repos: [],
     slack_channel: nil,
-    reflection: nil
+    reflection: nil,
+    feedback: nil
   ]
 
   @doc """
@@ -316,6 +336,14 @@ defmodule TriOnyx.AgentDefinition do
     %{field: "github_read_repos", message: hint}
   end
 
+  def format_error({:invalid_feedback, hint}) do
+    %{field: "feedback", message: hint}
+  end
+
+  def format_error({:invalid_repo_ref, key, ref, hint}) do
+    %{field: key, message: "Invalid repo reference \"#{ref}\": #{hint}"}
+  end
+
   def format_error({:invalid_cron_schedule, idx, {:missing_field, field}}) do
     %{field: "cron_schedules", message: "Schedule ##{idx + 1}: missing #{field}"}
   end
@@ -393,10 +421,12 @@ defmodule TriOnyx.AgentDefinition do
           %{value: "outbound", label: "Outbound (unrestricted)"}
         ],
         group: "sandbox", order: 0, hint: "Network access policy"},
-      %{key: "fs_read", label: "Filesystem Read", type: "list", required: false, default: [],
-        options: nil, group: "sandbox", order: 1, hint: "Glob patterns for read access"},
-      %{key: "fs_write", label: "Filesystem Write", type: "list", required: false, default: [],
-        options: nil, group: "sandbox", order: 2, hint: "Glob patterns for write access (implies read)"},
+      %{key: "repos_read", label: "Repos (read-only)", type: "list", required: false, default: [],
+        options: nil, group: "sandbox", order: 1,
+        hint: "Repos mounted read-only at /repos/<name>: shared names, agents/<name>, or agents/*"},
+      %{key: "repos_write", label: "Repos (read-write)", type: "list", required: false, default: [],
+        options: nil, group: "sandbox", order: 2,
+        hint: "Shared repos mounted read-write at /repos/<name> (own repo is always writable at /workspace)"},
       %{key: "browser", label: "Browser", type: "boolean", required: false, default: false,
         options: nil, group: "sandbox", order: 3, hint: "Enable browser automation"},
       %{key: "docker_socket", label: "Docker Socket", type: "boolean", required: false, default: false,
@@ -434,6 +464,10 @@ defmodule TriOnyx.AgentDefinition do
         options: nil, group: "messaging", order: 4,
         hint: "Business continuity protocol channels (YAML)",
         yaml_example: "- peer: other-agent\n  role: controller\n  rates:\n    cat1: 10/minute\n    cat2: 5/minute\n    cat3: 0"},
+      %{key: "feedback", label: "Item Feedback", type: "yaml", required: false, default: nil,
+        options: nil, group: "messaging", order: 6,
+        hint: "Deterministic gateway handling of 👍/👎 reactions on submitted items (YAML)",
+        yaml_example: "upvote:\n  content_dir: /plugins/newsagg/saved\n  copy_to: /obsidian/shared/sources/articles\n  notify: wiki\n  notify_message: \"New article source filed: sources/articles/{file}\""},
 
       # Scheduling
       %{key: "heartbeat_every", label: "Heartbeat Interval", type: "duration", required: false,
@@ -484,10 +518,10 @@ defmodule TriOnyx.AgentDefinition do
 
   @spec frontmatter_field_order() :: [String.t()]
   defp frontmatter_field_order do
-    ~w(name description model tools network fs_read fs_write send_to receive_from
+    ~w(name description model tools network repos_read repos_write send_to receive_from
        restart_targets browser docker_socket trionyx_repo github_repo github_read_repos
        slack_channel skills plugins input_sources heartbeat_every idle_timeout
-       cron_schedules reflection bcp_channels base_taint max_effective_risk
+       cron_schedules reflection bcp_channels feedback base_taint max_effective_risk
        exclude_from_personalization)
   end
 
@@ -498,6 +532,10 @@ defmodule TriOnyx.AgentDefinition do
     else
       do_serialize_yaml_field(key, value)
     end
+  end
+
+  defp do_serialize_yaml_field("feedback", %{} = value) do
+    ["feedback:" | serialize_nested_map(value, 1)]
   end
 
   defp do_serialize_yaml_field(key, value) when is_binary(value) do
@@ -535,6 +573,20 @@ defmodule TriOnyx.AgentDefinition do
 
   defp do_serialize_yaml_field(key, value) do
     ["#{key}: #{inspect(value)}"]
+  end
+
+  # Serializes a nested map (atom or string keys) as indented YAML, sorted
+  # for stable round-trips. Nil values are omitted.
+  defp serialize_nested_map(map, depth) do
+    indent = String.duplicate("  ", depth)
+
+    map
+    |> Enum.sort_by(fn {k, _v} -> to_string(k) end)
+    |> Enum.flat_map(fn
+      {_k, nil} -> []
+      {k, %{} = nested} -> ["#{indent}#{k}:" | serialize_nested_map(nested, depth + 1)]
+      {k, v} -> ["#{indent}#{k}: #{yaml_quote_if_needed(to_string(v))}"]
+    end)
   end
 
   defp serialize_yaml_complex_list(key, items) when is_list(items) do
@@ -674,8 +726,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, tools} <- parse_tools(yaml),
          {:ok, model} <- parse_model(yaml),
          {:ok, network} <- parse_network(yaml),
-         {:ok, fs_read} <- parse_string_list(yaml, "fs_read"),
-         {:ok, fs_write} <- parse_string_list(yaml, "fs_write"),
+         {:ok, repos_read} <- parse_repo_refs(yaml, "repos_read", name, wildcard: true),
+         {:ok, repos_write} <- parse_repo_refs(yaml, "repos_write", name, wildcard: false),
          {:ok, send_to} <- parse_string_list(yaml, "send_to"),
          {:ok, receive_from} <- parse_string_list(yaml, "receive_from"),
          {:ok, restart_targets} <- parse_string_list(yaml, "restart_targets"),
@@ -696,7 +748,8 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, github_repo} <- parse_github_repo(yaml),
          {:ok, github_read_repos} <- parse_github_read_repos(yaml, github_repo),
          {:ok, slack_channel} <- parse_slack_channel(yaml),
-         {:ok, reflection} <- parse_reflection(yaml) do
+         {:ok, reflection} <- parse_reflection(yaml),
+         {:ok, feedback} <- parse_feedback(yaml) do
       if "SendMessage" in tools and send_to == [] and receive_from == [] do
         Logger.warning(
           "Agent '#{name}' has SendMessage tool but no send_to/receive_from peers declared. " <>
@@ -746,8 +799,8 @@ defmodule TriOnyx.AgentDefinition do
          model: model,
          tools: tools,
          network: network,
-         fs_read: fs_read,
-         fs_write: fs_write,
+         repos_read: repos_read,
+         repos_write: repos_write,
          send_to: send_to,
          receive_from: receive_from,
          restart_targets: restart_targets,
@@ -768,7 +821,8 @@ defmodule TriOnyx.AgentDefinition do
          github_repo: github_repo,
          github_read_repos: github_read_repos,
          slack_channel: slack_channel,
-         reflection: reflection
+         reflection: reflection,
+         feedback: feedback
        }}
     end
   end
@@ -1370,6 +1424,111 @@ defmodule TriOnyx.AgentDefinition do
       other ->
         {:error, {:invalid_field_type, "reflection", :expected_cron_string, other}}
     end
+  end
+
+  # Repo references: a shared repo name, "agents/<name>", or (reads only)
+  # the "agents/*" wildcard. Names are lowercase slugs so they map cleanly
+  # onto directory names.
+  @repo_name_pattern ~r/\A[a-z0-9][a-z0-9_-]*\z/
+
+  @spec parse_repo_refs(map(), String.t(), String.t(), keyword()) ::
+          {:ok, [String.t()]} | {:error, term()}
+  defp parse_repo_refs(yaml, key, agent_name, opts) do
+    wildcard_ok = Keyword.fetch!(opts, :wildcard)
+
+    with {:ok, refs} <- parse_string_list(yaml, key) do
+      invalid =
+        Enum.find(refs, fn ref ->
+          not valid_repo_ref?(ref, wildcard_ok)
+        end)
+
+      foreign_write =
+        if key == "repos_write" do
+          Enum.find(refs, &String.starts_with?(&1, "agents/"))
+        end
+
+      cond do
+        invalid != nil ->
+          {:error,
+           {:invalid_repo_ref, key, invalid,
+            "expected a shared repo name, \"agents/<name>\"#{if wildcard_ok, do: ", or \"agents/*\"", else: ""}"}}
+
+        foreign_write != nil ->
+          {:error,
+           {:invalid_repo_ref, key, foreign_write,
+            "agents cannot write to other agents' repos; share a repo instead"}}
+
+        true ->
+          # The agent's own repo is always mounted — drop redundant refs.
+          {:ok, refs |> Enum.uniq() |> Enum.reject(&(&1 == "agents/#{agent_name}"))}
+      end
+    end
+  end
+
+  defp valid_repo_ref?("agents/*", wildcard_ok), do: wildcard_ok
+
+  defp valid_repo_ref?("agents/" <> name, _wildcard_ok),
+    do: Regex.match?(@repo_name_pattern, name)
+
+  defp valid_repo_ref?(name, _wildcard_ok), do: Regex.match?(@repo_name_pattern, name)
+
+  @feedback_action_keys ~w(content_dir copy_to notify notify_message)
+
+  defp parse_feedback(yaml) do
+    case Map.get(yaml, "feedback") do
+      nil ->
+        {:ok, nil}
+
+      %{} = map ->
+        with :ok <- reject_unknown_keys(map, ["upvote"], "feedback"),
+             {:ok, upvote} <- parse_feedback_action(Map.get(map, "upvote")) do
+          {:ok, %{upvote: upvote}}
+        end
+
+      other ->
+        {:error, {:invalid_field_type, "feedback", :expected_map, other}}
+    end
+  end
+
+  defp parse_feedback_action(nil), do: {:ok, nil}
+
+  defp parse_feedback_action(%{} = map) do
+    with :ok <- reject_unknown_keys(map, @feedback_action_keys, "feedback.upvote"),
+         :ok <- require_optional_strings(map, @feedback_action_keys, "feedback.upvote") do
+      action = %{
+        content_dir: Map.get(map, "content_dir"),
+        copy_to: Map.get(map, "copy_to"),
+        notify: Map.get(map, "notify"),
+        notify_message: Map.get(map, "notify_message")
+      }
+
+      if action.notify != nil and action.notify_message == nil do
+        {:error, {:invalid_feedback, "feedback.upvote.notify requires notify_message"}}
+      else
+        {:ok, action}
+      end
+    end
+  end
+
+  defp parse_feedback_action(other) do
+    {:error, {:invalid_field_type, "feedback.upvote", :expected_map, other}}
+  end
+
+  defp reject_unknown_keys(map, allowed, context) do
+    case Map.keys(map) -- allowed do
+      [] -> :ok
+      unknown -> {:error, {:invalid_feedback, "#{context}: unknown keys #{Enum.join(unknown, ", ")}"}}
+    end
+  end
+
+  defp require_optional_strings(map, keys, context) do
+    Enum.find_value(keys, :ok, fn key ->
+      case Map.get(map, key) do
+        nil -> nil
+        value when is_binary(value) -> nil
+        _other -> {:error, {:invalid_feedback, "#{context}.#{key} must be a string"}}
+      end
+    end)
   end
 
   @spec parse_optional_boolean(map(), String.t()) :: {:ok, boolean()} | {:error, term()}

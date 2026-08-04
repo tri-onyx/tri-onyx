@@ -1,7 +1,9 @@
 # Plugins
 
 Plugins extend agents with reusable skills, commands, agents, hooks, and MCP
-servers. They live in `workspace/plugins/` and are managed with the plugin CLI
+servers. A plugin lives inside the owning agent's repo
+(`/workspace/plugins/<name>`) or in a shared repo
+(`/repos/knowledge/plugins/<name>`) and is managed with the plugin CLI
 (`scripts/tri-onyx-plugin.py`).
 
 ---
@@ -14,9 +16,11 @@ servers. They live in `workspace/plugins/` and are managed with the plugin CLI
      - newsagg
    ```
 
-2. **Gateway** (`sandbox.ex`) adds FUSE read paths for each plugin:
-   - `/plugins/` (parent directory, for readdir)
-   - `/plugins/<name>/**` (all files in the plugin)
+2. **Gateway** resolves each plugin to a directory inside a mounted repo —
+   either the agent's own repo (`/workspace/plugins/<name>`) or a shared repo
+   the agent has in `repos_read`/`repos_write`
+   (`/repos/knowledge/plugins/<name>`). Access follows the repo mount: no
+   mount, no plugin.
 
 3. **Agent runner** passes plugin paths to the Claude Agent SDK:
    ```python
@@ -129,9 +133,11 @@ If a skill invocation returns 0 turns, check these in order:
 2. **Is the manifest valid?** Ensure `.claude-plugin/plugin.json` has valid
    JSON and no paths starting with `../`.
 
-3. **Is the FUSE policy correct?** The agent definition must list the plugin
-   in `plugins:`. Check that `/plugins/<name>/**` appears in the FUSE read
-   policy (`/etc/tri_onyx/fs-policy.json` inside the container).
+3. **Is the plugin directory mounted?** The agent definition must list the
+   plugin in `plugins:`, and the plugin must live in the agent's own repo
+   (`/workspace/plugins/<name>`) or in a shared repo the agent mounts via
+   `repos_read`/`repos_write`. Check inside the container that the directory
+   exists and is readable.
 
 4. **Is the gateway passing the message through?** Messages with `:` in the
    command name should reach the agent. Check gateway logs if the agent
@@ -162,6 +168,8 @@ uv run scripts/tri-onyx-plugin.py upgrade <name>
 uv run scripts/tri-onyx-plugin.py remove <name>
 ```
 
-Plugin metadata is recorded in `workspace/plugins.yaml`. When installed from
-git, the `.git/` directory is stripped so files become mutable workspace
-content.
+Plugins are installed into the target repo (an agent's own repo or a shared
+repo such as `knowledge`) — there is no global plugin directory or manifest.
+When installed from git, the `.git/` directory is stripped so the files become
+regular content of the owning repo, versioned by the gateway's per-session
+commits.

@@ -667,7 +667,6 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   alias TriOnyx.Connectors.Calendar
   alias TriOnyx.TriggerRouter
-  alias TriOnyx.Workspace.Committer
 
   defstruct [
     :caldav_config,
@@ -728,8 +727,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec do_poll(%__MODULE__{}) :: %__MODULE__{}
   defp do_poll(state) do
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.agent_name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.agent_name)
 
     # Query window: past 7 days to future 90 days
     now = DateTime.utc_now()
@@ -750,14 +748,14 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
               if uid && (old_etag == nil or old_etag != etag) do
                 # Record provenance: labels the event file in the risk
-                # manifest and queues a trailer-carrying commit so the
-                # labels survive a manifest rebuild from git history.
-                relative_path = "agents/#{state.agent_name}/events/#{calendar}/#{sanitize_uid(uid)}.json"
+                # manifest and commits with trailers so the labels
+                # survive a manifest rebuild from git history.
+                relative_path = "events/#{calendar}/#{sanitize_uid(uid)}.json"
 
-                Committer.record_write(
+                TriOnyx.Workspace.record_external_write(
                   state.agent_name,
-                  "connector-calendar",
-                  relative_path,
+                  "calendar-connector",
+                  [relative_path],
                   :high,
                   :low
                 )
@@ -769,7 +767,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
                     "Summary: #{event["summary"]}\n" <>
                     "Start: #{event["dtstart"]}\n" <>
                     "Calendar: #{calendar}\n" <>
-                    "Path: /workspace/agents/#{state.agent_name}/events/#{calendar}/#{sanitize_uid(uid)}.json"
+                    "Path: /workspace/events/#{calendar}/#{sanitize_uid(uid)}.json"
 
                 TriggerRouter.dispatch(%{
                   type: :unverified_input,
@@ -804,8 +802,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec load_known_etags(String.t()) :: map()
   defp load_known_etags(agent_name) do
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    state_path = Path.join([workspace_dir, "agents", agent_name, "state", "last_sync.json"])
+    state_path = Path.join([TriOnyx.Workspace.agent_dir(agent_name), "state", "last_sync.json"])
 
     case File.read(state_path) do
       {:ok, contents} ->
@@ -821,8 +818,7 @@ defmodule TriOnyx.Connectors.Calendar.Poller do
 
   @spec write_sync_state(String.t(), map()) :: :ok
   defp write_sync_state(agent_name, etags) do
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    state_dir = Path.join([workspace_dir, "agents", agent_name, "state"])
+    state_dir = Path.join(TriOnyx.Workspace.agent_dir(agent_name), "state")
     File.mkdir_p!(state_dir)
     state_path = Path.join(state_dir, "last_sync.json")
 

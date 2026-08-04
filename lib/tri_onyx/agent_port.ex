@@ -44,8 +44,6 @@ defmodule TriOnyx.AgentPort do
           | {:tool_result, String.t(), String.t(), boolean()}
           | {:result, map()}
           | {:error, String.t()}
-          | {:fuse_write, String.t(), String.t()}
-          | {:fuse_read, String.t(), String.t()}
           | {:send_message_request, String.t(), String.t(), String.t(), map()}
           | {:bcp_query_request, String.t(), String.t(), integer(), map()}
           | {:bcp_response, String.t(), map()}
@@ -660,9 +658,19 @@ defmodule TriOnyx.AgentPort do
       |> Keyword.put(:workspace_dir, host_workspace)
       |> Keyword.put(:log_dir, resolve_host_path(Application.get_env(:tri_onyx, :session_log_dir, "logs")))
 
-    # The FUSE path trie is built from files existing at mount time, so the
-    # repo clone must exist on the host before the container starts — a
-    # clone created mid-session would be invisible to the agent.
+    # All bind-mount sources must exist before `docker run`: the repo
+    # working trees (own tree synced, rw clones fast-forwarded, _ro
+    # checkouts refreshed) and any GitHub clones/mirrors.
+    case TriOnyx.RepoStore.prepare_session(definition) do
+      {:ok, _grants} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "AgentPort: repo tree preparation issue for #{definition.name}: #{inspect(reason)}"
+        )
+    end
+
     ensure_github_clone(definition)
 
     docker_args = Sandbox.build_docker_args(definition, session_id, sandbox_opts)
@@ -972,13 +980,8 @@ defmodule TriOnyx.AgentPort do
       when is_binary(level) and is_binary(message) ->
         {:ok, {:log, level, message}}
 
-      # FUSE filesystem events use "event" key instead of "type"
-      {:ok, %{"event" => "write", "op" => op, "path" => path}} ->
-        {:ok, {:fuse_write, op, path}}
-
-      {:ok, %{"event" => "read", "op" => op, "path" => path}} ->
-        {:ok, {:fuse_read, op, path}}
-
+      # Legacy FUSE-style event frames — ignored (filesystem access is
+      # now defined entirely by the container's bind mounts).
       {:ok, %{"event" => _}} ->
         :skip
 

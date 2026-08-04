@@ -2,7 +2,7 @@ import Config
 
 # TriOnyx configuration
 config :tri_onyx,
-  agents_dir: "./workspace/agent-definitions",
+  agents_dir: "./workspace/trees/_ro/definitions",
   audit_dir: "~/.tri-onyx/audit",
   workspace_dir: "./workspace"
 

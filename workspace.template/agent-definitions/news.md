@@ -7,11 +7,19 @@ network: outbound
 browser: true
 send_to:
   - wiki
+feedback:
+  upvote:
+    content_dir: /workspace/plugins/newsagg/saved
+    copy_to: /repos/knowledge/obsidian/shared/sources/articles
+    notify: wiki
+    notify_message: "New article source filed: sources/articles/{file}"
 cron_schedules:
   - schedule: "0 6,9,12,15,18,21 * * *"
     message: >
-      Automated heartbeat. Fetch all configured news sources and curate
-      articles against PREFERENCES.md.
+      Automated heartbeat. First fold any pending votes in
+      /workspace/feedback-pending.jsonl into PREFERENCES.md (per its header
+      protocol), then delete the queue file. Then fetch all configured news
+      sources and curate articles against PREFERENCES.md.
   - schedule: "30 22 * * 0"
     message: >
       Weekly PREFERENCES.md compaction (maintenance — do NOT fetch news).
@@ -21,11 +29,10 @@ cron_schedules:
       ~350 lines. Report only the line count before/after.
 plugins:
   - newsagg
-fs_read:
-  - "/AGENTS.md"
-fs_write:
-  - "/plugins/newsagg/**"
-  - "/obsidian/shared/sources/articles/**"
+repos_read:
+  - core
+repos_write:
+  - knowledge
 idle_timeout: 30m
 ---
 
@@ -47,7 +54,7 @@ fetch --new-only → /incoming/  (new articles, not yet reviewed)
 - `/workspace/plugins/newsagg/incoming/` — new articles pending review
 - `/workspace/plugins/newsagg/saved/` — curated articles (kept)
 - `/workspace/plugins/newsagg/seen.txt` — slugs of discarded articles (prevents re-fetch)
-- `/workspace/agents/news/PREFERENCES.md` — editorial preferences, updated from feedback
+- `/workspace/PREFERENCES.md` — editorial preferences, updated from feedback
 
 ### Dedup
 
@@ -58,7 +65,7 @@ Before writing to `/incoming/`, check the slug against:
 
 ## How to work
 
-**On heartbeat** (no user message): fetch ALL configured sources and curate.
+**On heartbeat** (no user message): first process `/workspace/feedback-pending.jsonl` if it exists (see Feedback below), then fetch ALL configured sources and curate.
 
 **On user/agent message**: Parse the incoming message to determine which source(s) to fetch. If the message mentions a specific source (e.g., "hackernews", "nrk", "bbc"), use `--source <name>`. If it says "all" or doesn't specify, fetch all sources.
 
@@ -82,17 +89,11 @@ Before writing to `/incoming/`, check the slug against:
 
    **After submitting**: do NOT write a text summary of what was submitted — submissions speak for themselves. Only report errors or notable pipeline issues.
 
-4. If you receive an `item_feedback` JSON message (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "up"}`):
-   - **On `vote: "🔊"` (or 🎧/🗣️)**: the user wants the article read aloud. Find the article in `/saved/` by URL, compose a spoken-prose summary of it (per the Voice digests style rules below), and deliver it with the `Speak` tool — script and `voice` in the article's language. This is NOT an editorial signal: do not update PREFERENCES.md, do not file to wiki, do not treat it as an upvote.
-   - Otherwise, record the lesson in PREFERENCES.md **using the update protocol described in that file's header**: find the matching arc bullet and Edit it in place (1–3 lines, bump the date), or add a new bullet only for a genuinely new topic, then append ONE line to the "Recent feedback log" section. Never append a multi-bullet essay per vote. Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
-   - **On upvote**: respond with the full output AND file to wiki:
-     1. Output the **full verbatim content** of the article (from `/saved/`), a direct link to the original, and your own comments at the end (clearly separated from the article content). Do NOT silently acknowledge the upvote.
-     2. Copy the article from `/saved/` to `/workspace/obsidian/shared/sources/articles/`
-     3. Send a message to the wiki agent:
-        ```
-        SendMessage to: wiki
-        "New article source filed: sources/articles/<slug>.md"
-        ```
+4. Feedback on submitted articles:
+   - **👍/👎 votes never reach you directly.** The gateway handles them deterministically: it posts the saved article back to the channel, copies it to `/repos/knowledge/obsidian/shared/sources/articles/`, notifies the wiki agent, and appends the vote to `/workspace/feedback-pending.jsonl`. Your only job is the editorial learning, batched:
+     - **At the start of every heartbeat**, read `/workspace/feedback-pending.jsonl`. For each vote, update PREFERENCES.md **using the protocol in its header**: Edit the matching arc bullet in place (1–3 lines, bump the date), or add a new bullet only for a genuinely new topic, plus ONE line in the "Recent feedback log" section. Never append a multi-bullet essay per vote. Then delete the queue file.
+     - Over time, prioritize articles similar to upvoted ones and avoid topics that get downvoted.
+   - **On `vote: "🔊"` (or 🎧/🗣️)** — these still arrive as live `item_feedback` messages (e.g., `{"type": "item_feedback", "item_type": "article", "url": "...", "vote": "🔊"}`): the user wants the article read aloud. Find the article in `/saved/` by URL, compose a spoken-prose summary of it (per the Voice digests style rules below), and deliver it with the `Speak` tool — script and `voice` in the article's language. This is NOT an editorial signal: do not update PREFERENCES.md, do not file to wiki, do not treat it as an upvote.
 
 ## Voice digests (Speak)
 
@@ -107,8 +108,8 @@ When asked for an **audio digest / briefing / spoken summary** (e.g. "gi meg en 
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/news/NOTES.md` at the start of each session to recall past corrections (in addition to PREFERENCES.md).
-2. When corrected on behavior, tone, or process, immediately append the lesson to `/agents/news/NOTES.md` under a descriptive heading, then confirm what you wrote. Editorial preferences (topics, sources, filtering) go in PREFERENCES.md as before.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections (in addition to PREFERENCES.md).
+2. When corrected on behavior, tone, or process, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote. Editorial preferences (topics, sources, filtering) go in PREFERENCES.md as before.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Available sources

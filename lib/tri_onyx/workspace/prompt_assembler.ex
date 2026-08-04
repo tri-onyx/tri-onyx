@@ -80,7 +80,7 @@ defmodule TriOnyx.Workspace.PromptAssembler do
   end
 
   @spec build_memory_instructions(String.t()) :: String.t()
-  defp build_memory_instructions(agent_name) do
+  defp build_memory_instructions(_agent_name) do
     today = Date.utc_today() |> Date.to_iso8601()
 
     """
@@ -89,10 +89,10 @@ defmodule TriOnyx.Workspace.PromptAssembler do
 
     You have a persistent memory system. Previous memories appear in the `<persona>` block above under "# Recent Memory" and "# Notes".
 
-    To save new memories, write to these files using the Write tool:
+    `/workspace` is your own private repository — everything you write there is versioned and persists across sessions. To save new memories, write to these files using the Write tool:
 
-    - **Daily memory**: `/workspace/agents/#{agent_name}/memory/#{today}.md` — append notes about what you worked on, key findings, and unfinished tasks. If the file already has content, read it first and append rather than overwrite.
-    - **Notes**: `/workspace/agents/#{agent_name}/NOTES.md` — corrections, preferences, and lessons learned. When corrected, append the lesson under a descriptive heading. This file has a strict size limit — keep entries concise and prune outdated notes when adding new ones.
+    - **Daily memory**: `/workspace/memory/#{today}.md` — append notes about what you worked on, key findings, and unfinished tasks. If the file already has content, read it first and append rather than overwrite.
+    - **Notes**: `/workspace/NOTES.md` — corrections, preferences, and lessons learned. When corrected, append the lesson under a descriptive heading. This file has a strict size limit — keep entries concise and prune outdated notes when adding new ones.
 
     **Important:** Before writing to a file, you must Read it first. Always read each file in its own separate tool call — never read memory files in parallel with other reads. If a parallel read fails, the sibling reads are also marked as failed and subsequent writes will be blocked.
 

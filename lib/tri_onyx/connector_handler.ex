@@ -43,6 +43,7 @@ defmodule TriOnyx.ConnectorHandler do
   alias TriOnyx.AgentSupervisor
   alias TriOnyx.BCP.ApprovalQueue
   alias TriOnyx.EventBus
+  alias TriOnyx.ItemFeedback
   alias TriOnyx.SystemCommand
   alias TriOnyx.TriggerRouter
 
@@ -349,65 +350,110 @@ defmodule TriOnyx.ConnectorHandler do
           "ConnectorHandler: reaction #{emoji} from #{sender} on #{agent_name}'s message"
         )
 
-        trigger_type = trust_to_trigger(trust)
         item_url = Map.get(frame, "item_url") || Map.get(frame, "article_url")
         item_type = Map.get(frame, "item_type", "article")
 
-        payload =
-          if is_binary(item_url) and item_url != "" do
-            vote = case emoji do
-              "👍" -> "up"
-              "👎" -> "down"
-              other -> other
-            end
-            Jason.encode!(%{"type" => "item_feedback", "item_type" => item_type, "url" => item_url, "vote" => vote})
-          else
-            "Reaction: #{emoji} from #{sender} on your message"
+        vote =
+          case emoji do
+            "👍" -> "up"
+            "👎" -> "down"
+            other -> other
           end
 
-        channel_hash = compute_channel_hash(channel)
-        session_key = "#{agent_name}:#{channel_hash}"
-        session_label = Map.get(channel, "display_name")
-
-        event = %{
-          type: trigger_type,
-          agent_name: agent_name,
-          payload: payload,
-          metadata: %{
-            "source" => "connector",
-            "connector_id" => state.connector_id,
-            "platform" => state.platform,
-            "channel" => channel,
-            "session_key" => session_key,
-            "session_label" => session_label,
-            "trigger_subtype" => "reaction",
-            "emoji" => emoji,
-            "sender" => sender
-          }
-        }
-
-        case dispatch_with_retry(event, agent_name) do
-          {:ok, pid} ->
-            session_id = get_session_id(pid)
-            already_subscribed = Map.has_key?(state.session_channels, session_id)
-
-            unless already_subscribed do
-              EventBus.subscribe(session_id)
-            end
-
-            new_channels = Map.put(state.session_channels, session_id, {channel, agent_name})
-            {:ok, %{state | session_channels: new_channels}}
-
-          {:error, reason} ->
-            Logger.warning(
-              "ConnectorHandler: reaction dispatch failed for #{agent_name}: #{inspect(reason)}"
-            )
-
+        # Up/down votes on submitted items are handled deterministically in
+        # the gateway when the agent declares a `feedback:` config — instant
+        # response, queued learning, no agent session per reaction. Other
+        # reactions (🔊 digests, unconfigured agents) dispatch a prompt.
+        case try_deterministic_feedback(agent_name, item_url, item_type, vote, sender, channel) do
+          {:handled, []} ->
             {:ok, state}
+
+          {:handled, frames} ->
+            {:push, Enum.map(frames, &{:text, &1}), state}
+
+          :not_handled ->
+            dispatch_reaction_prompt(
+              state, agent_name, item_url, item_type, vote, emoji, sender, channel, trust
+            )
         end
 
       true ->
         Logger.warning("ConnectorHandler: reaction frame with no approval_id or agent_name")
+        {:ok, state}
+    end
+  end
+
+  defp try_deterministic_feedback(agent_name, item_url, item_type, vote, sender, channel) do
+    with true <- is_binary(item_url) and item_url != "",
+         {:ok, definition} <- TriggerRouter.get_agent(agent_name),
+         {:handled, frames} <-
+           ItemFeedback.handle_vote(definition, %{
+             url: item_url,
+             item_type: item_type,
+             vote: vote,
+             sender: sender,
+             channel: channel
+           }) do
+      Logger.info(
+        "ConnectorHandler: item feedback (#{vote}) handled deterministically for #{agent_name}"
+      )
+
+      {:handled, frames}
+    else
+      _ -> :not_handled
+    end
+  end
+
+  defp dispatch_reaction_prompt(
+         state, agent_name, item_url, item_type, vote, emoji, sender, channel, trust
+       ) do
+    trigger_type = trust_to_trigger(trust)
+
+    payload =
+      if is_binary(item_url) and item_url != "" do
+        Jason.encode!(%{"type" => "item_feedback", "item_type" => item_type, "url" => item_url, "vote" => vote})
+      else
+        "Reaction: #{emoji} from #{sender} on your message"
+      end
+
+    channel_hash = compute_channel_hash(channel)
+    session_key = "#{agent_name}:#{channel_hash}"
+    session_label = Map.get(channel, "display_name")
+
+    event = %{
+      type: trigger_type,
+      agent_name: agent_name,
+      payload: payload,
+      metadata: %{
+        "source" => "connector",
+        "connector_id" => state.connector_id,
+        "platform" => state.platform,
+        "channel" => channel,
+        "session_key" => session_key,
+        "session_label" => session_label,
+        "trigger_subtype" => "reaction",
+        "emoji" => emoji,
+        "sender" => sender
+      }
+    }
+
+    case dispatch_with_retry(event, agent_name) do
+      {:ok, pid} ->
+        session_id = get_session_id(pid)
+        already_subscribed = Map.has_key?(state.session_channels, session_id)
+
+        unless already_subscribed do
+          EventBus.subscribe(session_id)
+        end
+
+        new_channels = Map.put(state.session_channels, session_id, {channel, agent_name})
+        {:ok, %{state | session_channels: new_channels}}
+
+      {:error, reason} ->
+        Logger.warning(
+          "ConnectorHandler: reaction dispatch failed for #{agent_name}: #{inspect(reason)}"
+        )
+
         {:ok, state}
     end
   end

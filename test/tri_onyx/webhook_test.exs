@@ -12,8 +12,6 @@ defmodule TriOnyx.Triggers.WebhookTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "You handle webhooks."
   }
 

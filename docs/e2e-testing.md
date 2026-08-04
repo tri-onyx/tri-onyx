@@ -145,9 +145,6 @@ cat logs/main/abc123.jsonl | jq .
 # Just tool calls and results
 cat logs/main/abc123.jsonl | jq 'select(.type == "tool_use" or .type == "tool_result")'
 
-# FUSE write events (filesystem access)
-cat logs/main/abc123.jsonl | jq 'select(.type == "fuse_write")'
-
 # Risk escalations only
 cat logs/main/abc123.jsonl | jq 'select(.type == "risk_escalation")'
 
@@ -167,9 +164,8 @@ curl -s http://localhost:4000/logs/main/abc123 | jq .
 ## Docker Compose logs
 
 Session logs capture what the gateway observed. Docker Compose logs capture
-everything the individual containers printed — including Python runtime output,
-FUSE driver messages, and container startup errors that never make it into the
-session log.
+everything the individual containers printed — including Python runtime output
+and container startup errors that never make it into the session log.
 
 ### Viewing logs
 
@@ -180,7 +176,7 @@ docker compose logs -f --tail=100
 # Gateway only (Elixir — routing, taint, risk scoring, session lifecycle)
 docker compose logs -f gateway
 
-# Agent container (Python runtime, FUSE mount, Claude SDK)
+# Agent container (Python runtime, Claude SDK)
 # Agent containers are ephemeral — use --tail to catch recent output
 docker compose logs --tail=200 agent
 
@@ -203,18 +199,17 @@ Look for:
 - `violation` — Biba/Bell-LaPadula policy was breached and session was killed
 - `BCP.Channel` lines — query routing and validation
 
-**Agent container logs** — the Python runtime and FUSE driver:
+**Agent container logs** — the Python runtime:
 
 ```bash
 docker compose logs agent 2>&1 | tail -200
 ```
 
 Look for:
-- `FUSE: deny` — a file operation was blocked by the policy trie. The log line
-  includes the denied path and operation. This is the first thing to check when
-  an agent reports it cannot read or write a file.
-- `FUSE: allow` — the operation was permitted (useful to confirm policy is working
-  as intended)
+- `Permission denied` / `Read-only file system` errors — the agent tried to
+  write outside its mounted repos, or into a read-only mount. The mount set is
+  the ACL: the agent's own repo is read-write at `/workspace`; `repos_read`
+  repos are read-only under `/repos/`.
 - `RuntimeError` / `Exception` — Python-side crash in the agent runner
 - `tool_use` / `tool_result` lines — the Python runner echoes each tool invocation
 
@@ -235,25 +230,25 @@ E2E encryption is in use.
 
 1. Check `docker compose logs gateway` for `port_spawn_failed` — the agent
    container may not have started.
-2. Check `docker compose logs agent` for Python import errors or FUSE mount
-   failures at startup.
+2. Check `docker compose logs agent` for Python import errors at startup.
 3. Check whether the ANTHROPIC_API_KEY env var is set in the agent container.
 
 ### Agent cannot read or write a file
 
-1. Look for `FUSE: deny` in `docker compose logs agent`. The log line shows the
-   exact path and operation that was blocked.
-2. Check the agent definition (`workspace/agent-definitions/<name>.md`) — the
-   `fs_read` and `fs_write` frontmatter fields control what the FUSE policy
-   allows.
-3. Check `Sandbox.build_fuse_policy/1` in `lib/tri_onyx/sandbox.ex` — this is
-   where the policy is assembled from the definition. Every agent automatically
-   gets `/agents/<name>/**` as a writable path for its memory files.
-4. After changing the definition or sandbox code, rebuild the agent image:
-   ```bash
-   docker run --rm -v $(pwd)/fuse:/src -w /src golang:1.22 go build -o tri-onyx-fs ./cmd/tri-onyx-fs
-   docker build --no-cache -t tri-onyx-agent:latest -f agent.Dockerfile .
-   ```
+1. Look for `Permission denied` or `Read-only file system` errors in
+   `docker compose logs agent`. The mount set is the ACL — a path that isn't
+   under a mounted repo simply doesn't exist inside the container.
+2. Check the agent definition (in the `definitions` repo) — the `repos_read`
+   and `repos_write` frontmatter fields control which repos are mounted under
+   `/repos/` and whether they are read-only or read-write. The agent's own
+   repo is always mounted read-write at `/workspace` — memory files
+   (`NOTES.md`, `memory/`, `HEARTBEAT.md`, `reflections/`) need no extra
+   grants.
+3. Remember that read-only mounts show the **last-committed** state of the
+   repo — another agent's uncommitted session changes are not visible until
+   the gateway commits them at that session's end.
+4. Definition and mount changes take effect on the next session start — no
+   image rebuild is needed.
 
 ### BCP approval request never arrives
 

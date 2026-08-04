@@ -3,6 +3,18 @@
 **Status:** draft v0.2 · consolidating design discussion
 **Scope:** agent access to mail, with credential isolation and human-gated mutation
 
+> **Update (2026-08-04).** Since this draft was written, TriOnyx replaced the
+> FUSE driver with per-agent git repositories and kernel bind mounts. This
+> changes some of the spec's assumptions: agent-visible mounts are now literal
+> git-repo bind mounts (the agent's own repo read-write at `/workspace`, shared
+> repos at `/repos/<name>` via `repos_read`/`repos_write`), and the
+> `/agents/<name>/**` FUSE default write path injected by
+> `Sandbox.build_fuse_policy/1` no longer exists — an agent's memory files
+> live directly in its own repo (e.g. `/workspace/NOTES.md`). References in
+> this document to the FUSE view daemon, `fs_read`/`fs_write` fields, and the
+> FUSE D-state hazard describe the retired mechanism; the body is left
+> unedited as the design record.
+
 > **Changes in v0.2.** Added §14, mapping the design onto what TriOnyx runs
 > today and recording two invariant violations that exist in the current
 > implementation. Resolved §13.1 (materialization cost) by arithmetic rather

@@ -44,7 +44,6 @@ defmodule TriOnyx.AgentSession do
           effective_risk: RiskScorer.risk_level(),
           started_at: DateTime.t(),
           status: :starting | :ready | :running | :saving_memory | :stopped,
-          workspace_writes: MapSet.t(String.t()),
           trigger_type: atom(),
           last_text: String.t() | nil,
           prompt_from_connector: boolean(),
@@ -172,6 +171,18 @@ defmodule TriOnyx.AgentSession do
     mount_sensitivity = mount_sensitivity_floor(definition)
     effective_sensitivity = InformationClassifier.higher_level(classification.sensitivity, mount_sensitivity)
 
+    # Without FUSE, reads are unobservable — the mount set defines what
+    # the session can see, so the max recorded labels across all readable
+    # repos become taint/sensitivity floors at start.
+    readable = InformationClassifier.classify_readable_repos(definition)
+    effective_taint = InformationClassifier.higher_level(effective_taint, readable.taint)
+
+    effective_sensitivity =
+      InformationClassifier.higher_level(effective_sensitivity, readable.sensitivity)
+
+    readable_sources =
+      if readable.taint != :low or readable.sensitivity != :low, do: [readable.reason], else: []
+
     state = %{
       id: session_id,
       definition: definition,
@@ -181,6 +192,7 @@ defmodule TriOnyx.AgentSession do
       sensitivity_level: effective_sensitivity,
       information_level: InformationClassifier.higher_level(effective_taint, effective_sensitivity),
       information_sources:
+        readable_sources ++
         mount_sensitivity_sources(definition) ++
         if(effective_taint != :low or classification.sensitivity != :low,
           do: [classification.reason | if(definition.base_taint != :low, do: ["base_taint: #{definition.base_taint}"], else: [])],
@@ -190,7 +202,6 @@ defmodule TriOnyx.AgentSession do
       effective_risk: effective_risk,
       started_at: DateTime.utc_now(),
       status: :starting,
-      workspace_writes: MapSet.new(),
       trigger_type: trigger_type,
       last_text: nil,
       prompt_from_connector: true,
@@ -637,7 +648,12 @@ defmodule TriOnyx.AgentSession do
       case Map.pop(state.pending_tools, id) do
         {{tool_name, tool_input}, remaining_tools} ->
           state = %{state | pending_tools: remaining_tools}
-          tool_meta = ToolRegistry.tool_meta(tool_name)
+
+          tool_meta =
+            tool_name
+            |> ToolRegistry.tool_meta()
+            |> Map.put(:agent_name, state.definition.name)
+
           classification = InformationClassifier.classify_tool_result(tool_name, tool_input, tool_meta)
           state = elevate_risk(state, classification)
 
@@ -701,11 +717,12 @@ defmodule TriOnyx.AgentSession do
     allowed_exts = ~w(.png .jpg .jpeg .gif .webp .svg)
     ext = Path.extname(filename) |> String.downcase()
 
-    workspace_dir = Workspace.workspace_dir() |> Path.expand()
-    full_path = Path.join(workspace_dir, path) |> Path.expand()
+    # Only files in the agent's OWN tree can be submitted — not shared
+    # repos, and not other agents' repos.
+    resolved = Workspace.agent_host_path(state.definition.name, path)
 
     cond do
-      not String.starts_with?(full_path, workspace_dir) ->
+      match?({:error, _}, resolved) ->
         AgentPort.send_submit_image_response(state.port, req_id, false, "path traversal denied")
 
       ext not in allowed_exts ->
@@ -713,10 +730,11 @@ defmodule TriOnyx.AgentSession do
           state.port, req_id, false, "unsupported image type: #{ext}"
         )
 
-      not File.regular?(full_path) ->
+      not File.regular?(elem(resolved, 1)) ->
         AgentPort.send_submit_image_response(state.port, req_id, false, "file not found")
 
       true ->
+        {:ok, full_path} = resolved
         image_id = :crypto.strong_rand_bytes(8) |> Base.hex_encode32(case: :lower, padding: false)
         images_dir = Path.join(["logs", state.definition.name, "#{state.id}_images"])
         File.mkdir_p!(images_dir)
@@ -751,11 +769,11 @@ defmodule TriOnyx.AgentSession do
     allowed_exts = ~w(.html .htm)
     ext = Path.extname(path) |> String.downcase()
 
-    workspace_dir = Workspace.workspace_dir() |> Path.expand()
-    full_path = Path.join(workspace_dir, path) |> Path.expand()
+    # Only files in the agent's OWN tree can be submitted and pinned.
+    resolved = Workspace.agent_host_path(state.definition.name, path)
 
     cond do
-      not String.starts_with?(full_path, workspace_dir) ->
+      match?({:error, _}, resolved) ->
         AgentPort.send_submit_page_response(state.port, req_id, false, "path traversal denied")
 
       ext not in allowed_exts ->
@@ -763,11 +781,11 @@ defmodule TriOnyx.AgentSession do
           state.port, req_id, false, "unsupported file type: #{ext}"
         )
 
-      not File.regular?(full_path) ->
+      not File.regular?(elem(resolved, 1)) ->
         AgentPort.send_submit_page_response(state.port, req_id, false, "file not found")
 
       true ->
-        case Workspace.Committer.commit_page(state.definition.name, path) do
+        case Workspace.commit_page(state.definition.name, path) do
           {:ok, sha} ->
             AgentPort.send_submit_page_response(state.port, req_id, true, "")
 
@@ -1022,13 +1040,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:send_email_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: send_email_request draft=#{draft_path}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
     # Translate agent path (/workspace/...) to host path
     host_path =
       draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1174,12 +1191,11 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
     host_path =
       draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1210,8 +1226,7 @@ defmodule TriOnyx.AgentSession do
         "#{source_folder} -> #{dest_folder}"
     )
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
     port = state.port
 
     Task.start(fn ->
@@ -1239,8 +1254,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:create_folder_request, req_id, folder_name}, state) do
     Logger.info("AgentSession #{state.id}: create_folder_request folder=#{folder_name}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
     port = state.port
 
     Task.start(fn ->
@@ -1266,8 +1280,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_query_request, req_id, params}, state) do
     Logger.info("AgentSession #{state.id}: calendar_query_request params=#{inspect(params)}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
     port = state.port
 
     Task.start(fn ->
@@ -1293,12 +1306,11 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_create_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: calendar_create_request draft=#{draft_path}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
     host_path =
       draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1334,12 +1346,11 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_update_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: calendar_update_request draft=#{draft_path}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
     host_path =
       draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/agents/#{state.definition.name}/", "")
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
       |> then(&Path.join(agent_dir, &1))
       |> Path.expand()
 
@@ -1378,8 +1389,7 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:calendar_delete_request, req_id, uid, calendar}, state) do
     Logger.info("AgentSession #{state.id}: calendar_delete_request uid=#{uid} calendar=#{calendar}")
 
-    workspace_dir = TriOnyx.Workspace.workspace_dir()
-    agent_dir = Path.join([workspace_dir, "agents", state.definition.name])
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
     port = state.port
 
     Task.start(fn ->
@@ -1455,47 +1465,11 @@ defmodule TriOnyx.AgentSession do
     {:noreply, state}
   end
 
-  defp handle_agent_event({:fuse_write, _op, path}, state) do
-    # Strip leading slash and report the write with the session's current
-    # labels. The committer updates the risk manifest immediately (so
-    # concurrent readers resolve fresh labels) and batches the git commit.
-    clean_path = String.trim_leading(path, "/")
-    Logger.debug("AgentSession #{state.id}: fuse write: #{clean_path}")
-
-    Workspace.Committer.record_write(
-      state.definition.name,
-      state.id,
-      clean_path,
-      state.taint_level,
-      state.sensitivity_level
-    )
-
-    {:noreply, %{state | workspace_writes: MapSet.put(state.workspace_writes, clean_path)}}
-  end
-
-  defp handle_agent_event({:fuse_read, _op, path}, state) do
-    # Reads are unrestricted by design — the agent may read anything its
-    # glob policy allows. What a read does is escalate the reader's risk
-    # to the file's recorded labels, so the session carries the risk of
-    # everything it has seen. The FUSE driver dedupes read events per
-    # path, so each unique path is resolved at most once per session.
-    case InformationClassifier.classify_fuse_read(path) do
-      {:ok, classification} ->
-        {:noreply, elevate_risk(state, classification)}
-
-      :unclassified ->
-        # Unlabeled file (predates provenance tracking, or operator-created):
-        # no escalation, but record the read so the gap is auditable.
-        AuditLog.log_event(%{
-          type: "unclassified_read",
-          session_id: state.id,
-          agent: state.definition.name,
-          path: String.trim_leading(path, "/")
-        })
-
-        {:noreply, state}
-    end
-  end
+# Note: with per-repo bind mounts there is no FUSE layer and therefore no
+  # per-read/per-write event stream. Reads taint the session up-front at
+  # spawn time (the mount set defines what is readable — see
+  # InformationClassifier.classify_readable_repos/1), and writes are
+  # observed via git diff at session end (commit_workspace_writes/1).
 
   defp handle_agent_event({:result, metadata}, state) do
     Logger.info(
@@ -1961,25 +1935,20 @@ defmodule TriOnyx.AgentSession do
 
   @spec commit_workspace_writes(t()) :: t()
   defp commit_workspace_writes(state) do
-    # The committer already saw every write as it happened; re-submitting
-    # is a cheap idempotent safety net in case it restarted mid-session.
-    # The labels here are the session's final (highest) levels, which can
-    # only confirm or escalate what was recorded at write time.
-    Enum.each(state.workspace_writes, fn path ->
-      Workspace.Committer.record_write(
-        state.definition.name,
+    # Session-end commit: every rw tree (own repo + repos_write grants) is
+    # diffed, changed paths are recorded in the risk manifest with the
+    # session's final labels, and one commit per repo is pushed to the
+    # bare repos. Reflection runs mount the same trees, so this applies
+    # to them too.
+    {:ok, _results} =
+      Workspace.commit_session(
+        state.definition,
         state.id,
-        path,
         state.taint_level,
         state.sensitivity_level
       )
-    end)
 
-    if MapSet.size(state.workspace_writes) > 0 do
-      Workspace.Committer.flush()
-    end
-
-    %{state | workspace_writes: MapSet.new()}
+    state
   end
 
   @spec cancel_timer(reference() | nil) :: :ok

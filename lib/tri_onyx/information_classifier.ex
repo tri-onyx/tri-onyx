@@ -85,7 +85,7 @@ defmodule TriOnyx.InformationClassifier do
 
     sensitivity =
       if tool_name == "Read" do
-        classify_read_sensitivity(input)
+        classify_read_sensitivity(input, tool_meta)
       else
         classify_tool_sensitivity(tool_name, tool_meta)
       end
@@ -142,31 +142,34 @@ defmodule TriOnyx.InformationClassifier do
   end
 
   @doc """
-  Classifies a FUSE-observed file read from the workspace risk manifest.
+  Classifies what an agent session can read through its repo mounts.
 
-  Returns `{:ok, classification}` carrying the labels recorded when the
-  file was written, or `:unclassified` when the file has no manifest
-  entry (it predates provenance tracking or was operator-created).
-  Reads of unclassified files do not escalate risk by design.
+  Without a FUSE layer, individual reads are unobservable — the mount set
+  defines what the session can see, so the session's read-taint floor is
+  the max taint/sensitivity recorded in the risk manifest across every
+  readable repo (its own, each `repos_write` clone, and each `repos_read`
+  checkout). Computed once at session start.
   """
-  @spec classify_fuse_read(String.t()) :: {:ok, classification()} | :unclassified
-  def classify_fuse_read(path) when is_binary(path) do
-    clean_path = String.trim_leading(path, "/")
+  @spec classify_readable_repos(TriOnyx.AgentDefinition.t()) :: classification()
+  def classify_readable_repos(definition) do
+    %{self: self_repo, write: write, read: read} = TriOnyx.RepoStore.grants(definition)
 
-    case TriOnyx.RiskManifest.lookup(clean_path) do
-      {:ok, entry} ->
-        writer = Map.get(entry, "agent", "unknown")
+    prefixes =
+      Enum.map([self_repo | write ++ read], fn
+        {:agent, name} -> "agents/#{name}/"
+        {:shared, name} -> "shared/#{name}/"
+      end)
 
-        {:ok,
-         %{
-           taint: parse_manifest_level(entry["taint_level"]),
-           sensitivity: parse_manifest_level(entry["sensitivity_level"]),
-           reason: "fs_read: #{clean_path} (written by #{writer})"
-         }}
+    {taint, sensitivity, top_prefix} = TriOnyx.RiskManifest.max_labels_for_prefixes(prefixes)
 
-      :error ->
-        :unclassified
-    end
+    reason =
+      if top_prefix do
+        "readable repos (max labels from #{String.trim_trailing(top_prefix, "/")})"
+      else
+        "readable repos (no labeled content)"
+      end
+
+    %{taint: taint, sensitivity: sensitivity, reason: reason}
   end
 
   @doc """
@@ -242,26 +245,24 @@ defmodule TriOnyx.InformationClassifier do
 
   # --- Private ---
 
-  @spec classify_read_sensitivity(map()) :: sensitivity_level()
-  defp classify_read_sensitivity(input) do
+  @spec classify_read_sensitivity(map(), map()) :: sensitivity_level()
+  defp classify_read_sensitivity(input, tool_meta) do
     path = Map.get(input, "file_path", "")
+    agent = Map.get(tool_meta, :agent_name, "unknown")
 
-    if controlled_path?(path) do
-      rel_path = path |> String.replace_leading(TriOnyx.Workspace.container_root() <> "/", "")
-
-      # The risk manifest is updated on every FUSE-observed write, so it
-      # is fresher than git history. Fall back to the Sc-Sensitivity git
-      # trailer for files predating the manifest.
-      case TriOnyx.RiskManifest.lookup(rel_path) do
+    with true <- controlled_path?(path),
+         {:ok, canonical} <- TriOnyx.Workspace.canonical_path(agent, path) do
+      # The risk manifest is updated at every commit boundary. Fall back
+      # to the Sc-Sensitivity git trailer for files predating the manifest.
+      case TriOnyx.RiskManifest.lookup(canonical) do
         {:ok, %{"sensitivity_level" => level}} when level in ~w(low medium high) ->
           String.to_existing_atom(level)
 
         _ ->
-          workspace_path = TriOnyx.Workspace.workspace_dir()
-          TriOnyx.GitProvenance.file_sensitivity(workspace_path, rel_path)
+          TriOnyx.GitProvenance.file_sensitivity(canonical)
       end
     else
-      :low
+      _ -> :low
     end
   end
 
@@ -331,19 +332,11 @@ defmodule TriOnyx.InformationClassifier do
     normalized = Path.expand(path, TriOnyx.Workspace.container_root())
 
     String.starts_with?(normalized, TriOnyx.Workspace.container_root()) or
-      String.starts_with?(normalized, "/mnt/host")
+      String.starts_with?(normalized, "/repos/")
   end
 
   defp controlled_path?(_), do: false
 
   @spec level_rank(information_level()) :: non_neg_integer()
   defp level_rank(level), do: Map.fetch!(@level_ranks, level)
-
-  # Parses a level string from a risk-manifest entry, defaulting to :low
-  # for missing or malformed values.
-  @spec parse_manifest_level(term()) :: information_level()
-  defp parse_manifest_level(level) when level in ~w(low medium high),
-    do: String.to_existing_atom(level)
-
-  defp parse_manifest_level(_), do: :low
 end

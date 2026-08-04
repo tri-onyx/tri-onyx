@@ -10,11 +10,11 @@ defmodule TriOnyx.AgentDefinitionTest do
   model: claude-sonnet-4-20250514
   tools: Read, Grep, Glob
   network: none
-  fs_read:
-    - "/workspace/repo/src/**/*.py"
-    - "/workspace/repo/docs/**/*.md"
-  fs_write:
-    - "/workspace/repo/src/output/**"
+  repos_read:
+    - core
+    - agents/wiki
+  repos_write:
+    - knowledge
   ---
 
   You are a code reviewer. Analyze code for quality issues and report findings.
@@ -38,8 +38,8 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert def.model == "claude-sonnet-4-20250514"
       assert def.tools == ["Read", "Grep", "Glob"]
       assert def.network == :none
-      assert def.fs_read == ["/workspace/repo/src/**/*.py", "/workspace/repo/docs/**/*.md"]
-      assert def.fs_write == ["/workspace/repo/src/output/**"]
+      assert def.repos_read == ["core", "agents/wiki"]
+      assert def.repos_write == ["knowledge"]
       assert def.system_prompt =~ "You are a code reviewer"
     end
 
@@ -51,8 +51,8 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert def.model == "claude-sonnet-4-20250514"
       assert def.tools == ["Read"]
       assert def.network == :none
-      assert def.fs_read == []
-      assert def.fs_write == []
+      assert def.repos_read == []
+      assert def.repos_write == []
       assert def.send_to == []
       assert def.receive_from == []
       assert def.system_prompt == "A simple agent."
@@ -832,6 +832,122 @@ defmodule TriOnyx.AgentDefinitionTest do
       """
 
       assert {:error, {:invalid_field_type, "reflection", :expected_cron_string, 42}} =
+               AgentDefinition.parse(content)
+    end
+  end
+
+  describe "feedback parsing" do
+    test "defaults to nil when not specified" do
+      assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
+      assert def.feedback == nil
+    end
+
+    test "parses a full upvote config" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback:
+        upvote:
+          content_dir: /plugins/newsagg/saved
+          copy_to: /obsidian/shared/sources/articles
+          notify: wiki
+          notify_message: "New article source filed: sources/articles/{file}"
+      ---
+
+      News agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+
+      assert def.feedback == %{
+               upvote: %{
+                 content_dir: "/plugins/newsagg/saved",
+                 copy_to: "/obsidian/shared/sources/articles",
+                 notify: "wiki",
+                 notify_message: "New article source filed: sources/articles/{file}"
+               }
+             }
+    end
+
+    test "parses an empty feedback block (queue-only)" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback: {}
+      ---
+
+      News agent.
+      """
+
+      assert {:ok, def} = AgentDefinition.parse(content)
+      assert def.feedback == %{upvote: nil}
+    end
+
+    test "rejects notify without notify_message" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback:
+        upvote:
+          notify: wiki
+      ---
+
+      News agent.
+      """
+
+      assert {:error, {:invalid_feedback, msg}} = AgentDefinition.parse(content)
+      assert msg =~ "notify requires notify_message"
+    end
+
+    test "rejects unknown keys" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback:
+        upvote:
+          content_dri: /typo
+      ---
+
+      News agent.
+      """
+
+      assert {:error, {:invalid_feedback, msg}} = AgentDefinition.parse(content)
+      assert msg =~ "unknown keys content_dri"
+    end
+
+    test "rejects non-string action values" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback:
+        upvote:
+          content_dir: 42
+      ---
+
+      News agent.
+      """
+
+      assert {:error, {:invalid_feedback, msg}} = AgentDefinition.parse(content)
+      assert msg =~ "content_dir must be a string"
+    end
+
+    test "rejects a non-map feedback value" do
+      content = """
+      ---
+      name: newsy
+      tools: Read
+      feedback: yes
+      ---
+
+      News agent.
+      """
+
+      assert {:error, {:invalid_field_type, "feedback", :expected_map, _}} =
                AgentDefinition.parse(content)
     end
   end

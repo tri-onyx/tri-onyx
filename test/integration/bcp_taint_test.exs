@@ -28,8 +28,6 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Grep"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "BCP controller test agent.",
     bcp_channels: [
       %{
@@ -48,8 +46,6 @@ defmodule TriOnyx.Integration.BCPTaintTest do
     model: "claude-haiku-4-5",
     tools: ["Read", "WebFetch"],
     network: :outbound,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "BCP reader test agent.",
     bcp_channels: [
       %{

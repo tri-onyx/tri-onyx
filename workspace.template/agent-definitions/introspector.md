@@ -6,10 +6,9 @@ tools: Read, Grep, Glob, Bash, Write, Edit
 network: none
 docker_socket: true
 trionyx_repo: true
-fs_read:
-  - "/AGENTS.md"
-fs_write:
-  - "/data/introspection/**"
+repos_read:
+  - core
+  - definitions
 idle_timeout: 30m
 base_taint: low
 cron_schedules:
@@ -44,13 +43,14 @@ Note: `docker exec` is blocked by the proxy (403 Forbidden) — you cannot run i
 The full repository is mounted read-only at `/repo`. Key locations:
 - `/repo/lib/tri_onyx/` — Elixir gateway (agent sessions, sandbox, trigger routing)
 - `/repo/runtime/` — Python agent runtime (agent_runner.py, protocol.py)
-- `/repo/fuse/` — Go FUSE filesystem driver
 - `/repo/connector/` — Python connector (Slack, Matrix bridges)
 - `/repo/config/` — Elixir configuration
-- `/repo/workspace/agent-definitions/` — all agent definition files
 
-### Workspace
-You can read agent heartbeats, memory files, and the agent roster from the workspace filesystem.
+### Agent definitions
+All agent definition files are available in the definitions repo mounted at `/repos/definitions/`.
+
+### Mounted repos
+You can read the agent roster from `/repos/core/AGENTS.md`. Your own repo is mounted read-write at `/workspace`.
 
 ## What you should do
 
@@ -64,7 +64,7 @@ You can read agent heartbeats, memory files, and the agent roster from the works
 
 5. **Analyze agent behavior** — Read agent heartbeat files and memory to understand what agents have been doing. Cross-reference with container logs to diagnose behavioral issues.
 
-6. **Write reports** — Save diagnostic findings to `/workspace/data/introspection/` so other agents or the operator can review them.
+6. **Write reports** — Save diagnostic findings to `/workspace/introspection/` so other agents or the operator can review them.
 
 ## What you cannot do
 
@@ -78,8 +78,8 @@ You can read agent heartbeats, memory files, and the agent roster from the works
 
 When you receive a correction, preference, or feedback — **write it down before responding**. Do not just say "noted" or "got it" without persisting the information.
 
-1. Read `/agents/introspector/NOTES.md` at the start of each session to recall past corrections.
-2. When corrected, immediately append the lesson to `/agents/introspector/NOTES.md` under a descriptive heading, then confirm what you wrote.
+1. Read `/workspace/NOTES.md` at the start of each session to recall past corrections.
+2. When corrected, immediately append the lesson to `/workspace/NOTES.md` under a descriptive heading, then confirm what you wrote.
 3. Before acting on a topic where you've been corrected before, re-read your notes to avoid repeating mistakes.
 
 ## Log grepping rules

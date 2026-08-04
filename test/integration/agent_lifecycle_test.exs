@@ -25,8 +25,8 @@ defmodule TriOnyx.Integration.AgentLifecycleTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Grep", "Write"],
     network: :none,
-    fs_read: ["/workspace/src/**"],
-    fs_write: ["/workspace/output/**"],
+    repos_read: ["core"],
+    repos_write: ["exchange"],
     system_prompt: "You are a lifecycle test agent."
   }
 
@@ -73,8 +73,11 @@ defmodule TriOnyx.Integration.AgentLifecycleTest do
       model: claude-haiku-4-5
       tools: Read, Grep
       network: none
-      fs_read:
-        - "/workspace/**"
+      repos_read:
+        - "core"
+        - "agents/news"
+      repos_write:
+        - "exchange"
       ---
 
       You are a test agent.
@@ -85,7 +88,8 @@ defmodule TriOnyx.Integration.AgentLifecycleTest do
       assert definition.tools == ["Read", "Grep"]
       assert definition.network == :none
       assert definition.network == :none
-      assert definition.fs_read == ["/workspace/**"]
+      assert definition.repos_read == ["core", "agents/news"]
+      assert definition.repos_write == ["exchange"]
       assert definition.system_prompt =~ "You are a test agent."
     end
 
@@ -151,8 +155,6 @@ defmodule TriOnyx.Integration.AgentLifecycleTest do
         model: "claude-haiku-4-5",
         tools: ["Read"],
             network: :none,
-        fs_read: [],
-        fs_write: [],
         system_prompt: "Temp."
       }
 

@@ -29,8 +29,7 @@ defmodule TriOnyx.Integration.TriggerTest do
     model: "claude-haiku-4-5",
     tools: ["Read", "Grep"],
     network: :none,
-    fs_read: ["/workspace/**"],
-    fs_write: [],
+    repos_read: ["core"],
     system_prompt: "You check things on a schedule."
   }
 
@@ -40,8 +39,7 @@ defmodule TriOnyx.Integration.TriggerTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Write"],
     network: :none,
-    fs_read: [],
-    fs_write: ["/workspace/output/**"],
+    repos_write: ["exchange"],
     system_prompt: "You process webhook payloads."
   }
 
@@ -221,7 +219,8 @@ defmodule TriOnyx.Integration.TriggerTest do
       assert body["name"] == "cron-checker"
       assert body["model"] == "claude-haiku-4-5"
       assert body["network"] == "none"
-      assert body["fs_read"] == ["/workspace/**"]
+      assert body["repos_read"] == ["core"]
+      assert body["repos_write"] == []
     end
 
     test "GET /health returns ok" do

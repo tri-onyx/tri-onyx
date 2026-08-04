@@ -208,8 +208,8 @@ defmodule TriOnyx.Router do
           definition
           |> serialize_definition_summary()
           |> Map.merge(%{
-            "fs_read" => definition.fs_read,
-            "fs_write" => definition.fs_write,
+            "repos_read" => definition.repos_read,
+            "repos_write" => definition.repos_write,
             "send_to" => definition.send_to,
             "receive_from" => definition.receive_from,
             "github_repo" => definition.github_repo,
@@ -269,8 +269,8 @@ defmodule TriOnyx.Router do
               "model" => definition.model,
               "tools" => definition.tools,
               "network" => format_network(definition.network),
-              "fs_read" => definition.fs_read,
-              "fs_write" => definition.fs_write,
+              "repos_read" => definition.repos_read,
+              "repos_write" => definition.repos_write,
               "send_to" => definition.send_to,
               "receive_from" => definition.receive_from,
               "restart_targets" => definition.restart_targets,
@@ -290,7 +290,8 @@ defmodule TriOnyx.Router do
               "github_read_repos" => definition.github_read_repos,
               "slack_channel" => definition.slack_channel,
               "exclude_from_personalization" => definition.exclude_from_personalization,
-              "reflection" => definition.reflection
+              "reflection" => definition.reflection,
+              "feedback" => serialize_feedback_for_edit(definition.feedback)
             }
 
             conn
@@ -347,7 +348,7 @@ defmodule TriOnyx.Router do
                 "message" => "Agent '#{definition.name}' already exists"
               })
             else
-              File.write!(file_path, markdown)
+              :ok = Workspace.write_definition(definition.name, markdown)
               TriggerRouter.load_agents()
 
               conn
@@ -391,7 +392,7 @@ defmodule TriOnyx.Router do
 
             case AgentDefinition.parse(markdown) do
               {:ok, _definition} ->
-                File.write!(file_path, markdown)
+                :ok = Workspace.write_definition(name, markdown)
                 TriggerRouter.load_agents()
 
                 conn
@@ -437,7 +438,7 @@ defmodule TriOnyx.Router do
             "message" => "Stop all sessions before deleting"
           })
         else
-          File.rm!(file_path)
+          :ok = Workspace.delete_definition(name)
           TriggerRouter.load_agents()
 
           conn
@@ -1395,7 +1396,7 @@ defmodule TriOnyx.Router do
         conn |> send_resp(403, "forbidden")
 
       true ->
-        case Workspace.read_file_at_commit(commit, path) do
+        case Workspace.find_commit_file(commit, path) do
           {:ok, data} ->
             conn
             |> put_resp_content_type("text/html")
@@ -1412,52 +1413,48 @@ defmodule TriOnyx.Router do
   # --- Workspace Explorer ---
 
   get "/api/workspace/tree" do
-    dir = Workspace.workspace_dir()
-    safe = Workspace.git_safe_args(dir)
     manifest = RiskManifest.snapshot()
 
-    # Get git status (porcelain format, NUL-delimited to avoid quoted paths)
-    git_status_map =
-      case System.cmd("git", safe ++ ["status", "--porcelain", "-z"], cd: dir, stderr_to_stdout: true) do
-        {output, 0} ->
-          output
-          |> String.split(<<0>>, trim: true)
-          |> Enum.reduce(%{}, fn entry, acc ->
-            status = String.slice(entry, 0, 2) |> String.trim()
-            path = String.slice(entry, 3..-1//1)
-            Map.put(acc, path, status)
-          end)
-
-        _ ->
-          %{}
-      end
-
-    # Get all tracked files (NUL-delimited to avoid quoted paths)
-    tracked =
-      case System.cmd("git", safe ++ ["ls-files", "-z"], cd: dir, stderr_to_stdout: true) do
-        {output, 0} -> output |> String.split(<<0>>, trim: true) |> MapSet.new()
-        _ -> MapSet.new()
-      end
-
-    # Combine: all tracked files + untracked from git status
-    all_paths =
-      MapSet.union(tracked, MapSet.new(Map.keys(git_status_map)))
-      |> Enum.sort()
-
+    # One entry per file across all repos, keyed by canonical path
+    # (agents/<name>/... or shared/<name>/...). Committed files come from
+    # each bare repo's HEAD; uncommitted changes from the owning working
+    # tree (the agent's own tree for agent repos, the gateway tree for
+    # shared repos).
     files =
-      Enum.map(all_paths, fn path ->
-        entry = Map.get(manifest, path, %{})
-        git_st = Map.get(git_status_map, path, "clean")
+      TriOnyx.RepoStore.list_repos()
+      |> Enum.flat_map(fn repo_id ->
+        prefix = Workspace.canonical_for_repo(repo_id, "")
 
-        %{
-          "path" => path,
-          "taint" => Map.get(entry, "taint_level"),
-          "sensitivity" => Map.get(entry, "sensitivity_level"),
-          "agent" => Map.get(entry, "agent"),
-          "updated_at" => Map.get(entry, "updated_at"),
-          "reviewed_by" => Map.get(entry, "reviewed_by"),
-          "git_status" => git_st
-        }
+        status_map =
+          repo_id
+          |> repo_owner_principal()
+          |> TriOnyx.RepoStore.changed_paths(repo_id)
+          |> Map.new(fn path -> {path, "dirty"} end)
+
+        tracked =
+          case TriOnyx.RepoStore.ls_tree(repo_id) do
+            {:ok, paths} -> paths
+            _ -> []
+          end
+
+        (tracked ++ Map.keys(status_map))
+        |> Enum.uniq()
+        |> Enum.sort()
+        |> Enum.map(fn rel ->
+          canonical = prefix <> rel
+          entry = Map.get(manifest, canonical, %{})
+
+          %{
+            "path" => canonical,
+            "repo" => TriOnyx.RepoStore.ref(repo_id),
+            "taint" => Map.get(entry, "taint_level"),
+            "sensitivity" => Map.get(entry, "sensitivity_level"),
+            "agent" => Map.get(entry, "agent"),
+            "updated_at" => Map.get(entry, "updated_at"),
+            "reviewed_by" => Map.get(entry, "reviewed_by"),
+            "git_status" => Map.get(status_map, rel, "clean")
+          }
+        end)
       end)
 
     conn
@@ -1468,33 +1465,37 @@ defmodule TriOnyx.Router do
     conn = Plug.Conn.fetch_query_params(conn)
     path = conn.params["path"]
 
-    if is_nil(path) or path == "" do
+    resolved =
+      if is_nil(path) or path == "" do
+        :error
+      else
+        Workspace.resolve_canonical(path)
+      end
+
+    if resolved == :error do
       conn
-      |> send_json(400, %{"error" => "missing path parameter"})
+      |> send_json(400, %{"error" => "missing or invalid canonical path parameter"})
     else
-      dir = Workspace.workspace_dir()
-      safe = Workspace.git_safe_args(dir)
+      {:ok, {repo_id, rel}} = resolved
       manifest = RiskManifest.snapshot()
       entry = Map.get(manifest, path, %{})
 
-      # Git status for this file
       git_st =
-        case System.cmd("git", safe ++ ["status", "--porcelain", "--", path],
-               cd: dir, stderr_to_stdout: true) do
-          {output, 0} ->
-            line = output |> String.split("\n", trim: true) |> List.first()
-            if line, do: String.slice(line, 0, 2) |> String.trim(), else: "clean"
-          _ -> "clean"
+        if rel in TriOnyx.RepoStore.changed_paths(repo_owner_principal(repo_id), repo_id) do
+          "dirty"
+        else
+          "clean"
         end
 
       # Recent commits for this file (up to 10)
       commits =
-        case System.cmd(
-               "git",
-               safe ++ ["log", "--format=%H%n%s%n%an%n%ai%n%B%n---END---", "-10", "--", path],
-               cd: dir, stderr_to_stdout: true
-             ) do
-          {output, 0} when output != "" ->
+        case TriOnyx.RepoStore.log(repo_id, [
+               "--format=%H%n%s%n%an%n%ai%n%B%n---END---",
+               "-10",
+               "--",
+               rel
+             ]) do
+          {:ok, output} when output != "" ->
             output
             |> String.split("---END---\n", trim: true)
             |> Enum.map(fn chunk ->
@@ -1566,6 +1567,11 @@ defmodule TriOnyx.Router do
     conn
     |> send_json(404, %{"error" => "not_found"})
   end
+
+  # The working tree whose dirty state is authoritative for a repo: the
+  # agent's own tree for agent repos, the gateway tree for shared repos.
+  defp repo_owner_principal({:agent, name}), do: name
+  defp repo_owner_principal({:shared, _}), do: :gw
 
   # --- Body Reading Plug ---
 
@@ -1808,6 +1814,19 @@ defmodule TriOnyx.Router do
       rem(ms, 1_000) == 0 -> "#{div(ms, 1_000)}s"
       true -> "#{ms}"
     end
+  end
+
+  defp serialize_feedback_for_edit(nil), do: nil
+
+  defp serialize_feedback_for_edit(%{upvote: nil}), do: %{}
+
+  defp serialize_feedback_for_edit(%{upvote: action}) do
+    upvote =
+      action
+      |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+
+    %{"upvote" => upvote}
   end
 
   defp serialize_bcp_channels_for_edit(channels) do

@@ -153,10 +153,11 @@ email-related processes run. This is the default behavior.
 
 1. The IMAP poller connects to your email server on each poll interval
 2. It searches for new messages since the last-seen UID
-3. Each new email is parsed and written as a directory:
+3. Each new email is parsed and written as a directory in the email agent's
+   own repo (visible to the agent at `/workspace/inbox/`):
 
 ```
-workspace/agents/email/inbox/
+inbox/
   12345/
     message.json          # Parsed headers, body, attachment manifest
     attachment-1-report.pdf
@@ -266,9 +267,8 @@ description: Sorts newsletters into folders
 model: claude-haiku-4-20250514
 tools: Read, Grep, Glob, MoveEmail, CreateFolder
 network: none
-fs_read:
-  - "/agents/newsletter-processor/**"
-fs_write: []
+repos_read: []
+repos_write: []
 idle_timeout: 10m
 ---
 

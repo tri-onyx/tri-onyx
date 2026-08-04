@@ -2,7 +2,6 @@
 
 [![Elixir](https://img.shields.io/badge/Elixir-OTP-4B275F?logo=elixir&logoColor=white)](https://elixir-lang.org)
 [![Python](https://img.shields.io/badge/Python-Agent_Runtime-3776AB?logo=python&logoColor=white)](https://python.org)
-[![Go](https://img.shields.io/badge/Go-FUSE_Driver-00ADD8?logo=go&logoColor=white)](https://go.dev)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-2496ED?logo=docker&logoColor=white)](https://docker.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
@@ -41,12 +40,13 @@ Other agent runtimes sandbox **capability** — restrict filesystem, disable she
 - **Bandwidth-Constrained Protocol** — tainted agents communicate with clean agents through structured, human-approvable formats
 
 **Isolation & sandboxing**
-- **Isolated containers** — each agent runs in its own Docker container with per-agent FUSE filesystem, network rules, and no shared state
-- **FUSE filesystem** — custom Go driver enforces per-file read/write policies with O(1) path-trie lookups
+- **Isolated containers** — each agent runs in its own Docker container with per-agent repo mounts, network rules, and no shared state
+- **Per-agent git repositories** — each agent owns a git repo mounted read-write at `/workspace`; shared repos mount read-only or read-write at `/repos/<name>`. The mount set *is* the ACL — no in-container policy engine
+- **Gateway-only git** — working trees contain no `.git`; the gateway commits each session's changes with taint/sensitivity provenance trailers
 
 **Runtime**
 - **Browser sessions** — headless Chromium with persistent login sessions from the host
-- **Plugin system** — reusable agent extensions installable from git repos
+- **Plugin system** — reusable agent extensions that live inside an agent's own repo or a shared repo
 - **Auditable everything** — structured logs for file access, tool calls, message routing, and policy violations
 
 ![Agent topology showing taint and sensitivity propagation](docs/agent-graph.png)
@@ -68,7 +68,7 @@ Other agent runtimes sandbox **capability** — restrict filesystem, disable she
 +---------------+  +---------------+     +-------------+
 | Agent A       |  | Agent B       |     | Connector   |
 | Python+Claude |  | Python+Claude |     | Matrix      |
-| FUSE (Go)     |  | FUSE (Go)     |     +-------------+
+| repo mounts   |  | repo mounts   |     +-------------+
 +---------------+  +---------------+
 ```
 
@@ -88,14 +88,12 @@ See the [full architecture docs](https://tri-onyx.com/agent-runtime/) for detail
 # Gateway image (Elixir/OTP)
 docker build -f gateway.Dockerfile -t tri-onyx-gateway:latest .
 
-# Agent runtime image (Python + FUSE sandbox)
+# Agent runtime image (Python + Claude SDK)
 docker build -f agent.Dockerfile -t tri-onyx-agent:latest .
 
 # Connector image (Python, for Matrix chat bridge)
 docker build -f connector.Dockerfile -t trionyx-connector:latest .
 ```
-
-The agent image requires a pre-built FUSE driver binary at `fuse/tri-onyx-fs`. See [FUSE Driver](https://tri-onyx.com/fuse-driver-spec/) for build instructions.
 
 ### Run
 
@@ -109,12 +107,6 @@ docker compose up
 # Elixir gateway tests
 docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test
 
-# Go FUSE driver tests
-docker run --rm --device /dev/fuse --cap-add SYS_ADMIN \
-  --security-opt apparmor=unconfined \
-  -v $(pwd)/fuse:/src -w /src golang:1.22 \
-  bash -c "apt-get update -qq && apt-get install -y -qq fuse3 2>/dev/null && go test ./..."
-
 # Python connector tests
 docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run pytest
 ```
@@ -123,7 +115,7 @@ docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run
 
 ## Agent definitions
 
-Agents are defined as markdown files with YAML frontmatter in `workspace/agent-definitions/`:
+Agents are defined as markdown files with YAML frontmatter in the shared `definitions` repo (seeded from `workspace.template/` on first gateway start):
 
 ```markdown
 ---
@@ -132,18 +124,18 @@ description: Reviews code for quality, security, and style
 model: claude-sonnet-4-20250514
 tools: Read, Grep, Glob
 network: none
-fs_read:
-  - /workspace/repo/src/**/*
-  - /workspace/repo/tests/**/*
+repos_read:
+  - knowledge
+  - agents/main
 skills: code-review-standards, security-checklist
 browser: false
 ---
 
-You are a code reviewer. Analyze the code at /workspace/repo/src and
-provide feedback on quality, security issues, and style.
+You are a code reviewer. Your own repo is mounted read-write at /workspace;
+repos listed in repos_read are mounted read-only under /repos/.
 ```
 
-The frontmatter declares permissions (tools, filesystem access, network policy, browser access). The body is the system prompt. The gateway translates these into Docker container configuration, FUSE policy, and iptables rules.
+The frontmatter declares permissions (tools, repo mounts, network policy, browser access). The body is the system prompt. The gateway translates these into Docker container configuration, per-repo bind mounts, and iptables rules — the mount set *is* the filesystem ACL.
 
 ---
 
@@ -159,5 +151,5 @@ Full documentation is available at **[tri-onyx.com](https://tri-onyx.com)**:
 - [API Reference](https://tri-onyx.com/api-reference/) — full HTTP API documentation
 - [Web Dashboard](https://tri-onyx.com/web-dashboard/) — monitoring and management UI
 - [Comparison with OpenClaw](https://tri-onyx.com/comparison/) — detailed side-by-side
-- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001-011
+- [Architecture Decisions](https://tri-onyx.com/decisions/) — ADRs 001-012
 - [Project Structure](https://tri-onyx.com/project-structure/) — full source tree reference

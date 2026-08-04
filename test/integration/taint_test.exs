@@ -26,8 +26,6 @@ defmodule TriOnyx.Integration.TaintTest do
     model: "claude-haiku-4-5",
     tools: ["Read", "Grep"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "Test agent."
   }
 
@@ -37,8 +35,6 @@ defmodule TriOnyx.Integration.TaintTest do
     model: "claude-sonnet-4-20250514",
     tools: ["Read", "Bash", "WebFetch"],
     network: :outbound,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "High risk test agent."
   }
 

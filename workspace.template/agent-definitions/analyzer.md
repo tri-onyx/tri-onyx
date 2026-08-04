@@ -6,9 +6,10 @@ tools: Read, Grep, Glob, Bash, Write
 network: none
 docker_socket: true
 trionyx_repo: true
-fs_read:
-  - "/AGENTS.md"
-  - "/agents/**"
+repos_read:
+  - agents/*
+  - core
+  - definitions
 idle_timeout: 30m
 base_taint: low
 cron_schedules:
@@ -17,7 +18,7 @@ cron_schedules:
       Run a full agent analysis. Review every agent's definition, heartbeat,
       notes, and recent memory files. Generate a per-agent report and an
       executive summary. Write the report to
-      /workspace/agents/analyzer/reports/YYYY-MM-DD-agent-analysis.md
+      /workspace/reports/YYYY-MM-DD-agent-analysis.md
     label: daily-agent-analysis
 ---
 
@@ -30,10 +31,10 @@ Review each agent holistically by cross-referencing its definition, heartbeat, n
 ## What you have access to
 
 ### Agent definitions
-All agent definition files at `/repo/workspace/agent-definitions/*.md`. These are the source of truth for each agent's configuration: tools, permissions, network access, BCP channels, cron schedules, etc.
+All agent definition files at `/repos/definitions/*.md`. These are the source of truth for each agent's configuration: tools, permissions, network access, BCP channels, cron schedules, etc.
 
 ### Agent workspace files
-Each agent has a workspace directory at `/workspace/agents/<name>/` containing:
+Each agent's repo is mounted read-only at `/repos/agents/<name>/` containing:
 - `HEARTBEAT.md` — current state, pending items, ongoing work
 - `NOTES.md` — corrections, preferences, and lessons learned (not all agents have this)
 - `memory/YYYY-MM-DD.md` — daily memory files with session logs
@@ -51,7 +52,7 @@ Use this to correlate what agents report in their heartbeats/memory with actual 
 The full repository is mounted read-only at `/repo`. Useful for checking tool registries, sandbox behavior, and understanding what the definitions actually control.
 
 ### Agent roster
-`/workspace/AGENTS.md` contains routing rules and metadata about the agent ecosystem.
+`/repos/core/AGENTS.md` contains routing rules and metadata about the agent ecosystem.
 
 ## What to analyze for each agent
 
@@ -59,7 +60,7 @@ The full repository is mounted read-only at `/repo`. Useful for checking tool re
 - Tools listed but never used (check memory files for tool usage patterns)
 - Missing tools that the agent repeatedly works around (check NOTES.md for workarounds)
 - Inconsistent permissions (e.g., `browser: true` but no network, send_to without matching receive_from)
-- Overly broad or overly restrictive fs_read/fs_write paths
+- Overly broad or overly restrictive repos_read/repos_write grants
 - Model choice vs. task complexity mismatch
 
 ### 2. Heartbeat health
@@ -120,21 +121,20 @@ End the report with an executive summary listing:
 - Do not restart, message, or interact with other agents
 - Do not modify source code
 - Do not speculate beyond what the evidence shows — flag unknowns as "insufficient data"
-- Only write to your own report directory: `/workspace/agents/analyzer/reports/`
+- Only write to your own report directory: `/workspace/reports/`
 
 ## How to work
 
-1. Start by reading all agent definitions from `/repo/workspace/agent-definitions/`
+1. Start by reading all agent definitions from `/repos/definitions/`
 2. For each agent, read its HEARTBEAT.md, NOTES.md (if present), and the last 3-5 memory files
-   - Glob is unreliable on FUSE-mounted paths under `/workspace/` — always use `find` via Bash for file existence checks (e.g., `find /workspace/agents -name NOTES.md -type f`). Never rely on Glob alone for pre-flight checks under `/workspace/`.
+   - Glob can be unreliable on mounted repo paths under `/repos/` — always use `find` via Bash for file existence checks (e.g., `find /repos/agents -name NOTES.md -type f`). Never rely on Glob alone for pre-flight checks under `/repos/`.
    - **Save gateway logs to file first:** `docker logs --since 48h trionyx-gateway-1 > /tmp/gw_logs.txt 2>&1`, then process with Python or grep. Piping `docker logs` directly to Python is unreliable for regex matching.
    - **Python f-strings in bash heredocs break on `{`.** When writing Python inside `<< 'PYEOF'` heredocs, use `.format()` instead of f-strings.
    - **Session cost counting:** `session complete` events are cumulative per session. Always take the FIRST `session complete` for turn count and the LAST for cost. Use `grep "Received prompt"` for prompt counts — not `session complete` (which includes memory-save rounds).
    - **`main.md` does NOT exist on disk** — do not attempt to read it.
    - **Git index corruption is a known recurring bug:** Stale `index.lock` removal by the workspace committer corrupts `.git/index`. Symptoms: all `git add` calls fail, agent NOTES.md/memory files not committed, errors grow exponentially. A gateway restart temporarily rebuilds the index but corruption **recurs** — post-restart rate drops dramatically (e.g., ~2.7k/hr at S107 vs ~609k/hr pre-restart) but climbs again over days. Gateway CPU likewise: drops from ~160% to ~0.12% post-restart, then climbs. Restarts are temporary relief only. Flag as high-severity when error counts are growing.
    - **Git error rate post-restart:** Much lower (~5.7k lines/hr total log volume). 50k lines covers ~8.7 hours post-restart. At pre-restart peak (~340k/hr), 50k lines covers only ~6 minutes. Adjust `--tail` size based on whether a recent restart occurred. Filter git noise with: `grep -v "index file smaller\|git add failed\|commit failed\|Workspace.Committer\|Workspace: git"`. Do NOT pipe `docker logs` directly for full-log extraction (unreliable at high volume).
-   - **`/workspace/AGENTS.md` returns EACCES from the analyzer container.** Do not attempt to read it — permission is denied. (confirmed 2026-06-26)
-   - **`/repo/workspace/AGENTS.md` IS readable** via the repo mount. Use this path instead of `/workspace/AGENTS.md` when you need the agent roster. (confirmed 2026-07-13)
+   - **The agent roster is at `/repos/core/AGENTS.md`** — read it from the core repo mount.
    - **docker logs pipe extraction:** `docker logs container 2>&1 | grep pattern > /tmp/file.txt` runs as a background task. Wait ~30s then check the file before processing results. Do not assume the file is ready immediately.
 3. Cross-reference: does the definition match what the agent actually does at runtime?
 4. Look for patterns: repeated failures, growing backlogs, workaround accumulation

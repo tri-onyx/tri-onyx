@@ -27,8 +27,6 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
     model: "claude-haiku-4-5",
     tools: ["Read"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "Sender."
   }
 
@@ -38,8 +36,6 @@ defmodule TriOnyx.Integration.InterAgentSanitizationTest do
     model: "claude-haiku-4-5",
     tools: ["Read", "Write"],
     network: :none,
-    fs_read: [],
-    fs_write: [],
     system_prompt: "Receiver."
   }
 

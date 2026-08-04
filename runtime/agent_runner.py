@@ -1,6 +1,12 @@
 # /// script
 # requires-python = ">=3.11"
-# dependencies = ["claude-agent-sdk==0.1.37"]
+# dependencies = [
+#     "claude-agent-sdk==0.1.37",
+#     # mcp is a transitive dep of the SDK; 2.0 changed the Server API
+#     # ('Server' object has no attribute 'list_tools') and breaks
+#     # create_sdk_mcp_server. Pin until claude-agent-sdk supports mcp 2.
+#     "mcp<2",
+# ]
 # ///
 """
 TriOnyx Agent Runner
@@ -193,7 +199,7 @@ corrections that require no external intervention. Examples:
 
 Changes that require the operator to modify agent definitions, gateway
 configuration, permissions, infrastructure, or code. Examples:
-  - Missing fs_read/fs_write paths in the agent definition
+  - Missing repos_read/repos_write grants in the agent definition
   - Missing tools or send_to/receive_from peers
   - SDK bugs, gateway errors, or infrastructure issues
   - Permission denials that block legitimate workflows
@@ -204,11 +210,11 @@ prior reflection runs, not real work.
 You must produce two outputs:
 
 1. Write a markdown reflection report to
-   /workspace/agents/{agent_name}/reflections/{date}.md using the two
+   /workspace/reflections/{date}.md using the two
    sections above. Keep it under 400 words. Be concrete and actionable.
    No narrative recap of the day — focus only on improvements.
 
-2. Read /workspace/agents/{agent_name}/HEARTBEAT.md, then append or update
+2. Read /workspace/HEARTBEAT.md, then append or update
    a "## Reflection Items" section at the bottom with a bulleted list of
    the self-correctable items. These are standing reminders for your next
    session. Keep each item to one line. Remove any reflection items from
@@ -227,8 +233,8 @@ def _reflection_user_prompt(agent_name: str, date: str) -> str:
         f"Agent: {agent_name}\n"
         f"Date: {date}\n\n"
         "Scan /reflection-logs/ for today's session transcripts, then:\n"
-        f"1. Write your reflection report to /workspace/agents/{agent_name}/reflections/{date}.md\n"
-        f"2. Update /workspace/agents/{agent_name}/HEARTBEAT.md with self-correctable items\n\n"
+        f"1. Write your reflection report to /workspace/reflections/{date}.md\n"
+        f"2. Update /workspace/HEARTBEAT.md with self-correctable items\n\n"
         "Follow the instructions in your system prompt."
     )
 
@@ -534,7 +540,7 @@ _SEND_MESSAGE_TIMEOUT_S = 30
 
 def _submissions_path(agent_name: str) -> Path:
     """Per-agent submissions ledger used for feedback enrichment."""
-    return Path(f"{WORKSPACE_ROOT}/agents/{agent_name}/submissions.json")
+    return Path(f"{WORKSPACE_ROOT}/submissions.json")
 
 
 async def _wait_for_matching_response(queue, request_id: str):
@@ -1795,7 +1801,7 @@ def build_github_tool(github_handler: GitHubHandler) -> Any:
         "repository. The gateway executes it with repository credentials — "
         "credentials never enter this container. Use command='gh' for GitHub "
         "operations (issues, PRs, releases, API) and command='git' for remote "
-        "sync of your local clone under /workspace/repos/ (push, fetch, pull "
+        "sync of your local clone under /github/ (push, fetch, pull "
         "— always name the remote and branch explicitly, e.g. args=['push', "
         "'origin', 'my-branch']). Run local git operations (commit, checkout, "
         "branch) directly via Bash in the clone instead. Pushes to the default "
@@ -2254,7 +2260,7 @@ def build_submit_image_tool(image_handler: SubmitImageHandler) -> Any:
                     "type": "string",
                     "description": (
                         "Path to the image file. Can be absolute "
-                        "(e.g. /workspace/agents/myagent/chart.png) "
+                        "(e.g. /workspace/chart.png) "
                         "or relative to /workspace/."
                     ),
                 },
@@ -2359,7 +2365,7 @@ def build_submit_page_tool(page_handler: SubmitPageHandler) -> Any:
                     "type": "string",
                     "description": (
                         "Path to the HTML file. Can be absolute "
-                        "(e.g. /workspace/agents/myagent/artifacts/report.html) "
+                        "(e.g. /workspace/artifacts/report.html) "
                         "or relative to /workspace/."
                     ),
                 },
@@ -3009,14 +3015,26 @@ async def main() -> None:
                 # Load project settings (including skills/plugins) when the
                 # agent has declared skills or plugins. This enables the Claude
                 # Code CLI to find SKILL.md / plugin.json files in the CWD.
-                # FUSE policy has already restricted access to only the declared
-                # skill/plugin directories, so undeclared ones are not readable.
+                # The container only mounts the repos this agent is granted,
+                # so undeclared plugin directories simply do not exist here.
                 setting_sources = ["project"]
 
-                # Build SDK plugin paths for declared workspace plugins
+                # Build SDK plugin paths for declared plugins. The gateway
+                # resolves each plugin to its container path (own repo:
+                # /workspace/plugins/<p>; shared repo: /repos/<name>/plugins/<p>)
+                # and passes the mapping via TRI_ONYX_PLUGIN_PATHS.
+                plugin_paths = {}
+                for entry in os.environ.get("TRI_ONYX_PLUGIN_PATHS", "").split(","):
+                    if "=" in entry:
+                        plugin_name, plugin_path = entry.split("=", 1)
+                        plugin_paths[plugin_name] = plugin_path
+
                 sdk_plugins = (
                     [
-                        {"type": "local", "path": f"{WORKSPACE_ROOT}/plugins/{p}"}
+                        {
+                            "type": "local",
+                            "path": plugin_paths.get(p, f"{WORKSPACE_ROOT}/plugins/{p}"),
+                        }
                         for p in config.plugins
                     ]
                     if config.plugins
@@ -3107,7 +3125,7 @@ async def main() -> None:
                         "Before shutdown, save any important context from this session "
                         "to your memory files. Write a brief summary of what you worked on, "
                         "key findings, and any unfinished tasks to today's daily memory file "
-                        f"at agents/{config.name}/memory/ using the Write tool. "
+                        f"at /workspace/memory/ using the Write tool. "
                         "Update your HEARTBEAT.md if your current state has changed. "
                         "Be concise — only save information that would be useful in future sessions."
                     )

@@ -1,6 +1,7 @@
-defmodule TriOnyx.ClassifyFuseReadTest do
+defmodule TriOnyx.ClassifyReadableReposTest do
   use ExUnit.Case, async: false
 
+  alias TriOnyx.AgentDefinition
   alias TriOnyx.InformationClassifier
   alias TriOnyx.RiskManifest
 
@@ -10,30 +11,42 @@ defmodule TriOnyx.ClassifyFuseReadTest do
     :ok
   end
 
-  test "returns manifest labels for a labeled file" do
+  defp make_def(name, repos_read \\ [], repos_write \\ []) do
+    %AgentDefinition{
+      name: name,
+      tools: ["Read"],
+      system_prompt: "test",
+      repos_read: repos_read,
+      repos_write: repos_write
+    }
+  end
+
+  test "session read floor is the max labels across readable repos" do
     RiskManifest.put("news", ["agents/news/digest.md"], :high, :medium)
 
-    assert {:ok, classification} = InformationClassifier.classify_fuse_read("/agents/news/digest.md")
-    assert classification.taint == :high
-    assert classification.sensitivity == :medium
-    assert classification.reason =~ "agents/news/digest.md"
-    assert classification.reason =~ "written by news"
+    # The agent's own repo taints its floor
+    assert %{taint: :high, sensitivity: :medium, reason: reason} =
+             InformationClassifier.classify_readable_repos(make_def("news"))
+
+    assert reason =~ "agents/news"
   end
 
-  test "path is matched without the FUSE mount's leading slash" do
-    RiskManifest.put("wiki", ["notes.md"], :medium, :low)
+  test "repos_read grants pull in other repos' labels" do
+    RiskManifest.put("wiki", ["shared/knowledge/index.md"], :medium, :low)
 
-    assert {:ok, %{taint: :medium}} = InformationClassifier.classify_fuse_read("/notes.md")
-    assert {:ok, %{taint: :medium}} = InformationClassifier.classify_fuse_read("notes.md")
+    assert %{taint: :medium} =
+             InformationClassifier.classify_readable_repos(make_def("clean", ["knowledge"]))
   end
 
-  test "returns :unclassified for files without a manifest entry" do
-    RiskManifest.put("news", ["agents/news/known.md"], :low, :low)
+  test "labels in unrelated repos do not taint the session" do
+    RiskManifest.put("news", ["agents/news/digest.md"], :high, :high)
 
-    assert :unclassified = InformationClassifier.classify_fuse_read("/agents/news/unknown.md")
+    assert %{taint: :low, sensitivity: :low} =
+             InformationClassifier.classify_readable_repos(make_def("loner"))
   end
 
-  test "returns :unclassified when the manifest is empty" do
-    assert :unclassified = InformationClassifier.classify_fuse_read("/anything.md")
+  test "empty manifest yields a low floor" do
+    assert %{taint: :low, sensitivity: :low} =
+             InformationClassifier.classify_readable_repos(make_def("anyone", ["core"]))
   end
 end
