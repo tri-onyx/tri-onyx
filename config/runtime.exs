@@ -9,7 +9,13 @@ unless config_env() == :test do
     agents_dir: System.get_env("TRI_ONYX_AGENTS_DIR", "./workspace/trees/_ro/definitions"),
     audit_dir: System.get_env("TRI_ONYX_AUDIT_DIR", "~/.tri-onyx/audit"),
     workspace_dir: System.get_env("TRI_ONYX_WORKSPACE_DIR", "./workspace"),
-    port: String.to_integer(System.get_env("TRI_ONYX_PORT", "4000"))
+    port: String.to_integer(System.get_env("TRI_ONYX_PORT", "4000")),
+    # uid/gid the agent containers run as (tri_onyx = HOST_UID). The gateway
+    # checks out working trees as its own user (root in the container), so
+    # RepoStore hands tree ownership to this uid after every sync. Unset →
+    # chown is skipped (dev runs where gateway and agent share a user).
+    tree_owner_uid: System.get_env("TRI_ONYX_HOST_UID"),
+    tree_owner_gid: System.get_env("TRI_ONYX_HOST_GID")
 end
 
 # Claude API token — passed through to agent runtime processes

@@ -45,6 +45,7 @@ Every filesystem boundary is a git repository — there is no FUSE layer and no 
 - Each agent owns a repo (bare at `workspace/bare/agents/<name>.git`) mounted read-write at `/workspace` in its container (its cwd). Shared repos (`core`, `definitions`, `knowledge`, ...) mount under `/repos/<name>` — rw for `repos_write` grants (the agent gets its own clone, synced through the bare repo at session boundaries), ro for `repos_read` grants (a shared `_ro` checkout of last-committed state).
 - **Gateway-only git**: no working tree contains `.git`; all git runs with explicit `--git-dir`/`--work-tree` from the gateway, so history is untamperable from inside a container.
 - **Session protocol**: trees are fast-forwarded before the container starts (`RepoStore.prepare_session/1`) and committed + pushed at session end (`Workspace.commit_session/4`) with `Taint-Level`/`Sensitivity-Level` trailers. Push conflicts on shared repos are parked on `conflict/<agent>/<session>` branches — main stays clean, nothing is lost.
+- **Tree ownership**: the gateway checks trees out as root, but agent containers run as `tri_onyx` (= `TRI_ONYX_HOST_UID`, default 1000, must match the agent image's `HOST_UID` build arg). `sync_tree/2` chowns every rw agent tree to that uid after each sync, so agents can write their mounts; `_ro`/`_gw` trees stay gateway-owned.
 - The risk manifest keys files by canonical path: `agents/<name>/<path>` or `shared/<name>/<path>`.
 
 ## Container Rebuilds

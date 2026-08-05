@@ -342,24 +342,27 @@ defmodule TriOnyx.RepoStore do
       gd = gitdir(principal, repo_id)
       tree = tree_dir(principal, repo_id)
 
-      locked(repo_id, fn ->
-        with {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
-             {_, 0} <-
-               git_tree(gd, tree, ["merge", "--ff-only", "origin/#{@default_branch}"]) do
-          :ok
-        else
-          {output, code} ->
-            Logger.warning(
-              "RepoStore: ff sync failed for #{principal_dir(principal)}/#{ref(repo_id)} " <>
-                "(exit #{code}): #{String.slice(output, 0, 500)} — attempting merge"
-            )
+      result =
+        locked(repo_id, fn ->
+          with {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
+               {_, 0} <-
+                 git_tree(gd, tree, ["merge", "--ff-only", "origin/#{@default_branch}"]) do
+            :ok
+          else
+            {output, code} ->
+              Logger.warning(
+                "RepoStore: ff sync failed for #{principal_dir(principal)}/#{ref(repo_id)} " <>
+                  "(exit #{code}): #{String.slice(output, 0, 500)} — attempting merge"
+              )
 
-            case git_tree(gd, tree, ["merge", "--no-edit", "origin/#{@default_branch}"]) do
-              {_, 0} -> :ok
-              {out, c} -> {:error, {:sync_failed, c, out}}
-            end
-        end
-      end)
+              case git_tree(gd, tree, ["merge", "--no-edit", "origin/#{@default_branch}"]) do
+                {_, 0} -> :ok
+                {out, c} -> {:error, {:sync_failed, c, out}}
+              end
+          end
+        end)
+
+      with :ok <- result, do: chown_tree(principal, repo_id)
     end
   end
 
@@ -640,6 +643,40 @@ defmodule TriOnyx.RepoStore do
       {:conflict, branch}
     else
       {output, code} -> {:error, {:conflict_park_failed, code, output}}
+    end
+  end
+
+  # Working trees are checked out by the gateway user (root in the gateway
+  # container) but mounted rw into agent containers running as the host
+  # user, so every git write (clone, fetch/merge, reset) leaves files the
+  # agent cannot modify. Hand ownership to the configured agent uid after
+  # every sync. Only agent trees need this — `_ro` mounts are read-only and
+  # `_gw` trees never leave the gateway. A failed chown fails the session
+  # prep loudly; the alternative is the agent hitting bare EACCES mid-run.
+  defp chown_tree(principal, repo_id) when is_binary(principal) do
+    case tree_owner() do
+      nil ->
+        :ok
+
+      {uid, gid} ->
+        tree = tree_dir(principal, repo_id)
+
+        case System.cmd("chown", ["-R", "#{uid}:#{gid}", tree], stderr_to_stdout: true) do
+          {_, 0} -> :ok
+          {out, code} -> {:error, {:chown_failed, code, String.slice(out, 0, 500)}}
+        end
+    end
+  end
+
+  defp chown_tree(_principal, _repo_id), do: :ok
+
+  defp tree_owner do
+    case Application.get_env(:tri_onyx, :tree_owner_uid) do
+      uid when is_binary(uid) and uid != "" ->
+        {uid, Application.get_env(:tri_onyx, :tree_owner_gid) || uid}
+
+      _ ->
+        nil
     end
   end
 

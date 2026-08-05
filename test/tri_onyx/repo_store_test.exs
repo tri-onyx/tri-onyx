@@ -107,6 +107,41 @@ defmodule TriOnyx.RepoStoreTest do
     assert File.read!(Path.join(wiki_tree, "sources/article.md")) == "content\n"
   end
 
+  test "sync_tree hands tree ownership to the configured agent uid" do
+    repo = {:shared, "knowledge"}
+    :ok = RepoStore.ensure_tree(:gw, repo)
+    gw_tree = RepoStore.tree_dir(:gw, repo)
+    File.write!(Path.join(gw_tree, "note.md"), "hello\n")
+    {:ok, _} = RepoStore.commit_and_push(:gw, repo, message: "seed", session_id: "s1")
+
+    {my_uid, 0} = System.cmd("id", ["-u"], stderr_to_stdout: true)
+    my_uid = String.trim(my_uid)
+
+    # Running as root (the gateway container), a real handover to a
+    # different uid is observable. As an unprivileged user, chown to the
+    # current owner still exercises the code path as a no-op.
+    {uid, gid} = if my_uid == "0", do: {"1234", "1234"}, else: {my_uid, my_uid}
+
+    Application.put_env(:tri_onyx, :tree_owner_uid, uid)
+    Application.put_env(:tri_onyx, :tree_owner_gid, gid)
+
+    on_exit(fn ->
+      Application.delete_env(:tri_onyx, :tree_owner_uid)
+      Application.delete_env(:tri_onyx, :tree_owner_gid)
+    end)
+
+    assert :ok = RepoStore.sync_tree("news", repo)
+
+    tree = RepoStore.tree_dir("news", repo)
+    expected = String.to_integer(uid)
+    assert File.stat!(tree).uid == expected
+    assert File.stat!(Path.join(tree, "note.md")).uid == expected
+
+    # The gateway's own tree is never handed over
+    assert :ok = RepoStore.sync_tree(:gw, repo)
+    assert File.stat!(gw_tree).uid != expected or my_uid == uid
+  end
+
   test "non-conflicting concurrent edits merge; conflicting edits get parked" do
     repo = {:shared, "knowledge"}
     :ok = RepoStore.ensure_tree("a", repo)

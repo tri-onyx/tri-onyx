@@ -19,6 +19,11 @@ services:
       - TRI_ONYX_AGENTS_DIR=/app/workspace/trees/_ro/definitions
       - TRI_ONYX_WORKSPACE_DIR=/app/workspace
       - TRI_ONYX_HOST_ROOT=${PWD}
+      # uid/gid the agent containers run as (must match the agent image's
+      # HOST_UID/HOST_GID build args) — RepoStore chowns working trees to
+      # this owner so agents can write their rw mounts
+      - TRI_ONYX_HOST_UID=${TRI_ONYX_HOST_UID:-1000}
+      - TRI_ONYX_HOST_GID=${TRI_ONYX_HOST_GID:-1000}
       - CLAUDE_CODE_OAUTH_TOKEN
       # Email connector (optional — set TRI_ONYX_IMAP_HOST in .env to enable)
       - TRI_ONYX_IMAP_HOST
