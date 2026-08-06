@@ -111,26 +111,7 @@ defmodule TriOnyx.ConnectorHandler do
 
   def handle_info({:push_frame, frame}, state) do
     if state.authenticated do
-      # Deduplicate heartbeat_notification for sessions we already track via
-      # EventBus. When a user message gets routed to an existing non-interactive
-      # session (cron/webhook wildcard match), the connector subscribes to
-      # EventBus — so text is already delivered as agent_text. The completion
-      # broadcast would send the same content again as heartbeat_notification.
-      case Jason.decode(frame) do
-        {:ok, %{"type" => "heartbeat_notification", "session_id" => sid}} when is_binary(sid) ->
-          if Map.has_key?(state.session_channels, sid) do
-            Logger.debug(
-              "ConnectorHandler: skipping heartbeat_notification for tracked session #{sid}"
-            )
-
-            {:ok, state}
-          else
-            {:push, [{:text, frame}], state}
-          end
-
-        _ ->
-          {:push, [{:text, frame}], state}
-      end
+      {:push, [{:text, frame}], state}
     else
       {:ok, state}
     end
@@ -755,11 +736,22 @@ defmodule TriOnyx.ConnectorHandler do
 
   Used for proactive notifications (e.g. heartbeat results) that aren't tied
   to an existing session channel.
+
+  Pass `unless_subscribed_to: session_id` to skip connectors that already
+  receive that session's events via their EventBus subscription — pushing
+  the frame to those as well would deliver the same content twice.
   """
-  @spec broadcast_to_connectors(binary()) :: :ok
-  def broadcast_to_connectors(frame) when is_binary(frame) do
+  @spec broadcast_to_connectors(binary(), keyword()) :: :ok
+  def broadcast_to_connectors(frame, opts \\ []) when is_binary(frame) do
+    subscribed =
+      case Keyword.get(opts, :unless_subscribed_to) do
+        nil -> MapSet.new()
+        session_id -> MapSet.new(EventBus.subscribers(session_id))
+      end
+
     TriOnyx.ConnectorRegistry
     |> Registry.select([{{:_, :"$1", :_}, [], [:"$1"]}])
+    |> Enum.reject(&MapSet.member?(subscribed, &1))
     |> Enum.each(fn pid -> send(pid, {:push_frame, frame}) end)
 
     :ok

@@ -46,7 +46,6 @@ defmodule TriOnyx.AgentSession do
           status: :starting | :ready | :running | :saving_memory | :stopped,
           trigger_type: atom(),
           last_text: String.t() | nil,
-          prompt_from_connector: boolean(),
           shutdown_reason: String.t() | nil,
           memory_save_timer: reference() | nil,
           prompt_queue: [{String.t(), map()}],
@@ -204,7 +203,6 @@ defmodule TriOnyx.AgentSession do
       status: :starting,
       trigger_type: trigger_type,
       last_text: nil,
-      prompt_from_connector: true,
       prompt_queue: [],
       pending_tools: %{},
       idle_timer: nil,
@@ -314,13 +312,6 @@ defmodule TriOnyx.AgentSession do
     end
   end
 
-  # Tracks whether the latest prompt came from a connector (chat platform)
-  # or elsewhere (frontend HTTP API). Connector-tracked sessions deliver
-  # responses via EventBus; others rely on the completion broadcast.
-  defp note_prompt_source(state, metadata) do
-    %{state | prompt_from_connector: Map.get(metadata, "source") == "connector"}
-  end
-
   # Prompts that arrive while the runtime is busy are queued FIFO, never
   # overwritten — rapid successive prompts (e.g. several upvote reactions)
   # must all be processed.
@@ -341,7 +332,6 @@ defmodule TriOnyx.AgentSession do
       state
       |> cancel_idle_timeout()
       |> maybe_elevate_from_metadata(metadata)
-      |> note_prompt_source(metadata)
 
     broadcast_event(state, %{"type" => "user_prompt", "content" => content})
     AgentPort.send_prompt(port, content, metadata)
@@ -351,7 +341,7 @@ defmodule TriOnyx.AgentSession do
   def handle_call({:prompt, content, metadata}, _from, %{status: status} = state)
       when status in [:starting] do
     Logger.info("AgentSession #{state.id}: queuing prompt (status=#{status}, #{byte_size(content)} bytes)")
-    state = state |> maybe_elevate_from_metadata(metadata) |> note_prompt_source(metadata)
+    state = state |> maybe_elevate_from_metadata(metadata)
     {:reply, :ok, enqueue_prompt(state, content, metadata)}
   end
 
@@ -367,7 +357,7 @@ defmodule TriOnyx.AgentSession do
       Logger.info("AgentSession #{state.id}: queuing prompt behind running work (no interrupt)")
     end
 
-    state = state |> maybe_elevate_from_metadata(metadata) |> note_prompt_source(metadata)
+    state = state |> maybe_elevate_from_metadata(metadata)
     {:reply, :ok, enqueue_prompt(state, content, metadata)}
   end
 
@@ -867,12 +857,14 @@ defmodule TriOnyx.AgentSession do
 
       broadcast_event(state, item_event)
 
-      # For non-interactive sessions (heartbeat, cron, etc.) no connector is
-      # subscribed to this session's EventBus, so also push via
-      # broadcast_to_connectors so the item reaches Matrix/Slack.
-      if state.trigger_type not in [:verified_input, :unverified_input] do
-        TriOnyx.ConnectorHandler.broadcast_to_connectors(Jason.encode!(item_event))
-      end
+      # Push to connectors so the item reaches Matrix/Slack. Connectors
+      # already receiving this session via EventBus (e.g. after a user
+      # message joined a running cron session) are skipped — they deliver
+      # the item through their subscription.
+      TriOnyx.ConnectorHandler.broadcast_to_connectors(
+        Jason.encode!(item_event),
+        unless_subscribed_to: state.id
+      )
     end
 
     {:noreply, state}
@@ -1520,25 +1512,20 @@ defmodule TriOnyx.AgentSession do
             "content" => state.last_text
           })
 
-        TriOnyx.ConnectorHandler.broadcast_to_connectors(frame)
+        TriOnyx.ConnectorHandler.broadcast_to_connectors(frame,
+          unless_subscribed_to: state.id
+        )
       end
     end
 
-    # Push result text to connectors for non-heartbeat, non-interactive agents
-    # (cron, inter-agent, webhook). Interactive sessions (verified/unverified
-    # input) deliver text via EventBus subscriptions when a connector
-    # originated the prompt — but prompts from the frontend HTTP API have no
-    # subscribed connector, so those are broadcast too. Connectors that DO
-    # track the session deduplicate these frames by session_id, so a
-    # connector-originated session prompted from the frontend is not posted
-    # twice.
+    # Push result text to connectors for non-heartbeat sessions. Connectors
+    # tracking this session via EventBus (e.g. the one that originated the
+    # prompt) are skipped — they already deliver the text as agent_text
+    # through their subscription. Prompts from the frontend HTTP API have no
+    # subscribed connector, so those reach chat via this broadcast.
     # Skip when saving_memory — the memory-save result is internal and should
     # not be pushed to chat (otherwise users see a duplicate/garbled message).
-    interactive_via_connector =
-      state.trigger_type in [:verified_input, :unverified_input] && state.prompt_from_connector
-
     if state.trigger_type != :heartbeat &&
-         not interactive_via_connector &&
          state.status != :saving_memory &&
          state.last_text do
       frame =
@@ -1549,7 +1536,9 @@ defmodule TriOnyx.AgentSession do
           "content" => state.last_text
         })
 
-      TriOnyx.ConnectorHandler.broadcast_to_connectors(frame)
+      TriOnyx.ConnectorHandler.broadcast_to_connectors(frame,
+        unless_subscribed_to: state.id
+      )
     end
 
     # Commit workspace writes

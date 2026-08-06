@@ -250,7 +250,6 @@ defmodule TriOnyx.AgentSessionTest do
           status: :running,
           prompt_queue: [],
           idle_timer: nil,
-          prompt_from_connector: true,
           pending_tools: %{}
         },
         overrides

@@ -34,6 +34,16 @@ defmodule TriOnyx.EventBus do
   end
 
   @doc """
+  Returns the pids currently subscribed to `session_id`.
+  """
+  @spec subscribers(String.t()) :: [pid()]
+  def subscribers(session_id) do
+    @registry
+    |> Registry.lookup(session_id)
+    |> Enum.map(fn {pid, _value} -> pid end)
+  end
+
+  @doc """
   Broadcasts an event map to all subscribers of `session_id`.
 
   `event` should be a JSON-serialisable map, e.g.:

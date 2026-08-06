@@ -396,6 +396,36 @@ defmodule TriOnyx.ConnectorHandlerTest do
     end
   end
 
+  describe "broadcast_to_connectors/2" do
+    test "pushes frames to registered connectors" do
+      {:ok, _} = Registry.register(TriOnyx.ConnectorRegistry, "bcast-test-#{inspect(self())}", %{})
+      frame = Jason.encode!(%{"type" => "article", "title" => "delivered once"})
+
+      ConnectorHandler.broadcast_to_connectors(frame)
+
+      assert_receive {:push_frame, ^frame}
+    end
+
+    test "unless_subscribed_to skips connectors tracking the session via EventBus" do
+      {:ok, _} = Registry.register(TriOnyx.ConnectorRegistry, "bcast-sub-test-#{inspect(self())}", %{})
+      session_id = "sess-#{System.unique_integer([:positive])}"
+      {:ok, _} = TriOnyx.EventBus.subscribe(session_id)
+
+      subscribed_frame = Jason.encode!(%{"type" => "article", "title" => "skipped"})
+      ConnectorHandler.broadcast_to_connectors(subscribed_frame, unless_subscribed_to: session_id)
+      refute_receive {:push_frame, ^subscribed_frame}
+
+      # A subscription to a different session does not suppress delivery
+      other_frame = Jason.encode!(%{"type" => "article", "title" => "still delivered"})
+
+      ConnectorHandler.broadcast_to_connectors(other_frame,
+        unless_subscribed_to: "sess-#{System.unique_integer([:positive])}"
+      )
+
+      assert_receive {:push_frame, ^other_frame}
+    end
+  end
+
   describe "invalid input handling" do
     setup do
       {:ok, state} = ConnectorHandler.init([])
