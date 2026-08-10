@@ -1,11 +1,16 @@
 # Public MCP Server — Status & Remaining Steps
 
-> Status as of 2026-08-10. All blocking security fixes from the 2026-08-09
-> review are **implemented and verified**: 120 mcp_server tests + 47 connector
-> tests pass in Docker, and a local smoke test of the full OAuth flow
-> (discovery → DCR → authorize → cookie-bound login → code → redirect) passed.
-> What remains before first exposure is operator-only setup, below.
-> Architecture and setup docs: `docs/mcp-server.md`.
+> Status as of 2026-08-10 (end of day): **LIVE and verified end-to-end.**
+> The claude.ai connector is authorized and working (token exchange + agent
+> round-trips confirmed), and a Cloudflare Access policy (One-time PIN,
+> operator email only) gates `/login` and `/authorize` — nothing else, since
+> claude.ai calls `/mcp`, `/token`, `/register` and `.well-known` server-side.
+> All blocking security fixes from the 2026-08-09 review are implemented and
+> tested. Architecture and setup docs: `docs/mcp-server.md`.
+>
+> Operational notes: restarting the `mcp` service kills in-flight tool calls —
+> apply config changes when idle. Agent turns take 1–3 minutes; Claude voice
+> may time out client-side even though the turn completes.
 
 ## Completed (2026-08-10)
 
@@ -35,24 +40,17 @@
    is the agent directory); sanitized tool names, collisions are a startup
    configuration error.
 
-Still owed from verification: one real agent round-trip through the gateway
-(needs the stack up with real secrets — part of first-exposure testing below).
-
-## Manual operator steps (only you can do these)
-
-1. Create a Cloudflare Tunnel (Zero Trust → Networks → Tunnels), route a public
-   hostname to `http://mcp:8765`, copy the connector token.
-2. Add to `.env`: `TUNNEL_TOKEN=…`,
-   `MCP_OPERATOR_PASSWORD=<high-entropy — openssl rand -base64 32>`,
-   `MCP_PUBLIC_URL=https://<your-hostname>`.
-3. `cp secrets/mcp-config.yaml.example secrets/mcp-config.yaml`,
-   `mkdir -p secrets/mcp-data`, edit the `agents:` allowlist (only agents safe
-   to expose — prompt injection reaching claude.ai inherits operator trust).
-4. Strongly recommended defense-in-depth: a Cloudflare Access policy in front
-   of the hostname, so the login page isn't reachable by the open internet.
-5. `docker compose --profile mcp up -d --build mcp cloudflared`, run the smoke
-   checks in `docs/mcp-server.md` ("Start" section), then add the custom
-   connector in claude.ai pointing at `https://<hostname>/mcp`.
+10. ✅ Registrations force-downgraded to public clients — claude.ai registers
+    as `client_secret_post` but never presents the secret at `/token`.
+11. ✅ Login page CSP `form-action` includes the callback origins — Chrome
+    enforces form-action on the submission's redirect target and otherwise
+    silently blocks the 302 back to claude.ai.
+12. ✅ Completed logins replayable for 60 s (cookie-bound + password-verified)
+    so password-manager interstitial resubmits don't strand the flow.
+13. ✅ Operator setup done: tunnel routed to `http://mcp:8765`, `.env` secrets
+    set, `secrets/mcp-config.yaml` filled, Cloudflare Access (One-time PIN,
+    operator email) on `/login` + `/authorize` only, connector added in
+    claude.ai, `news`-agent round-trip verified end-to-end.
 
 ## Lower priority (can follow first exposure)
 
