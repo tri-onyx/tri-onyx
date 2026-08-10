@@ -46,26 +46,16 @@ _TOOL_NAME_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _PENDING_NOTICE = """\
 [TriOnyx: still working — this is NOT the reply] (check #{checks})
 
-The '{agent}' agent has not finished this turn yet: {progress}. The turn is
-STILL RUNNING on the TriOnyx server — nothing was lost, and the agent is not
-waiting on you.
+The '{agent}' agent is still on this turn: {progress}. The turn keeps running
+on the server; nothing was lost.
 
-To collect the reply, call the `{tool}` tool again with {conv_hint} and any
-short message such as "status?". That call attaches to this same running turn
-and returns the real reply as soon as it lands. It waits up to {soft:.0f}s, so
-you may get this notice more than once — keep calling.
-
-Rules while this turn is running:
-- Your `message` is treated as a poll and is NOT delivered to the agent. Do not
-  send a follow-up question or new instructions yet — they would be silently
-  dropped. Send them only after you have received this turn's reply.
-- Do not switch `conversation_id` to get a faster answer: that starts a second,
-  independent agent session and abandons this one.
-- If the agent gives up, the next call returns an error instead of a reply —
-  re-send your original message after that.
-- Once you have the reply, stop calling this tool unless you genuinely have
-  something new to say: a call on an idle conversation starts a new agent turn.
-- This turn is abandoned after {hard:.0f}s in total."""
+Call `{tool}` again with {conv_hint} to collect the reply — each call waits up
+to {soft:.0f}s, so repeat until the reply (or, if the agent gives up, an error)
+arrives; the turn is abandoned after {hard:.0f}s total. While it runs, your
+`message` is only a poll and is NOT delivered to the agent — hold new
+instructions until the reply arrives, and don't switch `conversation_id` (that
+starts a separate session). Once you have the reply, stop calling: the next
+call starts a new turn."""
 
 
 def _progress_phrase(status: TurnStatus) -> str:
@@ -80,10 +70,7 @@ def _progress_phrase(status: TurnStatus) -> str:
 def _conv_hint(conversation_id: str | None) -> str:
     if conversation_id:
         return f'conversation_id="{conversation_id}"'
-    return (
-        "no conversation_id at all (the default conversation), exactly as you "
-        "did just now"
-    )
+    return "no conversation_id at all, exactly as now"
 
 
 def _still_working_text(
