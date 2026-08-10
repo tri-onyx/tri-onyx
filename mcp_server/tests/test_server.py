@@ -350,6 +350,16 @@ def test_login_without_the_txn_cookie_is_refused(client, wired):
     assert provider._codes == {}
 
 
+def test_login_page_csp_allows_the_callback_redirect(client):
+    """Chrome enforces form-action on the submission's redirect target — the
+    callback origin must be allowed or the 302 to claude.ai is blocked."""
+    client_id = register_client(client).json()["client_id"]
+    location = authorize(client, client_id).headers["location"]
+    txn = parse_qs(urlsplit(location).query)["txn"][0]
+    page = client.get("/login", params={"txn": txn})
+    assert "form-action 'self' https://claude.ai" in page.headers["content-security-policy"]
+
+
 def test_login_page_shows_the_verifiable_client_facts(client):
     client_id = register_client(client).json()["client_id"]
     location = authorize(client, client_id).headers["location"]

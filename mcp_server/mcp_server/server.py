@@ -89,9 +89,18 @@ def _login_page(
     *,
     txn: str,
     details: dict[str, str],
+    form_action_origins: str = "",
     error: str | None = None,
     status_code: int = 200,
 ) -> HTMLResponse:
+    # Chrome enforces CSP form-action on the *redirect target* of a form
+    # submission, so the allowlisted callback origins must be listed or the
+    # browser silently refuses to follow the 302 back to the client.
+    headers = dict(_SECURITY_HEADERS)
+    headers["Content-Security-Policy"] = (
+        "default-src 'none'; style-src 'unsafe-inline'; "
+        f"form-action 'self' {form_action_origins}".rstrip()
+    )
     safe_txn = html.escape(txn, quote=True)
     safe_client = html.escape(details.get("client_name") or "an MCP client", quote=True)
     # The client name is self-asserted at registration; the id and redirect
@@ -143,7 +152,7 @@ def _login_page(
 </body>
 </html>
 """
-    return HTMLResponse(body, status_code=status_code, headers=_SECURITY_HEADERS)
+    return HTMLResponse(body, status_code=status_code, headers=headers)
 
 
 def _message_page(title: str, detail: str, status_code: int) -> HTMLResponse:
@@ -287,6 +296,17 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
     #: actual throughput limit rather than per-request latency.
     login_guard = asyncio.Semaphore(4)
 
+    # The login form's 302 lands on an allowlisted redirect URI; those origins
+    # must be in CSP form-action or Chrome blocks the cross-origin redirect.
+    redirect_origins = " ".join(
+        sorted(
+            {
+                f"{urlsplit(u).scheme}://{urlsplit(u).netloc}"
+                for u in config.auth.redirect_uris
+            }
+        )
+    )
+
     def _expired_page() -> HTMLResponse:
         # One indistinguishable answer for unknown txn, expired txn and missing
         # cookie — no oracle for which precondition failed.
@@ -308,7 +328,9 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
             return _expired_page()
         details = provider.pending_details(txn)
         assert details is not None  # has_pending was just checked
-        return _login_page(txn=txn, details=details)
+        return _login_page(
+            txn=txn, details=details, form_action_origins=redirect_origins
+        )
 
     @mcp.custom_route("/login", methods=["POST"])
     async def login_submit(request: Request) -> Response:
@@ -356,6 +378,7 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
                 return _login_page(
                     txn=txn,
                     details=details,
+                    form_action_origins=redirect_origins,
                     error="Invalid credentials.",
                     status_code=401,
                 )
