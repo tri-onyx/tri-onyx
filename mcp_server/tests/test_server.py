@@ -158,6 +158,48 @@ def test_dynamic_client_registration(client):
     assert body["redirect_uris"] == [CLAUDE_REDIRECT]
 
 
+def test_confidential_registration_is_downgraded_to_a_public_client(client):
+    """claude.ai registers as client_secret_post but never presents the secret
+    at /token — every client is registered public (PKCE is the binding)."""
+    response = client.post(
+        "/register",
+        json={
+            "client_name": "Claude",
+            "redirect_uris": [CLAUDE_REDIRECT],
+            "grant_types": ["authorization_code", "refresh_token"],
+            "response_types": ["code"],
+            "token_endpoint_auth_method": "client_secret_post",
+            "scope": "trionyx:chat",
+        },
+    )
+    assert response.status_code == 201
+    body = response.json()
+    assert body["token_endpoint_auth_method"] == "none"
+    assert body.get("client_secret") is None
+
+    # The full flow works without a client secret at the token endpoint.
+    location = authorize(client, body["client_id"]).headers["location"]
+    txn = parse_qs(urlsplit(location).query)["txn"][0]
+    redirect = client.post(
+        "/login",
+        data={"txn": txn, "password": OPERATOR_PASSWORD},
+        follow_redirects=False,
+    )
+    code = parse_qs(urlsplit(redirect.headers["location"]).query)["code"][0]
+    token_response = client.post(
+        "/token",
+        data={
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": CLAUDE_REDIRECT,
+            "client_id": body["client_id"],
+            "code_verifier": VERIFIER,
+        },
+    )
+    assert token_response.status_code == 200, token_response.text
+    assert token_response.json()["access_token"]
+
+
 def test_registration_rejects_a_foreign_redirect_uri(client):
     response = register_client(client, redirect_uri="https://evil.test/callback")
     assert response.status_code == 400

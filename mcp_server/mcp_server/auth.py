@@ -248,6 +248,16 @@ class TriOnyxAuthProvider(
         return OAuthClientInformationFull.model_validate(record)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        # Every client is registered as a *public* client, whatever it asked
+        # for: this AS mandates PKCE-S256 and gates issuance on the operator
+        # login, so a client secret adds nothing — and claude.ai registers as
+        # client_secret_post yet never presents the minted secret at /token,
+        # which would fail the exchange with invalid_client. The mutation is
+        # reflected in the DCR response, so the client knows it is public.
+        client_info.token_endpoint_auth_method = "none"
+        client_info.client_secret = None
+        client_info.client_secret_expires_at = None
+
         redirect_uris = [str(u) for u in (client_info.redirect_uris or [])]
         if not redirect_uris:
             raise RegistrationError(
