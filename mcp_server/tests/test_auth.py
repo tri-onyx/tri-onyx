@@ -207,6 +207,44 @@ async def test_login_locks_out_after_repeated_failures(provider):
     assert provider.complete_login(txn, OPERATOR_PASSWORD, "1.1.1.1")
 
 
+async def test_duplicate_submit_replays_the_same_redirect(provider):
+    """Password managers can resubmit the form after a successful login; the
+    duplicate must land on the same redirect, not a 'link expired' page."""
+    client = make_client()
+    await provider.register_client(client)
+    url = await provider.authorize(client, auth_params())
+    txn = parse_qs(urlsplit(url).query)["txn"][0]
+
+    first = provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
+    second = provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
+    assert second == first
+    # The replay minted nothing new — still exactly one (single-use) code.
+    assert len(provider._codes) == 1
+
+
+async def test_duplicate_submit_with_a_wrong_password_is_refused(provider):
+    client = make_client()
+    await provider.register_client(client)
+    url = await provider.authorize(client, auth_params())
+    txn = parse_qs(urlsplit(url).query)["txn"][0]
+
+    provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
+    with pytest.raises(LoginExpired):
+        provider.complete_login(txn, "not-the-password", "1.2.3.4")
+
+
+async def test_completed_login_replay_window_expires(provider):
+    client = make_client()
+    await provider.register_client(client)
+    url = await provider.authorize(client, auth_params())
+    txn = parse_qs(urlsplit(url).query)["txn"][0]
+
+    provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
+    provider._completed[txn].expires_at = time.time() - 1
+    with pytest.raises(LoginExpired):
+        provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
+
+
 async def test_expired_pending_authorization_cannot_be_completed(provider):
     client = make_client()
     await provider.register_client(client)

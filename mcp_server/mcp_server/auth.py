@@ -89,6 +89,20 @@ class _PendingAuthorization:
 
 
 @dataclass(slots=True)
+class _CompletedLogin:
+    """A recently finished login, kept briefly so duplicate form submissions
+    (password-manager interstitials, double clicks) replay the same redirect
+    instead of landing on a 'link expired' page."""
+
+    redirect_url: str
+    expires_at: float
+
+
+#: How long a finished login transaction stays replayable.
+_COMPLETED_LOGIN_TTL = 60.0
+
+
+@dataclass(slots=True)
 class _IpState:
     failures: int = 0
     locked_until: float = 0.0
@@ -195,6 +209,7 @@ class TriOnyxAuthProvider(
         self._auth = config.auth
         self._store = store
         self._pending: dict[str, _PendingAuthorization] = {}
+        self._completed: dict[str, _CompletedLogin] = {}
         self._codes: dict[str, AuthorizationCode] = {}
         self._allowed_redirects = {
             canonical_resource(u) for u in config.auth.redirect_uris
@@ -233,6 +248,8 @@ class TriOnyxAuthProvider(
         ttl = self._auth.pending_authorization_ttl_seconds
         for txn in [t for t, p in self._pending.items() if p.created_at + ttl < now]:
             self._pending.pop(txn, None)
+        for txn in [t for t, c in self._completed.items() if c.expires_at < now]:
+            self._completed.pop(txn, None)
         for code, record in list(self._codes.items()):
             if record.expires_at < now:
                 self._codes.pop(code, None)
@@ -389,6 +406,22 @@ class TriOnyxAuthProvider(
         self._prune_pending()
         pending = self._pending.get(txn)
         if pending is None:
+            # Duplicate submission of a just-completed login (password-manager
+            # interstitials resubmit the form): replay the identical redirect —
+            # same single-use code, nothing new is minted — but only for a
+            # requester that still presents the correct password.
+            completed = self._completed.get(txn)
+            if completed is not None and hmac.compare_digest(
+                self._auth.operator_password.encode("utf-8"),
+                password.encode("utf-8"),
+            ):
+                logger.info(
+                    "Replaying completed login redirect for duplicate submit "
+                    "from %s (txn=%s…)",
+                    client_ip,
+                    txn[:8],
+                )
+                return completed.redirect_url
             # A valid pending transaction is a precondition for evaluating the
             # password at all: without one there is nothing to authorize, and
             # requiring it means a password guess costs an /authorize round-trip.
@@ -430,9 +463,14 @@ class TriOnyxAuthProvider(
             client_ip,
             pending.client_id,
         )
-        return construct_redirect_uri(
+        redirect_url = construct_redirect_uri(
             pending.redirect_uri, code=code, state=pending.state
         )
+        self._completed[txn] = _CompletedLogin(
+            redirect_url=redirect_url,
+            expires_at=time.time() + _COMPLETED_LOGIN_TTL,
+        )
+        return redirect_url
 
     # ------------------------------------------------------------------
     # Token issuance

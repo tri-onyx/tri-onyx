@@ -359,6 +359,21 @@ def test_login_page_shows_the_verifiable_client_facts(client):
     assert CLAUDE_REDIRECT in page.text
 
 
+def test_duplicate_login_submit_replays_the_redirect(client):
+    """A 1Password-style interstitial resubmits the form ~2s after the real
+    submit; the duplicate must return the identical 302, not 'link expired'."""
+    client_id = register_client(client).json()["client_id"]
+    location = authorize(client, client_id).headers["location"]
+    txn = parse_qs(urlsplit(location).query)["txn"][0]
+    form = {"txn": txn, "password": OPERATOR_PASSWORD}
+
+    first = client.post("/login", data=form, follow_redirects=False)
+    second = client.post("/login", data=form, follow_redirects=False)
+    assert first.status_code == 302
+    assert second.status_code == 302
+    assert second.headers["location"] == first.headers["location"]
+
+
 def test_oversized_login_body_is_refused(client):
     response = client.post("/login", data={"txn": "x", "password": "y" * 5000})
     assert response.status_code == 413

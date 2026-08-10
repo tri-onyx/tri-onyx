@@ -319,6 +319,13 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
         txn = str(form.get("txn") or "")
         password = str(form.get("password") or "")
         ip = client_ip(request)
+        logger.info(
+            "POST /login from %s txn=%s… ua=%r referer=%r",
+            ip,
+            txn[:8],
+            request.headers.get("user-agent", "")[:60],
+            request.headers.get("referer", ""),
+        )
 
         # The txn cookie was set by *this* browser's /authorize redirect; a
         # transaction pre-staged from someone else's browser dies here.
@@ -352,6 +359,7 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
                     error="Invalid credentials.",
                     status_code=401,
                 )
+        logger.info("Redirecting operator to the client callback (txn=%s…)", txn[:8])
         return RedirectResponse(
             redirect_url, status_code=302, headers={"Cache-Control": "no-store"}
         )
