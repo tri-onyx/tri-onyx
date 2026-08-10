@@ -29,11 +29,81 @@ from mcp_server.auth import (
     TriOnyxAuthProvider,
 )
 from mcp_server.config import AgentEntry, ConfigError, McpConfig
-from mcp_server.gateway_bridge import GatewayBridge, GatewayError, make_room_id
+from mcp_server.gateway_bridge import (
+    GatewayBridge,
+    GatewayError,
+    TurnStatus,
+    make_room_id,
+)
 
 logger = logging.getLogger(__name__)
 
 _TOOL_NAME_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
+
+#: Returned instead of the reply when a turn outlives the soft deadline. Written
+#: for the calling model: it must keep polling the same conversation and must
+#: not treat this text as the agent's answer.
+_PENDING_NOTICE = """\
+[TriOnyx: still working — this is NOT the reply] (check #{checks})
+
+The '{agent}' agent has not finished this turn yet: {progress}. The turn is
+STILL RUNNING on the TriOnyx server — nothing was lost, and the agent is not
+waiting on you.
+
+To collect the reply, call the `{tool}` tool again with {conv_hint} and any
+short message such as "status?". That call attaches to this same running turn
+and returns the real reply as soon as it lands. It waits up to {soft:.0f}s, so
+you may get this notice more than once — keep calling.
+
+Rules while this turn is running:
+- Your `message` is treated as a poll and is NOT delivered to the agent. Do not
+  send a follow-up question or new instructions yet — they would be silently
+  dropped. Send them only after you have received this turn's reply.
+- Do not switch `conversation_id` to get a faster answer: that starts a second,
+  independent agent session and abandons this one.
+- If the agent gives up, the next call returns an error instead of a reply —
+  re-send your original message after that.
+- Once you have the reply, stop calling this tool unless you genuinely have
+  something new to say: a call on an idle conversation starts a new agent turn.
+- This turn is abandoned after {hard:.0f}s in total."""
+
+
+def _progress_phrase(status: TurnStatus) -> str:
+    parts = [f"{status.elapsed:.0f}s elapsed", status.activity]
+    if status.partial_chars:
+        parts.append(
+            f"{status.partial_chars} characters of output produced so far"
+        )
+    return ", ".join(parts)
+
+
+def _conv_hint(conversation_id: str | None) -> str:
+    if conversation_id:
+        return f'conversation_id="{conversation_id}"'
+    return (
+        "no conversation_id at all (the default conversation), exactly as you "
+        "did just now"
+    )
+
+
+def _still_working_text(
+    *,
+    agent_name: str,
+    tool_name: str,
+    conversation_id: str | None,
+    status: TurnStatus,
+    soft: float,
+    hard: float,
+) -> str:
+    return _PENDING_NOTICE.format(
+        checks=status.checks,
+        agent=agent_name,
+        progress=_progress_phrase(status),
+        tool=tool_name,
+        conv_hint=_conv_hint(conversation_id),
+        soft=soft,
+        hard=hard,
+    )
 
 
 def agent_tool_name(agent_name: str) -> str:
@@ -184,8 +254,11 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
         "This server is a front door to a set of TriOnyx agents. Each tool is "
         "one agent: call it with a message and it returns that agent's reply. "
         "Agents are stateful — pass a stable `conversation_id` to keep talking "
-        "to the same agent session across turns.\n\nAvailable agents:\n"
-        + agent_list
+        "to the same agent session across turns. Tool calls are long-running: "
+        "if a call returns a `[TriOnyx: still working]` notice, call the same "
+        "tool again with the same `conversation_id` until the real reply "
+        "arrives, and do not send new instructions in the meantime."
+        "\n\nAvailable agents:\n" + agent_list
     )
 
     mcp = MCPServer(
@@ -210,7 +283,12 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
     # Tools — one per allowlisted agent; the tool list is the agent directory
     # ------------------------------------------------------------------
 
-    async def ask(agent_name: str, message: str, conversation_id: str | None) -> str:
+    async def ask(
+        agent_name: str,
+        tool_name: str,
+        message: str,
+        conversation_id: str | None,
+    ) -> str:
         stripped = message.strip()
         if not stripped:
             raise ValueError("message must not be empty")
@@ -219,6 +297,8 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
             # command (e.g. `/restart <any agent>`) *before* routing, which
             # would bypass this server's agent allowlist. Skill invocations
             # (`/library:action`) pass through to the agent and stay allowed.
+            # Rejected here, before the bridge, so a rejected message never
+            # consumes a parked result.
             raise ValueError(
                 "Messages must not start with '/': gateway system commands are "
                 "not available through this connector."
@@ -233,31 +313,55 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
             "…" if len(message) > 120 else "",
         )
         try:
-            reply = await bridge.ask(
+            status = await bridge.ask(
                 agent_name,
                 message,
                 room_id,
-                timeout=config.session.timeout_seconds,
+                wait_timeout=config.session.soft_timeout_seconds,
+                hard_timeout=config.session.timeout_seconds,
             )
         except GatewayError as exc:
             raise ValueError(str(exc)) from None
-        if not reply:
+        if status.pending:
+            # A successful result, not an error: the calling model must read
+            # the polling contract rather than see a failed tool call.
+            return _still_working_text(
+                agent_name=agent_name,
+                tool_name=tool_name,
+                conversation_id=conversation_id,
+                status=status,
+                soft=config.session.soft_timeout_seconds,
+                hard=config.session.timeout_seconds,
+            )
+        if not status.reply:
             return (
                 f"Agent '{agent_name}' finished without producing any text output."
             )
-        return reply
+        return status.reply
 
     def register_agent_tool(entry: AgentEntry) -> None:
         purpose = (entry.description or f"The TriOnyx agent '{entry.name}'").rstrip(".")
+        tool_name = agent_tool_name(entry.name)
 
         @mcp.tool(
-            name=agent_tool_name(entry.name),
+            name=tool_name,
             title=f"Ask the {entry.name} agent",
             description=(
                 f"{purpose}. Sends a message to the '{entry.name}' agent and "
                 "returns its reply. The agent is stateful: reuse the same "
                 "`conversation_id` to continue an existing conversation, or "
-                "pick a new one to start fresh. Agent turns can take minutes."
+                "pick a new one to start fresh. Agent turns can take minutes — "
+                "the first message to an agent boots its container. If the "
+                "reply is not ready in time, this tool returns a "
+                "`[TriOnyx: still working]` notice instead of the reply (a "
+                "normal result, not an error) and the turn keeps running on "
+                "the server: call this tool again with the same "
+                "`conversation_id` to keep waiting, and repeat until you get "
+                "the reply or an error. While a turn is running your `message` "
+                "is only a poll and is NOT delivered to the agent, so never "
+                "send new instructions until the previous turn's reply has "
+                "arrived. Stop calling once you have the reply — a call on an "
+                "idle conversation starts a new agent turn."
             ),
         )
         async def agent_tool(
@@ -275,7 +379,7 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
                 ),
             ] = None,
         ) -> str:
-            return await ask(entry.name, message, conversation_id)
+            return await ask(entry.name, tool_name, message, conversation_id)
 
     tool_names: set[str] = set()
     for entry in config.agents:
@@ -507,6 +611,8 @@ def build_all(config: McpConfig) -> tuple[GatewayBridge, MCPServer, Starlette, A
         sender=config.session.sender,
         trust_level=config.session.trust_level,
         default_timeout=config.session.timeout_seconds,
+        soft_timeout=config.session.soft_timeout_seconds,
+        parked_ttl=config.session.parked_result_ttl_seconds,
     )
     mcp = build_server(config, provider, bridge)
     app = build_app(config, mcp)

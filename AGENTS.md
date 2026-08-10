@@ -24,6 +24,7 @@ When building new features, follow these steps in order:
 3. **Run existing tests** — Always run the relevant test suite after making changes:
    - Elixir (gateway): `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
    - Python (connector): `docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run pytest`
+   - Python (mcp server): `docker run --rm -v $(pwd)/mcp_server/mcp_server:/app/mcp_server:ro -v $(pwd)/mcp_server/tests:/app/tests:ro -v $(pwd)/connector/connector:/app/connector:ro -w /app trionyx-mcp:latest uv run --no-sync pytest -q`
 
 4. **Rebuild images and restart containers** — Before running end-to-end tests, rebuild any affected images and restart containers so the latest code is running (see Container Rebuilds below).
 

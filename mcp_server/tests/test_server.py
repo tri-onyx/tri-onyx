@@ -12,7 +12,7 @@ from starlette.testclient import TestClient
 
 from mcp_server.auth import TriOnyxAuthProvider
 from mcp_server.config import ConfigError, parse_config
-from mcp_server.gateway_bridge import GatewayError
+from mcp_server.gateway_bridge import GatewayError, TurnStatus
 from mcp_server.server import build_app, build_server, client_ip
 from mcp_server.storage import OAuthStore
 
@@ -26,17 +26,40 @@ CHALLENGE = base64.urlsafe_b64encode(hashlib.sha256(VERIFIER.encode()).digest())
 class StubBridge:
     """Minimal GatewayBridge stand-in for tool tests."""
 
-    def __init__(self, reply: str = "hi from the agent", error: str | None = None):
+    def __init__(
+        self,
+        reply: str = "hi from the agent",
+        error: str | None = None,
+        pending: bool = False,
+        activity: str = "the agent session is starting up",
+        elapsed: float = 50.0,
+        checks: int = 1,
+        partial_chars: int = 0,
+    ):
         self.reply = reply
         self.error = error
+        self.pending = pending
+        self.activity = activity
+        self.elapsed = elapsed
+        self.checks = checks
+        self.partial_chars = partial_chars
         self.calls: list[tuple[str, str, str]] = []
+        self.timeouts: list[tuple[float | None, float | None]] = []
         self.connected = True
 
-    async def ask(self, agent_name, message, room_id, timeout=None):
+    async def ask(self, agent_name, message, room_id, *, wait_timeout=None, hard_timeout=None):
         self.calls.append((agent_name, message, room_id))
+        self.timeouts.append((wait_timeout, hard_timeout))
         if self.error:
             raise GatewayError(self.error)
-        return self.reply
+        return TurnStatus(
+            pending=self.pending,
+            reply="" if self.pending else self.reply,
+            elapsed=self.elapsed,
+            activity=self.activity,
+            checks=self.checks,
+            partial_chars=self.partial_chars,
+        )
 
 
 @pytest.fixture
@@ -621,6 +644,90 @@ async def test_agent_names_are_sanitized_into_tool_names(tmp_path, bridge):
     await mcp.call_tool("news_agg", {"message": "hello"})
     # The gateway still sees the real agent name, not the sanitized tool name.
     assert bridge.calls == [("news agg!", "hello", "mcp-default")]
+
+
+async def test_soft_and_hard_timeouts_come_from_config(wired, bridge):
+    _config, _provider, mcp, _app = wired
+    await mcp.call_tool("main", {"message": "hello"})
+    # conftest's session block: soft_timeout_seconds=2, timeout_seconds=5.
+    assert bridge.timeouts == [(2.0, 5.0)]
+
+
+def pending_server(tmp_path, bridge, agents=None):
+    config = parse_config(
+        raw_config(
+            auth={"data_dir": str(tmp_path)},
+            **({"agents": agents} if agents else {}),
+        ),
+        path="t",
+    )
+    provider = TriOnyxAuthProvider(config, OAuthStore(config.auth.store_path))
+    return build_server(config, provider, bridge)
+
+
+async def test_pending_turn_is_a_successful_tool_result_not_an_error(tmp_path):
+    bridge = StubBridge(pending=True)
+    mcp = pending_server(tmp_path, bridge)
+    result = await mcp.call_tool("main", {"message": "hi", "conversation_id": "c1"})
+    assert result.is_error is not True
+    text = result.content[0].text
+    assert "still working" in text
+    assert "NOT the reply" in text
+    assert "call the `main` tool again" in text.lower() or "`main`" in text
+
+
+async def test_pending_notice_documents_the_polling_contract(tmp_path):
+    bridge = StubBridge(pending=True, checks=2)
+    mcp = pending_server(tmp_path, bridge)
+    result = await mcp.call_tool("main", {"message": "hi", "conversation_id": "c1"})
+    text = result.content[0].text
+    assert "NOT delivered to the agent" in text
+    assert "conversation_id" in text
+    assert 'conversation_id="c1"' in text
+    assert "(check #2)" in text
+
+
+async def test_pending_notice_names_the_default_conversation(tmp_path):
+    bridge = StubBridge(pending=True)
+    mcp = pending_server(tmp_path, bridge)
+    result = await mcp.call_tool("main", {"message": "hi"})
+    assert "no conversation_id at all" in result.content[0].text
+
+
+async def test_pending_notice_reports_activity_and_elapsed(tmp_path):
+    bridge = StubBridge(
+        pending=True,
+        activity="the agent is running the Bash tool",
+        elapsed=73.0,
+        partial_chars=120,
+    )
+    mcp = pending_server(tmp_path, bridge)
+    text = (await mcp.call_tool("main", {"message": "hi"})).content[0].text
+    assert "73s elapsed" in text
+    assert "the agent is running the Bash tool" in text
+    assert "120 characters" in text
+
+
+async def test_pending_notice_uses_the_sanitized_tool_name(tmp_path):
+    bridge = StubBridge(pending=True)
+    mcp = pending_server(
+        tmp_path, bridge, agents=[{"name": "news agg!", "description": "Gathers news"}]
+    )
+    text = (await mcp.call_tool("news_agg", {"message": "hi"})).content[0].text
+    assert "`news_agg`" in text
+    assert "`news agg!`" not in text
+
+
+async def test_tool_description_documents_the_polling_contract(wired):
+    _config, _provider, mcp, _app = wired
+    for tool in await mcp.list_tools():
+        assert "still working" in tool.description
+        assert "conversation_id" in tool.description
+
+
+async def test_server_instructions_document_the_polling_contract(wired):
+    _config, _provider, mcp, _app = wired
+    assert "still working" in mcp.instructions
 
 
 async def test_colliding_sanitized_tool_names_are_rejected(tmp_path, bridge):

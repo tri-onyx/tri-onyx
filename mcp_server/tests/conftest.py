@@ -34,7 +34,12 @@ def raw_config(**overrides: Any) -> dict[str, Any]:
             "redirect_uris": [CLAUDE_REDIRECT],
             "data_dir": "/tmp",
         },
-        "session": {"sender": "mcp-operator", "timeout_seconds": 5},
+        "session": {
+            "sender": "mcp-operator",
+            "timeout_seconds": 5,
+            "soft_timeout_seconds": 2,
+            "parked_result_ttl_seconds": 5,
+        },
         "agents": [
             {"name": "main", "description": "The router"},
             {"name": "researcher", "description": "Deep research"},

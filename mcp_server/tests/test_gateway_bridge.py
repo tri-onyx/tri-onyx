@@ -1,4 +1,4 @@
-"""Gateway bridge: frame handling, correlation, timeouts and disconnects."""
+"""Gateway bridge: frame handling, correlation, early-return turns and TTLs."""
 
 from __future__ import annotations
 
@@ -10,11 +10,14 @@ from connector.protocol import (
     AgentResultMessage,
     AgentStepMessage,
     AgentTextMessage,
+    AgentTypingMessage,
 )
 
+import mcp_server.gateway_bridge as gateway_bridge_module
 from mcp_server.gateway_bridge import GatewayBridge, GatewayError, make_room_id
 
 CHANNEL = {"platform": "mcp", "room_id": "mcp-conv-1"}
+KEY = ("main", "mcp-conv-1")
 
 
 class FakeGatewayClient:
@@ -63,8 +66,26 @@ def make_bridge(**kwargs) -> GatewayBridge:
         gateway_token="token",
         connector_id="mcp",
         default_timeout=kwargs.pop("default_timeout", 5.0),
+        soft_timeout=kwargs.pop("soft_timeout", 5.0),
+        parked_ttl=kwargs.pop("parked_ttl", 60.0),
         client_factory=FakeGatewayClient,
         **kwargs,
+    )
+
+
+async def finish(client, content="ok", channel=CHANNEL, agent="main"):
+    if content:
+        await client.emit(
+            AgentTextMessage(type="agent_text", agent_name=agent, channel=channel, content=content)
+        )
+    await client.emit(
+        AgentResultMessage(type="agent_result", agent_name=agent, channel=channel)
+    )
+
+
+def typing(is_typing=True, channel=CHANNEL, agent="main"):
+    return AgentTypingMessage(
+        type="agent_typing", agent_name=agent, channel=channel, is_typing=is_typing
     )
 
 
@@ -123,7 +144,9 @@ async def test_ask_collects_text_until_agent_result():
     await client.emit(AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="part two"))
     await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=CHANNEL))
 
-    assert await task == "part one\n\npart two"
+    status = await task
+    assert status.pending is False
+    assert status.reply == "part one\n\npart two"
 
 
 async def test_ask_surfaces_agent_errors():
@@ -138,17 +161,33 @@ async def test_ask_surfaces_agent_errors():
         await task
 
 
+async def test_agent_error_sent_under_the_gateways_message_key_is_surfaced():
+    # The gateway's agent_error frame carries the detail as "message", not
+    # "error" — the bridge must read both.
+    bridge = make_bridge()
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(
+        AgentErrorMessage(
+            type="agent_error", agent_name="main", channel=CHANNEL, message="boom detail"
+        )
+    )
+    with pytest.raises(GatewayError, match="boom detail"):
+        await task
+
+
 async def test_result_without_text_yields_empty_reply():
     bridge = make_bridge()
     client = bridge._client
     task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
     await asyncio.sleep(0.01)
     await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=CHANNEL))
-    assert await task == ""
+    assert (await task).reply == ""
 
 
 async def test_frames_for_another_agent_or_room_are_ignored():
-    bridge = make_bridge(default_timeout=0.2)
+    bridge = make_bridge(soft_timeout=0.05)
     client = bridge._client
     task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
     await asyncio.sleep(0.01)
@@ -158,16 +197,10 @@ async def test_frames_for_another_agent_or_room_are_ignored():
     await client.emit(AgentTextMessage(type="agent_text", agent_name="other", channel=CHANNEL, content="not mine"))
     await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=other_channel))
 
-    with pytest.raises(GatewayError, match="did not respond"):
-        await task
-
-
-async def test_timeout_produces_a_clean_error():
-    bridge = make_bridge(default_timeout=0.05)
-    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
-    with pytest.raises(GatewayError, match="did not respond within"):
-        await task
-    assert bridge._turns == {}
+    status = await task
+    assert status.pending is True
+    assert status.partial_chars == 0
+    assert KEY in bridge._turns  # the turn was neither settled nor mutated
 
 
 async def test_disconnect_fails_in_flight_requests():
@@ -187,29 +220,6 @@ async def test_ask_fails_fast_when_never_connected():
         await bridge.ask("main", "hi", "mcp-conv-1")
 
 
-async def test_concurrent_asks_on_one_conversation_are_serialised():
-    bridge = make_bridge()
-    client = bridge._client
-
-    first = asyncio.create_task(bridge.ask("main", "one", "mcp-conv-1"))
-    await asyncio.sleep(0.01)
-    second = asyncio.create_task(bridge.ask("main", "two", "mcp-conv-1"))
-    await asyncio.sleep(0.01)
-
-    # The second request waits for the first turn to finish.
-    assert [m.content for m in client.sent] == ["one"]
-
-    await client.emit(AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="a"))
-    await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=CHANNEL))
-    assert await first == "a"
-
-    await asyncio.sleep(0.01)
-    assert [m.content for m in client.sent] == ["one", "two"]
-    await client.emit(AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="b"))
-    await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=CHANNEL))
-    assert await second == "b"
-
-
 async def test_different_conversations_run_in_parallel():
     bridge = make_bridge()
     client = bridge._client
@@ -222,11 +232,337 @@ async def test_different_conversations_run_in_parallel():
 
     await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=channel_two))
     await client.emit(AgentResultMessage(type="agent_result", agent_name="main", channel=CHANNEL))
-    assert await first == ""
-    assert await second == ""
+    assert (await first).reply == ""
+    assert (await second).reply == ""
 
 
 async def test_stop_is_idempotent():
     bridge = make_bridge()
     await bridge.stop()
     assert bridge._client.stopped
+
+
+# ---------------------------------------------------------------------------
+# Early return: soft deadline, attach, parked results
+# ---------------------------------------------------------------------------
+
+
+async def test_soft_deadline_returns_pending_without_killing_the_turn():
+    bridge = make_bridge(soft_timeout=0.05)
+    status = await bridge.ask("main", "hi", "mcp-conv-1")
+    assert status.pending is True
+    turn = bridge._turns[KEY]
+    assert not turn.future.done()
+    assert not turn.future.cancelled()
+
+
+async def test_poll_attaches_to_the_running_turn_and_gets_the_reply():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    assert (await bridge.ask("main", "hello", "mcp-conv-1")).pending is True
+
+    poll = asyncio.create_task(bridge.ask("main", "status?", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    assert len(client.sent) == 1  # the poll was not forwarded to the agent
+    await finish(client, "the reply")
+    assert (await poll).reply == "the reply"
+    assert bridge._turns == {}
+
+
+async def test_two_waiters_on_one_turn_both_receive_the_reply():
+    bridge = make_bridge()
+    client = bridge._client
+    first = asyncio.create_task(bridge.ask("main", "one", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    second = asyncio.create_task(bridge.ask("main", "poll", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+
+    assert len(client.sent) == 1
+    await finish(client, "a")
+    assert (await first).reply == "a"
+    assert (await second).reply == "a"
+    assert bridge._turns == {}
+
+
+async def test_key_is_idle_after_delivery_so_the_next_message_is_sent():
+    bridge = make_bridge()
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "one", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await finish(client, "a")
+    assert (await task).reply == "a"
+
+    next_task = asyncio.create_task(bridge.ask("main", "next", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    assert [m.content for m in client.sent] == ["one", "next"]
+    await finish(client, "b")
+    assert (await next_task).reply == "b"
+
+
+async def test_parked_result_is_delivered_to_the_next_call():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    assert (await bridge.ask("main", "hello", "mcp-conv-1")).pending is True
+
+    await finish(client, "late reply")  # lands with nobody waiting
+    assert bridge._turns[KEY].future.done()
+
+    status = await bridge.ask("main", "status?", "mcp-conv-1")
+    assert status.pending is False
+    assert status.reply == "late reply"
+    assert len(client.sent) == 1
+    assert bridge._turns == {}
+
+
+async def test_parked_result_is_delivered_even_to_a_new_substantive_message():
+    # The contract's sharp edge: a genuinely new question arriving on a parked
+    # key receives the previous reply and its own message is dropped.
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await finish(client, "old reply")
+
+    status = await bridge.ask("main", "a totally new question", "mcp-conv-1")
+    assert status.reply == "old reply"
+    assert len(client.sent) == 1
+
+
+async def test_parked_error_is_delivered_to_the_next_call():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await client.emit(
+        AgentErrorMessage(type="agent_error", agent_name="main", channel=CHANNEL, error="crashed")
+    )
+
+    with pytest.raises(GatewayError, match="crashed"):
+        await bridge.ask("main", "status?", "mcp-conv-1")
+    assert bridge._turns == {}
+
+    # The key is idle again: the following message starts a fresh turn.
+    assert (await bridge.ask("main", "retry", "mcp-conv-1")).pending is True
+    assert [m.content for m in client.sent] == ["hello", "retry"]
+
+
+# ---------------------------------------------------------------------------
+# Hard timeout
+# ---------------------------------------------------------------------------
+
+
+async def test_hard_timeout_wakes_an_attached_caller():
+    bridge = make_bridge(default_timeout=0.05, soft_timeout=5.0)
+    with pytest.raises(GatewayError, match="did not respond within"):
+        await bridge.ask("main", "hi", "mcp-conv-1")
+    assert bridge._turns == {}
+
+
+async def test_hard_timeout_fails_an_unattended_turn():
+    bridge = make_bridge(default_timeout=0.05, soft_timeout=0.02)
+    assert (await bridge.ask("main", "hi", "mcp-conv-1")).pending is True
+
+    await asyncio.sleep(0.1)
+    assert bridge._turns[KEY].future.done()  # parked as an error
+
+    with pytest.raises(GatewayError, match="did not respond within"):
+        await bridge.ask("main", "status?", "mcp-conv-1")
+    assert len(bridge._client.sent) == 1
+    assert bridge._turns == {}
+
+
+async def test_watchdog_is_cancelled_once_the_turn_is_delivered():
+    bridge = make_bridge()
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    turn = bridge._turns[KEY]
+    await finish(client, "a")
+    await task
+    await asyncio.sleep(0)
+    assert turn.watchdog.done()
+
+
+async def test_cancelled_caller_leaves_the_turn_running():
+    # asyncio.wait (unlike wait_for) must not propagate the caller's
+    # cancellation into the turn future — the turn survives the caller.
+    bridge = make_bridge()
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+
+    assert KEY in bridge._turns
+    assert not bridge._turns[KEY].future.cancelled()
+
+    await finish(client, "survived")
+    assert (await bridge.ask("main", "status?", "mcp-conv-1")).reply == "survived"
+
+
+# ---------------------------------------------------------------------------
+# Parked-result TTL
+# ---------------------------------------------------------------------------
+
+
+async def test_parked_result_expires_after_its_ttl():
+    bridge = make_bridge(soft_timeout=0.02, parked_ttl=0.05)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await finish(client, "stale")
+
+    await asyncio.sleep(0.1)
+    status = await bridge.ask("main", "a new question", "mcp-conv-1")
+    assert status.pending is True  # a NEW turn was started, not the stale reply
+    assert [m.content for m in client.sent] == ["hello", "a new question"]
+
+
+async def test_parked_ttl_is_measured_from_completion_not_from_start():
+    bridge = make_bridge(soft_timeout=0.02, parked_ttl=0.1)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await asyncio.sleep(0.15)  # turn is older than the TTL, but still running
+    await finish(client, "fresh")
+
+    status = await bridge.ask("main", "status?", "mcp-conv-1")
+    assert status.reply == "fresh"
+
+
+async def test_sweeper_drops_abandoned_parked_results(monkeypatch):
+    monkeypatch.setattr(gateway_bridge_module, "_SWEEP_INTERVAL_S", 0.02)
+    bridge = make_bridge(soft_timeout=0.02, parked_ttl=0.01)
+    client = bridge._client
+    await bridge.start()
+    try:
+        await bridge.ask("main", "hello", "mcp-conv-1")
+        await finish(client, "abandoned")
+        await asyncio.sleep(0.1)
+        assert bridge._turns == {}
+    finally:
+        await bridge.stop()
+
+
+# ---------------------------------------------------------------------------
+# Disconnects
+# ---------------------------------------------------------------------------
+
+
+async def test_disconnect_does_not_discard_an_already_parked_result():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await finish(client, "safe")
+
+    await client.drop()
+    client.registered = True
+    assert (await bridge.ask("main", "status?", "mcp-conv-1")).reply == "safe"
+
+
+async def test_disconnect_parks_the_error_for_an_unattended_turn():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+
+    await client.drop()
+    client.registered = True
+    with pytest.raises(GatewayError, match="(?i)connection.*lost"):
+        await bridge.ask("main", "status?", "mcp-conv-1")
+
+
+# ---------------------------------------------------------------------------
+# Activity phases
+# ---------------------------------------------------------------------------
+
+
+async def test_activity_reports_the_session_starting_phase():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(typing(True))
+    assert "starting" in (await task).activity
+
+
+async def test_activity_reports_the_agent_is_ready():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(typing(True))
+    await client.emit(typing(False))
+    assert "thinking" in (await task).activity
+
+
+async def test_activity_reports_the_running_tool():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(typing(True))
+    await client.emit(
+        AgentStepMessage(type="agent_step", agent_name="main", channel=CHANNEL, step_type="tool_use", name="Bash")
+    )
+    assert "Bash" in (await task).activity
+
+
+async def test_later_typing_frames_do_not_clobber_a_more_specific_phase():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(
+        AgentStepMessage(type="agent_step", agent_name="main", channel=CHANNEL, step_type="tool_use", name="Bash")
+    )
+    await client.emit(typing(True))
+    assert "Bash" in (await task).activity
+
+
+async def test_pending_status_reports_elapsed_and_partial_output():
+    bridge = make_bridge(soft_timeout=0.05)
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await client.emit(
+        AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="part one")
+    )
+    status = await task
+    assert status.pending is True
+    assert status.partial_chars == len("part one")
+    assert status.elapsed > 0
+    assert status.checks == 1
+
+
+async def test_checks_counts_repeated_polls():
+    bridge = make_bridge(soft_timeout=0.02)
+    for expected in (1, 2, 3):
+        status = await bridge.ask("main", "hi", "mcp-conv-1")
+        assert status.pending is True
+        assert status.checks == expected
+    assert len(bridge._client.sent) == 1
+
+
+async def test_frames_after_completion_do_not_mutate_a_parked_result():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await finish(client, "a")
+    await client.emit(
+        AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="b")
+    )
+    assert (await bridge.ask("main", "status?", "mcp-conv-1")).reply == "a"
+
+
+# ---------------------------------------------------------------------------
+# Shutdown
+# ---------------------------------------------------------------------------
+
+
+async def test_stop_wakes_waiters_and_leaves_no_watchdog_tasks():
+    bridge = make_bridge()
+    task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await bridge.stop()
+    with pytest.raises(GatewayError, match="shutting down"):
+        await task
+    await asyncio.sleep(0)
+    leftovers = [t for t in asyncio.all_tasks() if (t.get_name() or "").startswith("turn-deadline")]
+    assert leftovers == []

@@ -133,7 +133,7 @@ async def _route_outbound(
     # agent's own room so channel-bound agents are visible there
     # regardless of what triggered them.
     if adapter is None and isinstance(msg, (AgentTextMessage, AgentErrorMessage)) and msg.agent_name:
-        content = msg.error if isinstance(msg, AgentErrorMessage) else msg.content
+        content = (msg.error or msg.message) if isinstance(msg, AgentErrorMessage) else msg.content
         if content:
             for resolved_adapter, channel in _resolve_agent_room(adapters, msg.agent_name):
                 await resolved_adapter.send_text(channel, content, agent_name=msg.agent_name)
@@ -168,7 +168,11 @@ async def _route_outbound(
     elif isinstance(msg, AgentStepMessage):
         await adapter.send_step(msg.channel, msg)
     elif isinstance(msg, AgentErrorMessage):
-        await adapter.send_text(msg.channel, f"Error: {msg.error}", agent_name=msg.agent_name)
+        await adapter.send_text(
+            msg.channel,
+            f"Error: {msg.error or msg.message or 'the agent reported an error'}",
+            agent_name=msg.agent_name,
+        )
     else:
         logger.debug("Unhandled outbound message type: %s", msg.type)
 

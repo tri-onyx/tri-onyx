@@ -12,7 +12,7 @@ from mcp_server.config import (
     parse_config,
 )
 
-from conftest import raw_config
+from conftest import OPERATOR_PASSWORD, raw_config
 
 
 def test_parses_a_full_config():
@@ -86,6 +86,64 @@ def test_rejects_plain_http_redirect_uri():
 def test_rejects_long_lived_auth_codes():
     with pytest.raises(ConfigError, match="auth_code_ttl_seconds"):
         parse_config(raw_config(auth={"auth_code_ttl_seconds": 3600}), path="t")
+
+
+def test_session_timeouts_have_sane_defaults():
+    # A raw dict without a session block at all: the defaults must validate.
+    cfg = parse_config(
+        {
+            "server": {"public_url": "https://mcp.example.com"},
+            "gateway": {"token": "gateway-token"},
+            "auth": {
+                "operator_password": OPERATOR_PASSWORD,
+                "data_dir": "/tmp",
+            },
+            "agents": ["main"],
+        },
+        path="t",
+    )
+    assert cfg.session.timeout_seconds == 300.0
+    assert cfg.session.soft_timeout_seconds == 50.0
+    assert cfg.session.parked_result_ttl_seconds == 600.0
+
+
+def test_session_timeouts_are_configurable():
+    cfg = parse_config(
+        raw_config(
+            session={
+                "timeout_seconds": 120,
+                "soft_timeout_seconds": 30,
+                "parked_result_ttl_seconds": 240,
+            }
+        ),
+        path="t",
+    )
+    assert cfg.session.timeout_seconds == 120.0
+    assert cfg.session.soft_timeout_seconds == 30.0
+    assert cfg.session.parked_result_ttl_seconds == 240.0
+
+
+def test_rejects_non_positive_soft_timeout():
+    with pytest.raises(ConfigError, match="soft_timeout_seconds must be > 0"):
+        parse_config(raw_config(session={"soft_timeout_seconds": 0}), path="t")
+
+
+def test_rejects_soft_timeout_above_the_hard_timeout():
+    with pytest.raises(ConfigError, match="must not exceed"):
+        parse_config(
+            raw_config(session={"soft_timeout_seconds": 10, "timeout_seconds": 5}),
+            path="t",
+        )
+
+
+def test_rejects_parked_ttl_below_the_soft_timeout():
+    with pytest.raises(ConfigError, match="parked_result_ttl_seconds"):
+        parse_config(
+            raw_config(
+                session={"soft_timeout_seconds": 3, "parked_result_ttl_seconds": 2}
+            ),
+            path="t",
+        )
 
 
 def test_agents_may_be_bare_strings():

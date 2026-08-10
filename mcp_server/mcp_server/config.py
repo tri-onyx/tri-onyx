@@ -87,7 +87,14 @@ class SessionConfig:
     sender: str = "mcp-operator"
     trust_level: str = "verified"
     room_prefix: str = "mcp"
+    #: Hard ceiling for one background agent turn.
     timeout_seconds: float = 300.0
+    #: How long one tool call waits before returning a "still working" notice.
+    #: Must stay under the MCP client's own tool-call timeout (undocumented for
+    #: claude.ai; 50 s leaves headroom under a presumed ~60 s).
+    soft_timeout_seconds: float = 50.0
+    #: How long a finished, uncollected reply is held for the next poll.
+    parked_result_ttl_seconds: float = 600.0
 
 
 @dataclass(slots=True, frozen=True)
@@ -258,7 +265,26 @@ def parse_config(raw: dict[str, Any], *, path: str = "<memory>") -> McpConfig:
         trust_level=str(session_raw.get("trust_level", "verified")),
         room_prefix=str(session_raw.get("room_prefix", "mcp")),
         timeout_seconds=float(session_raw.get("timeout_seconds", 300.0)),
+        soft_timeout_seconds=float(session_raw.get("soft_timeout_seconds", 50.0)),
+        parked_result_ttl_seconds=float(
+            session_raw.get("parked_result_ttl_seconds", 600.0)
+        ),
     )
+    if session.soft_timeout_seconds <= 0:
+        raise ConfigError(f"{path}: session.soft_timeout_seconds must be > 0")
+    if session.soft_timeout_seconds > session.timeout_seconds:
+        raise ConfigError(
+            f"{path}: session.soft_timeout_seconds "
+            f"({session.soft_timeout_seconds:.0f}s) must not exceed "
+            f"session.timeout_seconds ({session.timeout_seconds:.0f}s) — a tool "
+            "call has to return before the background turn is abandoned"
+        )
+    if session.parked_result_ttl_seconds < session.soft_timeout_seconds:
+        raise ConfigError(
+            f"{path}: session.parked_result_ttl_seconds must be >= "
+            "session.soft_timeout_seconds, or a finished reply can expire "
+            "before the polling caller comes back for it"
+        )
 
     return McpConfig(
         public_url=public_url,

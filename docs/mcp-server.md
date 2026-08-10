@@ -25,7 +25,7 @@ only `127.0.0.1:8765` for local testing.
 | `mcp_server/mcp_server/config.py` | container | YAML config with `${VAR}` interpolation (helper imported from the connector package) |
 | `mcp_server/mcp_server/auth.py` | container | OAuth 2.1 policy: operator login, codes, tokens, rotation |
 | `mcp_server/mcp_server/storage.py` | container | Hashed, atomically-written token store under `/data` |
-| `mcp_server/mcp_server/gateway_bridge.py` | container | Collapses a streaming gateway turn into one MCP tool result |
+| `mcp_server/mcp_server/gateway_bridge.py` | container | Collapses a streaming gateway turn into one MCP tool result and keeps a long turn running in the background across tool calls |
 | `mcp_server/mcp_server/server.py` | container | Tools, login page, ASGI app |
 | `mcp.Dockerfile` | build | `python:3.12-slim`, uv, non-root |
 | `docker-compose.yml` (`mcp`, `cloudflared`) | host | Both behind the `mcp` profile |
@@ -67,11 +67,50 @@ The id is stripped to `[A-Za-z0-9_-]`, truncated to 64 characters, and prefixed
 Slack room and cannot be used to smuggle path-like values. Reusing a
 `conversation_id` continues the same agent session; a new one starts fresh.
 
-Calls on the same `(agent, conversation)` are serialised — the gateway streams a
-turn's answer as `agent_text` frames terminated by `agent_result`, and the
-bridge collapses that into one string. On timeout (`session.timeout_seconds`,
-default 300 s) or a dropped gateway connection, the tool returns an error rather
-than hanging.
+The gateway streams a turn's answer as `agent_text` frames terminated by
+`agent_result`, and the bridge collapses that into one string.
+
+### Long turns
+
+A turn can far outlive the tool call that started it — the first message to an
+agent syncs its git repos and boots a container, which can take minutes, while
+the MCP client's own tool-call timeout is much shorter. The bridge therefore
+runs each `(agent, conversation)` key through a small state machine:
+
+| State | Meaning | Left by |
+| --- | --- | --- |
+| idle | no turn | a call sends its message and starts a turn |
+| running | turn in flight | `agent_result`/`agent_error`, or the hard timeout |
+| parked | finished, reply uncollected | the next call collects it, or the TTL expires it |
+
+- A tool call waits up to `session.soft_timeout_seconds` (default **50 s**). If
+  the reply is not in by then, the call returns a `[TriOnyx: still working]`
+  notice — a *successful* result carrying elapsed time and last-known activity
+  (session starting / agent thinking / running tool X) — and the turn keeps
+  running.
+- A later call on the same key **attaches** to the running turn. Its message is
+  a poll and is *not* forwarded: the gateway FIFO-queues prompts per session,
+  so forwarding would enqueue a second prompt and desynchronise the
+  one-turn-per-key correlation. This also means a genuinely new message sent
+  mid-turn is dropped in favour of the previous reply — the notice warns the
+  calling model about exactly this.
+- A reply (or error) that lands with nobody waiting is parked and delivered to
+  the next call; uncollected results are swept after
+  `session.parked_result_ttl_seconds` (default **600 s**). A background turn is
+  abandoned with an error after `session.timeout_seconds` (default **300 s**)
+  even if no caller is attached, so the worst-case lifetime of a key is
+  `timeout_seconds + parked_result_ttl_seconds`.
+- Caller cancellation (the client hanging up mid-call) does not cancel the
+  turn — the bridge waits with `asyncio.wait`, never `asyncio.wait_for`, which
+  is what keeps the turn alive. A dropped gateway connection fails running
+  turns (the error is parked for the next poll); already-parked replies
+  survive.
+
+**Tuning:** `soft_timeout_seconds` is the one knob tied to the MCP client's
+undocumented tool-call timeout. If callers see transport errors instead of the
+still-working notice, lower it; every early return logs the elapsed time, so
+the real client timeout can be measured from production logs. Config changes
+are restart-only (`docker compose --profile mcp up -d mcp`), no rebuild.
 
 Every forwarded message carries `trust: {level: verified, sender: mcp-operator}`
 — the operator is the only principal that can be behind a valid token.

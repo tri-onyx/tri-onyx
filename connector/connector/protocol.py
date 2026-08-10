@@ -88,9 +88,15 @@ class AgentResultMessage(OutboundMessage):
 
 @dataclass(slots=True)
 class AgentErrorMessage(OutboundMessage):
-    """Agent encountered an error."""
+    """Agent encountered an error.
+
+    The gateway sends the detail under ``message`` (see ConnectorHandler's
+    moduledoc); ``error`` is kept for compatibility with consumers that read
+    it — check both.
+    """
 
     error: str = ""
+    message: str = ""
 
 
 @dataclass(slots=True)
