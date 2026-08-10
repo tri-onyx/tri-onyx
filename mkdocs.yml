@@ -78,6 +78,7 @@ nav:
       - Email OAuth2: email-outlook-oauth2.md
       - Browser Sessions: browser-sessions.md
       - Plugins: plugins.md
+      - MCP Server: mcp-server.md
       - Webhook Receiver: webhook-receiver-design.md
   - Agents:
       - Overview: agents/index.md

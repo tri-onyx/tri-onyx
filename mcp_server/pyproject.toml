@@ -1,0 +1,29 @@
+[project]
+name = "tri-onyx-mcp-server"
+version = "0.1.0"
+description = "Publicly reachable MCP server exposing an allowlist of TriOnyx agents to claude.ai custom connectors"
+requires-python = ">=3.12"
+dependencies = [
+    # MCP SDK 2.x — the FastMCP class was renamed to MCPServer in 2.0.0.
+    # Pinned exactly: this dependency IS the OAuth enforcement layer, so
+    # upgrades must be deliberate (bump + re-verify, never a floating range).
+    "mcp==2.0.0",
+    "uvicorn>=0.30",
+    # Shared with the connector package (imported for the gateway wire protocol).
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# The project is never pip-installed (uv sync --no-install-project); the
+# packages are importable from the project root.
+pythonpath = ["."]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "httpx>=0.27",
+]

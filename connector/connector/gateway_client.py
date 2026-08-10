@@ -44,12 +44,18 @@ _BACKOFF_FACTOR = 2.0
 # Health ping interval
 _HEALTH_INTERVAL_S = 30.0
 
+# Platform label sent in the register frame. The gateway echoes the channel
+# object back untouched, so this is purely descriptive — but each connector
+# should identify itself honestly (``matrix``, ``mcp``, ...).
+DEFAULT_PLATFORM = "matrix"
+
 OutboundHandler = Callable[[OutboundMessage], Coroutine[Any, Any, None]]
 ActionHandler = Callable[[ActionRequest], Coroutine[Any, Any, None]]
 HeartbeatHandler = Callable[[HeartbeatNotification], Coroutine[Any, Any, None]]
 ApprovalRequestHandler = Callable[[ApprovalRequestMessage], Coroutine[Any, Any, None]]
 MirrorHandler = Callable[[InterAgentMirrorMessage], Coroutine[Any, Any, None]]
 PromptMirrorHandler = Callable[[PromptMirrorMessage], Coroutine[Any, Any, None]]
+DisconnectHandler = Callable[[], Coroutine[Any, Any, None]]
 
 
 class GatewayClient:
@@ -64,6 +70,7 @@ class GatewayClient:
         self,
         config: ConnectorConfig,
         *,
+        platform: str = DEFAULT_PLATFORM,
         adapters: dict[str, Any] | None = None,
         on_outbound: OutboundHandler | None = None,
         on_action: ActionHandler | None = None,
@@ -71,8 +78,10 @@ class GatewayClient:
         on_approval_request: ApprovalRequestHandler | None = None,
         on_mirror: MirrorHandler | None = None,
         on_prompt_mirror: PromptMirrorHandler | None = None,
+        on_disconnect: DisconnectHandler | None = None,
     ) -> None:
         self._config = config
+        self._platform = platform
         self._adapters = adapters or {}
         self._on_outbound = on_outbound
         self._on_action = on_action
@@ -80,6 +89,7 @@ class GatewayClient:
         self._on_approval_request = on_approval_request
         self._on_mirror = on_mirror
         self._on_prompt_mirror = on_prompt_mirror
+        self._on_disconnect = on_disconnect
         self._ws: ClientConnection | None = None
         self._registered = asyncio.Event()
         self._closing = False
@@ -106,6 +116,19 @@ class GatewayClient:
             await self._ws.close()
             self._ws = None
         logger.info("Gateway client stopped")
+
+    @property
+    def is_registered(self) -> bool:
+        """True while the connection is up and the gateway has acknowledged us."""
+        return self._registered.is_set()
+
+    async def wait_registered(self, timeout: float | None = None) -> bool:
+        """Block until registered with the gateway. Returns False on timeout."""
+        try:
+            await asyncio.wait_for(self._registered.wait(), timeout)
+            return True
+        except asyncio.TimeoutError:
+            return False
 
     async def send_message(self, msg: InboundMessage) -> None:
         """Forward an adapter-originated message to the gateway."""
@@ -171,7 +194,7 @@ class GatewayClient:
         self._registered.clear()
         msg = RegisterMessage(
             connector_id=self._config.connector_id,
-            platform="matrix",
+            platform=self._platform,
             token=self._config.connector_token,
         )
         await self._send(encode(msg))
@@ -188,6 +211,12 @@ class GatewayClient:
         finally:
             health_task.cancel()
             self._tasks = [t for t in self._tasks if t is not health_task]
+            self._registered.clear()
+            if self._on_disconnect is not None:
+                try:
+                    await self._on_disconnect()
+                except Exception:
+                    logger.exception("on_disconnect handler failed")
 
     # ------------------------------------------------------------------
     # Frame handling

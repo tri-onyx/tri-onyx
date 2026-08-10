@@ -55,6 +55,9 @@ services:
       - /app/_build
       - /app/deps
       - /var/run/docker.sock:/var/run/docker.sock
+    networks:
+      - default
+      - mcp_internal
 
   docker-proxy:
     image: tecnativa/docker-socket-proxy:latest
@@ -103,6 +106,81 @@ services:
       gateway:
         condition: service_healthy
 
+  # Public MCP entry point for claude.ai custom connectors. The mcp/cloudflared
+  # pair live on dedicated networks (see `networks:` at the bottom) so the
+  # internet-facing containers can only ever reach each other and the gateway.
+  #
+  # Behind the `mcp` profile so a plain `docker compose up` is unaffected until
+  # the operator has created secrets/mcp-config.yaml and set the two secrets:
+  #     docker compose --profile mcp up -d
+  # See docs/mcp-server.md.
+  mcp:
+    profiles: ["mcp"]
+    build:
+      context: .
+      dockerfile: mcp.Dockerfile
+      args:
+        HOST_UID: ${TRI_ONYX_HOST_UID:-1000}
+        HOST_GID: ${TRI_ONYX_HOST_GID:-1000}
+    restart: unless-stopped
+    # Loopback only — the public path is the cloudflared sidecar, which dials
+    # out and reaches this container over the compose network.
+    ports:
+      - "127.0.0.1:8765:8765"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/healthz')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ./mcp_server/mcp_server:/app/mcp_server:ro
+      - ./connector/connector:/app/connector:ro
+      - ./secrets/mcp-config.yaml:/app/config.yaml:ro
+      - ./secrets/mcp-data:/data
+    environment:
+      - TRI_ONYX_MCP_CONFIG=/app/config.yaml
+      - TRI_ONYX_CONNECTOR_TOKEN
+      - MCP_OPERATOR_PASSWORD
+      - MCP_PUBLIC_URL
+      - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-INFO}
+    # Deliberately NOT on the default network: the only things this container
+    # can reach are the tunnel (mcp_edge) and the gateway (mcp_internal).
+    networks:
+      - mcp_edge
+      - mcp_internal
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+  # Cloudflare Tunnel sidecar. Hostname -> service routing (http://mcp:8765) is
+  # configured in the Cloudflare dashboard, not here. No published ports: the
+  # tunnel is outbound-only.
+  #
+  # Isolated on mcp_edge so a dashboard routing typo cannot publish anything
+  # except the MCP server — gateway:4000 (unauthenticated webhooks) and
+  # frontend:8080 (DEBUG=1) are unreachable from this container.
+  cloudflared:
+    profiles: ["mcp"]
+    image: cloudflare/cloudflared:latest
+    command: ["tunnel", "--no-autoupdate", "run"]
+    restart: unless-stopped
+    environment:
+      - TUNNEL_TOKEN=${TUNNEL_TOKEN}
+      - TUNNEL_METRICS=127.0.0.1:2000
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "ready"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - mcp_edge
+    depends_on:
+      - mcp
+
   frontend:
     build:
       context: .
@@ -126,3 +204,12 @@ services:
     depends_on:
       gateway:
         condition: service_healthy
+
+networks:
+  default:
+  # cloudflared <-> mcp only: the blast radius of a Cloudflare dashboard
+  # routing mistake is limited to the (OAuth-protected) MCP server.
+  mcp_edge:
+  # mcp <-> gateway connector WebSocket. Internal: no outbound NAT needed.
+  mcp_internal:
+    internal: true
