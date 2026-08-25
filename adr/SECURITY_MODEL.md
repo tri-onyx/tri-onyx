@@ -12,7 +12,7 @@ The concept originates from Simon Willison's ["The Lethal Trifecta"](https://sim
 
 3. **Kill, don't downgrade.** When an agent's effective risk exceeds its policy threshold, the correct response is to terminate the session — not to dynamically revoke capabilities. This is simpler to implement, easier to audit, and avoids race conditions between policy enforcement and agent behavior.
 
-4. **Defense in depth.** The risk model, FUSE filesystem enforcement, and gateway-level policy checks are independent layers. A failure in one does not compromise the others.
+4. **Defense in depth.** The risk model, the per-agent repo mount boundary (the kernel bind-mount ACL), and gateway-level policy checks are independent layers. A failure in one does not compromise the others.
 
 ## Taint Level (integrity axis)
 
@@ -113,9 +113,11 @@ Risk spreads between agents through two channels. Taint and sensitivity propagat
 
 ### File-based propagation
 
-Every write an agent makes through its FUSE mount is recorded in the risk manifest **as it happens**, tagged with the writing session's taint and sensitivity at that moment (point-in-time labels — a file written before the session's risk escalated keeps the lower label). Every read is reported by the FUSE driver, and the reading session's taint **and** sensitivity escalate to the file's recorded labels at full strength — reading raw file content is direct disclosure, so the per-hop decay rationale does not apply here.
+Every write an agent makes to its own repo or a `repos_write` mount is recorded in the risk manifest at session-end commit, tagged with the writing session's taint and sensitivity at that moment (point-in-time labels — a file written before the session's risk escalated keeps the lower label).
 
-Reads are never blocked: an agent may read anything its glob policy allows, and the escalation (combined with the kill threshold above) is the enforcement. Reads of files with no manifest entry (predating provenance tracking, or operator-created) do not escalate risk; they are recorded in the audit log as `unclassified_read`.
+There is no per-read observation — the mount set replaces FUSE as the enforcement point (ADR-012). At session start, `InformationClassifier.classify_readable_repos/1` scans the risk manifest for the maximum taint and sensitivity recorded anywhere across the repos the session can read (its own repo plus its `repos_read`/`repos_write` grants) and applies that maximum as a floor for the entire session — reading raw file content is direct disclosure, so the per-hop decay rationale does not apply here. Because the floor already reflects the worst label visible anywhere in the mount set, no read during the session can expose the agent to a higher label than it started with.
+
+Reads are never blocked: an agent may read anything inside its mounted repos, and the start-of-session floor (combined with the kill threshold above) is the enforcement.
 
 ### Inter-agent messages
 
@@ -174,9 +176,11 @@ Every file written by an agent is tagged in the risk manifest (`TriOnyx.RiskMani
 
 Workspace git history is the durable record: provenance commits carry `Taint-Level:` and `Sensitivity-Level:` trailers, and human reviews are recorded as empty commits with `Reviewed-Path:` trailers. The in-memory store is rebuilt from that history at gateway boot and kept current at runtime — `Workspace.Committer` updates it synchronously per write event (so concurrently running sessions resolve fresh labels on read) and batches the corresponding trailer-carrying git commits on a short debounce. See ADR-008 (amended).
 
-## FUSE Role
+## Mount Role
 
-The FUSE filesystem layer enforces **path access** (glob-based read/write policy, symlink denial) and provides **observation**: it reports every write and every read (deduplicated per path per mount) to the gateway. It does not filter reads by risk level — there is deliberately no limit on the taint or sensitivity an agent may read. Tracking what was read, escalating the reader's risk, and killing sessions that exceed their permitted ceiling is the enforcement mechanism (see Kill on threshold above).
+Per ADR-012, filesystem isolation is a kernel bind-mount boundary rather than a userspace filesystem driver: **the mount set is the ACL**. Each agent's own repo is mounted read-write at `/workspace`; `repos_read`/`repos_write` grants mount shared repos or other agents' repos read-only or read-write at `/repos/<name>`. There is no glob-based path policy and no symlink handling to enforce — what isn't mounted doesn't exist inside the container, and nothing more granular than a repo is exposed.
+
+This means there is no read-time observation (see File-based propagation above): the mount set does not filter reads by risk level — there is deliberately no limit on the taint or sensitivity an agent may read within its mounts. Computing the start-of-session floor from the mount set, and killing sessions that exceed their permitted ceiling, is the enforcement mechanism (see Kill on threshold above).
 
 ## Graph Analysis
 
@@ -214,4 +218,4 @@ The gateway is the sole custodian of credentials in the system. This is a founda
 
 - **Docker socket proxy exposes container environment variables.** Agents with `docker_socket: true` can run `docker inspect` on other agent containers through the tecnativa/docker-socket-proxy. The proxy operates at the URL-path level (allow/deny entire endpoint categories) and cannot filter fields from response bodies. Since `CONTAINERS: 1` grants access to `/containers/{id}/json`, the full inspect response is returned — including the `Env` array, which contains `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` for every running agent container. This violates the principle that agents never hold credentials: while the agent's own process does not receive other agents' keys through normal channels, the Docker API provides a side channel to read them. A filtering reverse proxy that strips `Config.Env` from inspect responses would close this gap.
 - **Agent containers receive the Claude API key as an environment variable.** The gateway passes `ANTHROPIC_API_KEY` or `CLAUDE_CODE_OAUTH_TOKEN` to every agent container via `-e` flags. The Claude Agent SDK (`SubprocessCLITransport`) merges `os.environ` into the Claude Code subprocess environment, and Claude Code in turn passes its full environment to Bash tool children. There is no interception point: the key must be in the process environment for the SDK to authenticate, and every child process inherits it. Stripping the key from `os.environ` and passing it via `ClaudeAgentOptions(env=...)` is ineffective because the SDK merges both sources into the same subprocess env dict. This is an inherent limitation of the SDK's credential model — credential secrecy (ADR-006) does not extend to the LLM inference credential. The iptables network policy mitigates exfiltration risk: agents with `network: none` cannot reach any endpoint other than `api.anthropic.com`, limiting what a leaked key could be used for.
-- **The `/repo` bind mount is not FUSE-controlled.** Agents with `trionyx_repo: true` receive a raw read-only bind mount of the entire repository at `/repo`. Unlike `/workspace`, this mount bypasses the FUSE driver, so any file in the repo — including `.env` files, secrets directories, or configuration with embedded credentials — is readable regardless of the agent's `fs_read` policy. Sensitive files should not be stored in the repository tree, or the repo mount should be replaced with a FUSE-filtered mount.
+- **The `/repo` bind mount is not `RepoStore`-mediated.** Agents with `trionyx_repo: true` receive a raw read-only bind mount of the entire TriOnyx source repository at `/repo`. Unlike `/workspace` and `/repos/<name>`, this is a direct host bind mount outside `RepoStore` — it is not scoped by `repos_read`/`repos_write` grants, so any file in the repository tree — including `.env` files, secrets directories, or configuration with embedded credentials — is readable regardless of the agent's repo grants. Sensitive files should not be stored in the repository tree, or the `/repo` mount should be replaced with a filtered, `RepoStore`-managed mount.

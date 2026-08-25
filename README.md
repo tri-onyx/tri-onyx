@@ -148,6 +148,7 @@ Full documentation is available at **[tri-onyx.com](https://tri-onyx.com)**:
 - [Bandwidth-Constrained Protocol](https://tri-onyx.com/bcp/) — how tainted agents communicate safely
 - [Browser Sessions](https://tri-onyx.com/browser-sessions/) — persistent browser sessions for agents
 - [Plugins](https://tri-onyx.com/plugins/) — plugin system and management
+- [MCP Server](https://tri-onyx.com/mcp-server/) — public MCP endpoint for claude.ai and other MCP clients
 - [API Reference](https://tri-onyx.com/api-reference/) — full HTTP API documentation
 - [Web Dashboard](https://tri-onyx.com/web-dashboard/) — monitoring and management UI
 - [Comparison with OpenClaw](https://tri-onyx.com/comparison/) — detailed side-by-side

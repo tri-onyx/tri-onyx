@@ -12,7 +12,7 @@ enter the agent sandbox.
 - A running TriOnyx gateway (Elixir)
 - Docker and Docker Compose
 - An email account with IMAP and SMTP access enabled
-- The email agent definition loaded (`workspace/agent-definitions/email.md`)
+- The email agent definition loaded (seeded from `workspace.template/agent-definitions/email.md` into the `definitions` repo)
 
 ## 2. Enable IMAP/SMTP on Your Email Provider
 
@@ -247,7 +247,7 @@ validated to be within the agent's workspace directory.
 ## 8. Customizing the Agent
 
 The default `email.md` agent definition handles general email triage. You can
-customize it by editing `workspace/agent-definitions/email.md`:
+customize it by editing the `email` definition in the `definitions` repo — seeded from `workspace.template/agent-definitions/email.md`:
 
 - **Change the model** — use a smaller model for cost efficiency on high-volume
   accounts, or a larger model for complex triage logic

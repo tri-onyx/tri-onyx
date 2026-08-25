@@ -202,7 +202,7 @@ docker compose -f docker-compose.docs.yml down
 
 ## Plugin System
 
-Plugins are reusable agent extensions (e.g., newsagg, diary, bookmarks) that live in `workspace/plugins/`. Each plugin is a directory of files that agents can read/write via FUSE paths like `/plugins/<name>/**`.
+Plugins are reusable agent extensions (e.g., newsagg, diary, bookmarks) that live inside a git repo — either the owning agent's own repo (`/workspace/plugins/<name>`) or a shared repo such as `knowledge` (`/repos/knowledge/plugins/<name>`). An agent definition declares which plugins it loads via `plugins:` in its frontmatter; access follows the repo mount (`repos_read`/`repos_write`) — no mount, no plugin. See `docs/plugins.md` for the full directory layout and gateway resolution flow.
 
 Plugins are managed with the CLI tool:
 
@@ -213,7 +213,7 @@ uv run scripts/tri-onyx-plugin.py remove <name>
 uv run scripts/tri-onyx-plugin.py list
 ```
 
-When a plugin is installed from a git repo, its `.git/` directory is stripped so the files become mutable workspace content tracked by the workspace's own git repo. Plugin metadata is recorded in `workspace/plugins.yaml`.
+When a plugin is installed from a git repo, its `.git/` directory is stripped so the files become regular content of the target repo (the agent's own repo or a shared repo), versioned by the gateway's per-session commits — there is no global plugin directory or manifest.
 
 ## Temporary Files
 
