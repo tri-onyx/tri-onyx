@@ -149,6 +149,12 @@ defmodule TriOnyx.InformationClassifier do
   the max taint/sensitivity recorded in the risk manifest across every
   readable repo (its own, each `repos_write` clone, and each `repos_read`
   checkout). Computed once at session start.
+
+  Computing it once is only sound because of `TriOnyx.RepoStore`'s mount
+  stability invariant: no tree mounted into a running container changes
+  under it — `_ro` refreshes are deferred while a session holds the mount,
+  and the sweeper never touches a claimed tree. If that invariant is ever
+  relaxed, this floor has to be recomputed whenever a mount moves.
   """
   @spec classify_readable_repos(TriOnyx.AgentDefinition.t()) :: classification()
   def classify_readable_repos(definition) do

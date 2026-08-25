@@ -660,37 +660,41 @@ defmodule TriOnyx.AgentPort do
 
     # All bind-mount sources must exist before `docker run`: the repo
     # working trees (own tree synced, rw clones fast-forwarded, _ro
-    # checkouts refreshed) and any GitHub clones/mirrors.
+    # checkouts refreshed) and any GitHub clones/mirrors. A tree that could
+    # not be prepared is fatal — starting anyway would either fail the
+    # bind mount or, worse, run the session against a stale or diverged
+    # tree whose provenance the gateway can no longer vouch for.
     case TriOnyx.RepoStore.prepare_session(definition) do
       {:ok, _grants} ->
-        :ok
+        ensure_github_clone(definition)
+
+        docker_args = Sandbox.build_docker_args(definition, session_id, sandbox_opts)
+        container_name = "tri-onyx-#{definition.name}-#{session_id}"
+
+        port =
+          Port.open({:spawn_executable, find_docker()}, [
+            :binary,
+            :exit_status,
+            :use_stdio,
+            :stderr_to_stdout,
+            args: docker_args
+          ])
+
+        Logger.info(
+          "AgentPort started in Docker mode " <>
+            "(port=#{inspect(port)}, container=#{container_name})"
+        )
+
+        {:ok, %__MODULE__{port: port, notify: notify, buffer: "", container_name: container_name}}
 
       {:error, reason} ->
-        Logger.warning(
-          "AgentPort: repo tree preparation issue for #{definition.name}: #{inspect(reason)}"
+        Logger.error(
+          "AgentPort: repo tree preparation failed for #{definition.name}: " <>
+            "#{inspect(reason)} — refusing to start the container"
         )
+
+        {:stop, {:repo_prepare_failed, reason}}
     end
-
-    ensure_github_clone(definition)
-
-    docker_args = Sandbox.build_docker_args(definition, session_id, sandbox_opts)
-    container_name = "tri-onyx-#{definition.name}-#{session_id}"
-
-    port =
-      Port.open({:spawn_executable, find_docker()}, [
-        :binary,
-        :exit_status,
-        :use_stdio,
-        :stderr_to_stdout,
-        args: docker_args
-      ])
-
-    Logger.info(
-      "AgentPort started in Docker mode " <>
-        "(port=#{inspect(port)}, container=#{container_name})"
-    )
-
-    {:ok, %__MODULE__{port: port, notify: notify, buffer: "", container_name: container_name}}
   end
 
   @spec ensure_github_clone(AgentDefinition.t()) :: :ok

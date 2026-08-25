@@ -34,8 +34,9 @@ defmodule TriOnyx.RepoStore do
   A *principal* is whoever a working tree belongs to: an agent name, `:ro`
   (the shared read-only checkouts mounted into readers), or `:gw` (the
   gateway's own trees). Read-only grants mount the `_ro` checkout, which is
-  refreshed after every push — readers see last-committed state, never
-  another agent's in-flight writes.
+  refreshed after every push (unless a session is reading it — see the
+  mount stability invariant below) — readers see last-committed state,
+  never another agent's in-flight writes.
 
   ## Sync protocol
 
@@ -44,9 +45,38 @@ defmodule TriOnyx.RepoStore do
     provenance trailers, and pushes; a rejected push triggers fetch+merge,
     and an unresolvable conflict is parked on `conflict/<agent>/<session>`
     in the bare repo (nothing is lost, main stays clean)
+
+  ## Mount stability invariant
+
+  **No mounted working tree changes under a running session.** A session's
+  read-taint floor (`InformationClassifier.classify_readable_repos/1`) is
+  computed once at session start from the labels of everything it can
+  read, which only holds if what it can read cannot change mid-session:
+
+  - rw trees are only synced by `prepare_session/1`, before the container
+    starts, and written only by the session itself
+  - `refresh_ro/1` is *deferred* while any live session mounts that repo's
+    `_ro` checkout — a push by another agent updates the bare repo but not
+    the checkout being read. The deferred refresh happens naturally at the
+    next session boundary, since `prepare_session/1` refreshes every
+    `_ro` tree it is about to mount
+  - `RepoStore.Sweeper` skips every tree belonging to a live session, so
+    crash recovery never touches a tree in use
+
+  Liveness is tracked as *mount claims*: `prepare_session/1` records the
+  trees it prepared against the calling process — the agent port that owns
+  the container — and the claim is released automatically when that
+  process exits, so a mount is claimed for exactly as long as the
+  container that holds it lives. Claims are kept by `RepoStore.Sweeper`
+  and read through `active_principals/0` and `ro_mounted?/1`. They are
+  deliberately not derived by asking the session processes: session start
+  and session end both run inside those processes, so a synchronous query
+  would deadlock.
   """
 
   require Logger
+
+  alias TriOnyx.RepoStore.Sweeper
 
   @type repo_id :: {:agent, String.t()} | {:shared, String.t()}
   @type principal :: String.t() | :ro | :gw
@@ -117,6 +147,10 @@ defmodule TriOnyx.RepoStore do
   Ensures + fast-forwards the agent's own tree and each rw shared-repo
   clone, and refreshes the `_ro` checkout of each read grant. Must run
   before the container starts. Returns the grants map on success.
+
+  On success the prepared trees are claimed for the calling process (the
+  agent port that owns the container), which is what makes them off-limits
+  to the sweeper and to `_ro` refreshes until the container is gone.
   """
   @spec prepare_session(TriOnyx.AgentDefinition.t()) ::
           {:ok, map()} | {:error, term()}
@@ -131,8 +165,12 @@ defmodule TriOnyx.RepoStore do
       Enum.map(read, fn repo_id -> {repo_id, refresh_ro(repo_id)} end)
 
     case Enum.find(rw_results ++ ro_results, fn {_repo, res} -> res != :ok end) do
-      nil -> {:ok, g}
-      {repo_id, {:error, reason}} -> {:error, {:prepare_failed, ref(repo_id), reason}}
+      nil ->
+        :ok = Sweeper.claim(self(), name, read)
+        {:ok, g}
+
+      {repo_id, {:error, reason}} ->
+        {:error, {:prepare_failed, ref(repo_id), reason}}
     end
   end
 
@@ -357,7 +395,7 @@ defmodule TriOnyx.RepoStore do
 
               case git_tree(gd, tree, ["merge", "--no-edit", "origin/#{@default_branch}"]) do
                 {_, 0} -> :ok
-                {out, c} -> {:error, {:sync_failed, c, out}}
+                {out, c} -> recover_failed_merge(gd, tree, principal, repo_id, c, out)
               end
           end
         end)
@@ -371,6 +409,12 @@ defmodule TriOnyx.RepoStore do
 
   Unlike `sync_tree/2` this discards any local state — the `_ro` tree is a
   pure projection of the last commit and nothing else ever writes to it.
+
+  The refresh is skipped (and reported as `:ok`) while a live session
+  mounts the checkout: resetting a tree an agent is reading would move
+  content under it after its read-taint floor was computed. Deferring is
+  safe because `prepare_session/1` refreshes every `_ro` tree it mounts,
+  so the pending update lands at the next session boundary.
   """
   @spec refresh_ro(repo_id()) :: :ok | {:error, term()}
   def refresh_ro(repo_id) do
@@ -378,16 +422,31 @@ defmodule TriOnyx.RepoStore do
       gd = gitdir(:ro, repo_id)
       tree = tree_dir(:ro, repo_id)
 
-      locked(repo_id, fn ->
-        with {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
-             {_, 0} <- git_tree(gd, tree, ["reset", "--hard", "origin/#{@default_branch}"]),
-             {_, 0} <- git_tree(gd, tree, ["clean", "-fd"]) do
-          :ok
-        else
-          {output, code} -> {:error, {:refresh_failed, code, output}}
-        end
-      end)
+      if ro_mounted?(repo_id) do
+        # Mount stability invariant: a live session reads this checkout and
+        # its read-taint floor was snapshotted at spawn. Defer — the next
+        # `prepare_session/1` refreshes it before mounting it again.
+        Logger.debug(
+          "RepoStore: deferring _ro refresh of #{ref(repo_id)} — mounted by a live session"
+        )
+
+        :ok
+      else
+        do_refresh_ro_tree(gd, tree, repo_id)
+      end
     end
+  end
+
+  defp do_refresh_ro_tree(gd, tree, repo_id) do
+    locked(repo_id, fn ->
+      with {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
+           {_, 0} <- git_tree(gd, tree, ["reset", "--hard", "origin/#{@default_branch}"]),
+           {_, 0} <- git_tree(gd, tree, ["clean", "-fd"]) do
+        :ok
+      else
+        {output, code} -> {:error, {:refresh_failed, code, output}}
+      end
+    end)
   end
 
   @doc """
@@ -728,6 +787,58 @@ defmodule TriOnyx.RepoStore do
         Logger.warning("RepoStore: _ro refresh failed for #{ref(repo_id)}: #{inspect(reason)}")
         :ok
     end
+  end
+
+  # A fallback merge that fails leaves the tree with MERGE_HEAD and
+  # conflict markers — unusable as a mount. Always abort so the tree is a
+  # plain checkout again. Only the gateway-owned projections (`_ro`, `_gw`)
+  # may additionally be reset onto origin; an agent's rw tree may hold the
+  # only copy of its work, so a diverged agent tree is reported as an error
+  # and left for `push/5` to park on a conflict branch.
+  defp recover_failed_merge(gd, tree, principal, repo_id, code, output) do
+    _ = git_tree(gd, tree, ["merge", "--abort"])
+
+    if principal in [:ro, :gw] do
+      case git_tree(gd, tree, ["reset", "--hard", "origin/#{@default_branch}"]) do
+        {_, 0} ->
+          Logger.warning(
+            "RepoStore: reset #{principal_dir(principal)}/#{ref(repo_id)} onto origin " <>
+              "after a failed merge"
+          )
+
+          :ok
+
+        {out, c} ->
+          {:error, {:sync_failed, c, out}}
+      end
+    else
+      Logger.error(
+        "RepoStore: #{principal_dir(principal)}/#{ref(repo_id)} diverged from origin and " <>
+          "could not be merged — merge aborted, tree left as-is"
+      )
+
+      {:error, {:sync_failed, code, output}}
+    end
+  end
+
+  # --- Mount claims ---
+
+  @doc """
+  Agent names whose trees are mounted into a running container. The
+  gateway must not commit to, or reset, any tree of such a principal.
+  """
+  @spec active_principals() :: MapSet.t(String.t())
+  def active_principals do
+    Sweeper.claims() |> MapSet.new(& &1.principal)
+  end
+
+  @doc """
+  True when a running container mounts the shared read-only checkout of
+  `repo_id` (i.e. its session holds a `repos_read` grant for it).
+  """
+  @spec ro_mounted?(repo_id()) :: boolean()
+  def ro_mounted?(repo_id) do
+    Enum.any?(Sweeper.claims(), fn claim -> repo_id in claim.ro end)
   end
 
   # git in a bare dir (no work tree)

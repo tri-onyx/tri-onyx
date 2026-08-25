@@ -22,13 +22,17 @@ defmodule TriOnyx.ItemFeedback do
   or `/repos/<name>/...` for a shared repo the agent has been granted.
   Reads resolve against the corresponding working tree; writes into a
   shared repo go through the gateway's tree and are committed + pushed
-  immediately so notified peers see the file on their next sync.
+  immediately so notified peers see the file on their next sync. A copy
+  carries its source's risk labels (`Workspace.labels_for/1`) into the
+  destination repo's commit trailers and risk-manifest entry — copying a
+  file must not launder its provenance.
   """
 
   require Logger
 
   alias TriOnyx.AgentDefinition
   alias TriOnyx.RepoStore
+  alias TriOnyx.RiskManifest
   alias TriOnyx.Triggers.InterAgent
   alias TriOnyx.Workspace
 
@@ -124,7 +128,7 @@ defmodule TriOnyx.ItemFeedback do
   defp run_upvote_actions(definition, action, ctx, title) do
     case find_item_file(definition, action[:content_dir], ctx.url) do
       {:ok, file_path} ->
-        maybe_copy(definition, action[:copy_to], file_path)
+        maybe_copy(definition, action[:copy_to], file_path, action[:content_dir])
         maybe_notify(definition.name, action, Path.basename(file_path))
         [content_frame(definition.name, file_path, ctx, title)]
 
@@ -163,15 +167,17 @@ defmodule TriOnyx.ItemFeedback do
     end
   end
 
-  defp maybe_copy(_definition, nil, _file_path), do: :ok
+  defp maybe_copy(_definition, nil, _file_path, _source_dir), do: :ok
 
   # Copies into the agent's own repo tree (picked up by the next
   # session-end commit or the sweeper), or into a shared repo via the
   # gateway tree with an immediate commit + push — the notified peer's
   # next session-start sync sees the file.
-  defp maybe_copy(definition, dest_dir, file_path) do
+  defp maybe_copy(definition, dest_dir, file_path, source_dir) do
     case resolve_write_dir(definition, dest_dir) do
       {:ok, :agent_tree, abs_dir} ->
+        # Stays inside the agent's own repo: the session-end commit (or the
+        # sweeper) labels it with the session's own levels.
         with :ok <- File.mkdir_p(abs_dir),
              :ok <- File.cp(file_path, Path.join(abs_dir, Path.basename(file_path))) do
           :ok
@@ -182,7 +188,7 @@ defmodule TriOnyx.ItemFeedback do
         end
 
       {:ok, {:shared_repo, repo_id, rel_dir}, _} ->
-        copy_into_shared_repo(definition, repo_id, rel_dir, file_path)
+        copy_into_shared_repo(definition, repo_id, rel_dir, file_path, source_dir)
 
       error ->
         Logger.warning("ItemFeedback: copy to #{dest_dir} rejected: #{inspect(error)}")
@@ -190,30 +196,55 @@ defmodule TriOnyx.ItemFeedback do
     end
   end
 
-  defp copy_into_shared_repo(definition, repo_id, rel_dir, file_path) do
+  # Crossing a repo boundary is a labeled write: the destination inherits
+  # the source file's manifest labels (conservative floor when the source
+  # has none), recorded both as commit trailers — the durable record
+  # RiskManifest replays — and as a manifest entry for the new path.
+  defp copy_into_shared_repo(definition, repo_id, rel_dir, file_path, source_dir) do
     filename = Path.basename(file_path)
     rel_path = Path.join(rel_dir, filename)
+    author = "#{definition.name}-feedback"
+    {taint, sensitivity} = source_labels(definition, source_dir, filename)
 
     with :ok <- RepoStore.sync_tree(:gw, repo_id),
          gw_tree = RepoStore.tree_dir(:gw, repo_id),
          abs_dir = Path.join(gw_tree, rel_dir),
          :ok <- File.mkdir_p(abs_dir),
          :ok <- File.cp(file_path, Path.join(abs_dir, filename)),
-         {:ok, _} <-
+         {:ok, sha} when is_binary(sha) <-
            RepoStore.commit_and_push(:gw, repo_id,
-             author: "#{definition.name}-feedback",
+             author: author,
              message: "#{definition.name} feedback: file #{filename}",
+             trailers: ["Taint-Level: #{taint}", "Sensitivity-Level: #{sensitivity}"],
              session_id: "feedback",
              paths: [rel_path]
            ) do
+      canonical = Workspace.canonical_for_repo(repo_id, rel_path)
+      RiskManifest.put(author, [canonical], taint, sensitivity)
       :ok
     else
+      {:ok, :no_changes} ->
+        :ok
+
       error ->
         Logger.warning(
           "ItemFeedback: shared-repo copy to #{RepoStore.ref(repo_id)} failed: #{inspect(error)}"
         )
 
         :ok
+    end
+  end
+
+  # Labels of the file being copied, looked up by its canonical path. The
+  # source dir is the owning agent's container view, so the canonical path
+  # is derived the same way agent writes are.
+  defp source_labels(definition, source_dir, filename) do
+    with dir when is_binary(dir) <- source_dir,
+         {:ok, canonical} <-
+           Workspace.canonical_path(definition.name, Path.join(dir, filename)) do
+      Workspace.labels_for(canonical)
+    else
+      _ -> Workspace.unlabeled_levels()
     end
   end
 

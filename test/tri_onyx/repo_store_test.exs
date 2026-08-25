@@ -1,7 +1,11 @@
 defmodule TriOnyx.RepoStoreTest do
   use ExUnit.Case, async: false
 
+  alias TriOnyx.AgentDefinition
   alias TriOnyx.RepoStore
+  alias TriOnyx.RepoStore.Sweeper
+  alias TriOnyx.RiskManifest
+  alias TriOnyx.Workspace
 
   setup do
     tmp = Path.join(["test", "tmp", "repo_store_#{System.unique_integer([:positive])}"])
@@ -217,5 +221,282 @@ defmodule TriOnyx.RepoStoreTest do
 
     assert {:ok, "v1\n"} = RepoStore.read_file_at_commit(repo, sha1, "f.md")
     assert {:error, :invalid_commit} = RepoStore.read_file_at_commit(repo, "not-a-sha", "f.md")
+  end
+
+  # --- Helpers ---
+
+  defp definition(name, repos_write, repos_read \\ []) do
+    %AgentDefinition{
+      name: name,
+      tools: ["Read"],
+      system_prompt: "test",
+      repos_write: repos_write,
+      repos_read: repos_read
+    }
+  end
+
+  # Stands in for the agent port that owns a container: it claims the
+  # session's mounts and holds them until it is stopped.
+  defp live_container!(principal, ro_repos \\ []) do
+    test = self()
+
+    pid =
+      spawn(fn ->
+        :ok = Sweeper.claim(self(), principal, ro_repos)
+        send(test, :claimed)
+
+        receive do
+          :stop -> :ok
+        end
+      end)
+
+    assert_receive :claimed, 5_000
+    on_exit(fn -> stop_container(pid) end)
+    pid
+  end
+
+  defp stop_container(pid) do
+    if Process.alive?(pid) do
+      ref = Process.monitor(pid)
+      send(pid, :stop)
+
+      receive do
+        {:DOWN, ^ref, :process, ^pid, _} -> :ok
+      after
+        1_000 -> :ok
+      end
+    end
+
+    # The claim is released asynchronously, when the custodian sees the exit.
+    wait_until(fn -> not Enum.any?(Sweeper.claims(), &(&1.pid == pid)) end)
+  end
+
+  defp wait_until(fun, attempts \\ 100) do
+    cond do
+      fun.() ->
+        :ok
+
+      attempts == 0 ->
+        flunk("condition never became true")
+
+      true ->
+        Process.sleep(10)
+        wait_until(fun, attempts - 1)
+    end
+  end
+
+  # Commits in a tree without pushing, so the tree diverges from its bare repo.
+  defp local_commit!(principal, repo_id, message) do
+    gd = RepoStore.gitdir(principal, repo_id)
+    tree = RepoStore.tree_dir(principal, repo_id)
+
+    env = [
+      {"GIT_AUTHOR_NAME", "test"},
+      {"GIT_AUTHOR_EMAIL", "test@tri_onyx"},
+      {"GIT_COMMITTER_NAME", "test"},
+      {"GIT_COMMITTER_EMAIL", "test@tri_onyx"}
+    ]
+
+    git = fn args ->
+      System.cmd("git", ["-c", "safe.directory=*", "--git-dir", gd, "--work-tree", tree | args],
+        stderr_to_stdout: true,
+        env: env
+      )
+    end
+
+    {_, 0} = git.(["add", "-A"])
+    {_, 0} = git.(["commit", "-m", message])
+    :ok
+  end
+
+  defp bare_log(repo_id, format) do
+    {out, 0} =
+      System.cmd(
+        "git",
+        ["--git-dir", RepoStore.bare_dir(repo_id), "log", "-1", "--format=#{format}"],
+        stderr_to_stdout: true
+      )
+
+    out
+  end
+
+  # --- Failed-merge recovery ---
+
+  describe "sync_tree merge recovery" do
+    setup do
+      repo = {:shared, "knowledge"}
+      :ok = RepoStore.ensure_tree("a", repo)
+      :ok = RepoStore.ensure_tree(:gw, repo)
+
+      # Origin gains a version of shared.md that both trees will conflict with.
+      :ok = RepoStore.ensure_tree("origin_writer", repo)
+      writer_tree = RepoStore.tree_dir("origin_writer", repo)
+      File.write!(Path.join(writer_tree, "shared.md"), "from origin\n")
+
+      {:ok, _} =
+        RepoStore.commit_and_push("origin_writer", repo, message: "origin", session_id: "s0")
+
+      %{repo: repo}
+    end
+
+    test "an agent tree keeps its work and is left without MERGE_HEAD", %{repo: repo} do
+      tree = RepoStore.tree_dir("a", repo)
+      File.write!(Path.join(tree, "shared.md"), "from a\n")
+      :ok = local_commit!("a", repo, "local work")
+
+      assert {:error, {:sync_failed, _, _}} = RepoStore.sync_tree("a", repo)
+
+      refute File.exists?(Path.join(RepoStore.gitdir("a", repo), "MERGE_HEAD"))
+      content = File.read!(Path.join(tree, "shared.md"))
+      assert content == "from a\n"
+      refute content =~ "<<<<<<<"
+    end
+
+    test "a gateway tree is reset onto origin", %{repo: repo} do
+      tree = RepoStore.tree_dir(:gw, repo)
+      File.write!(Path.join(tree, "shared.md"), "from gw\n")
+      :ok = local_commit!(:gw, repo, "local work")
+
+      assert :ok = RepoStore.sync_tree(:gw, repo)
+
+      refute File.exists?(Path.join(RepoStore.gitdir(:gw, repo), "MERGE_HEAD"))
+      assert File.read!(Path.join(tree, "shared.md")) == "from origin\n"
+    end
+  end
+
+  # --- Mount stability ---
+
+  describe "mount claims" do
+    test "prepare_session claims the trees it prepared for its caller" do
+      test = self()
+      definition = definition("mounter", ["knowledge"], ["core"])
+
+      pid =
+        spawn(fn ->
+          send(test, RepoStore.prepare_session(definition))
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert_receive {:ok, %{read: [{:shared, "core"}]}}, 15_000
+
+      assert MapSet.member?(RepoStore.active_principals(), "mounter")
+      assert RepoStore.ro_mounted?({:shared, "core"})
+      refute RepoStore.ro_mounted?({:shared, "knowledge"})
+
+      stop_container(pid)
+      refute MapSet.member?(RepoStore.active_principals(), "mounter")
+      refute RepoStore.ro_mounted?({:shared, "core"})
+    end
+
+    test "_ro refresh is deferred while a container mounts the checkout" do
+      repo = {:shared, "knowledge"}
+      :ok = RepoStore.ensure_tree(:gw, repo)
+      gw_tree = RepoStore.tree_dir(:gw, repo)
+      ro_path = Path.join(RepoStore.tree_dir(:ro, repo), "note.md")
+
+      File.write!(Path.join(gw_tree, "note.md"), "v1\n")
+      {:ok, _} = RepoStore.commit_and_push(:gw, repo, message: "v1", session_id: "s1")
+      assert File.read!(ro_path) == "v1\n"
+
+      reader = live_container!("reader", [{:shared, "knowledge"}])
+      assert RepoStore.ro_mounted?(repo)
+
+      File.write!(Path.join(gw_tree, "note.md"), "v2\n")
+      {:ok, _} = RepoStore.commit_and_push(:gw, repo, message: "v2", session_id: "s2")
+
+      # The push landed in the bare repo but the mounted checkout did not move.
+      {:ok, sha} = RepoStore.head(repo)
+      assert {:ok, "v2\n"} = RepoStore.read_file_at_commit(repo, sha, "note.md")
+      assert File.read!(ro_path) == "v1\n"
+      assert :ok = RepoStore.refresh_ro(repo)
+      assert File.read!(ro_path) == "v1\n"
+
+      # ...and lands once the container is gone (as prepare_session/1 would).
+      stop_container(reader)
+      refute RepoStore.ro_mounted?(repo)
+      assert :ok = RepoStore.refresh_ro(repo)
+      assert File.read!(ro_path) == "v2\n"
+    end
+  end
+
+  # --- Sweeper ---
+
+  describe "Sweeper" do
+    test "commits orphaned trees at the unlabeled floor and records them" do
+      RiskManifest.clear()
+      repo = {:agent, "ghost"}
+      :ok = RepoStore.ensure_tree("ghost", repo)
+      File.write!(Path.join(RepoStore.tree_dir("ghost", repo), "NOTES.md"), "crashed\n")
+
+      assert {"ghost", "agents/ghost"} in Sweeper.sweep_now()
+
+      body = bare_log(repo, "%B")
+      assert body =~ "orphaned uncommitted changes"
+      assert body =~ "Taint-Level: high"
+      assert body =~ "Sensitivity-Level: high"
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "high"}} =
+               RiskManifest.lookup("agents/ghost/NOTES.md")
+    end
+
+    test "skips trees belonging to a live session" do
+      repo = {:agent, "busy"}
+      :ok = RepoStore.ensure_tree("busy", repo)
+      File.write!(Path.join(RepoStore.tree_dir("busy", repo), "NOTES.md"), "in flight\n")
+      live_container!("busy")
+
+      swept = Sweeper.sweep_now()
+
+      refute Enum.any?(swept, fn {principal, _repo} -> principal == "busy" end)
+      assert RepoStore.dirty?("busy", repo)
+    end
+  end
+
+  # --- Label ordering (Workspace façade) ---
+
+  describe "risk labels follow the push" do
+    test "a parked session commit leaves its paths unlabeled" do
+      RiskManifest.clear()
+      shared = {:shared, "knowledge"}
+      definition = definition("writer", ["knowledge"])
+
+      :ok = RepoStore.ensure_tree("writer", {:agent, "writer"})
+      :ok = RepoStore.ensure_tree("writer", shared)
+      :ok = RepoStore.ensure_tree("peer", shared)
+
+      # A peer pushes doc.md first, so the writer's commit cannot merge.
+      File.write!(Path.join(RepoStore.tree_dir("peer", shared), "doc.md"), "peer\n")
+      {:ok, _} = RepoStore.commit_and_push("peer", shared, message: "peer", session_id: "p1")
+
+      File.write!(Path.join(RepoStore.tree_dir("writer", {:agent, "writer"}), "NOTES.md"), "mine\n")
+      File.write!(Path.join(RepoStore.tree_dir("writer", shared), "doc.md"), "writer\n")
+
+      {:ok, results} = Workspace.commit_session(definition, "s1", :high, :medium)
+
+      assert {"knowledge", {:ok, {:conflict, _branch}}} =
+               Enum.find(results, fn {repo_ref, _} -> repo_ref == "knowledge" end)
+
+      # Own repo pushed cleanly → labeled; parked shared path → not labeled.
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "medium"}} =
+               RiskManifest.lookup("agents/writer/NOTES.md")
+
+      assert :error = RiskManifest.lookup("shared/knowledge/doc.md")
+    end
+
+    test "a failed review leaves the recorded taint intact", %{tmp: tmp} do
+      RiskManifest.clear()
+      :ok = RiskManifest.put("news", ["shared/broken/x.md"], :high, :low)
+
+      # A bare path that cannot become a repo makes the review commit fail.
+      File.mkdir_p!(Path.join([tmp, "bare", "shared"]))
+      File.write!(Path.join([tmp, "bare", "shared", "broken.git"]), "not a repo\n")
+
+      assert {:error, _reason} = Workspace.review_artifacts(["shared/broken/x.md"], "sondre")
+
+      assert {:ok, %{"taint_level" => "high"}} = RiskManifest.lookup("shared/broken/x.md")
+    end
   end
 end

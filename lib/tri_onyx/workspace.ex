@@ -30,6 +30,9 @@ defmodule TriOnyx.Workspace do
   # gateway loads.
   @baseline_shared_repos ~w(core definitions)
 
+  # Conservative floor for content with no recorded provenance.
+  @unlabeled_levels {:high, :high}
+
   @core_templates %{
     "personality/SOUL.md" => "# Soul\n\n<!-- Define personality, values, and tone here -->\n",
     "personality/IDENTITY.md" => "# Identity\n\n<!-- Define name, role, and capabilities here -->\n",
@@ -186,10 +189,13 @@ defmodule TriOnyx.Workspace do
   Commits an agent session's changes — one commit per rw repo (its own
   plus each `repos_write` grant), pushed to the bare repos.
 
-  Changed paths are recorded in the risk manifest with the session's
-  final taint/sensitivity labels before committing, and the commit
-  carries `Taint-Level`/`Sensitivity-Level` trailers as the durable
-  record.
+  The commit carries `Taint-Level`/`Sensitivity-Level` trailers as the
+  durable record, and the changed paths are recorded in the risk manifest
+  with the session's final labels **only once the push succeeded** — a
+  commit parked on a conflict branch is not on `main`, so labelling those
+  paths would describe content no reader can see. Their provenance stays
+  in the parked commit's trailers and is picked up if the branch is
+  merged.
 
   Returns `{:ok, results}` with one `{repo_ref, result}` per rw repo.
   """
@@ -213,11 +219,6 @@ defmodule TriOnyx.Workspace do
           RepoStore.changed_paths(definition.name, repo)
           |> Enum.reject(&temp_file?/1)
 
-        if changed != [] and taint_level != nil do
-          canonical = Enum.map(changed, &canonical_for_repo(repo, &1))
-          TriOnyx.RiskManifest.put(definition.name, canonical, taint_level, sensitivity_level)
-        end
-
         result =
           if changed == [] and not RepoStore.dirty?(definition.name, repo) do
             {:ok, :no_changes}
@@ -232,6 +233,11 @@ defmodule TriOnyx.Workspace do
 
         case result do
           {:ok, sha} when is_binary(sha) ->
+            if changed != [] and taint_level != nil do
+              canonical = Enum.map(changed, &canonical_for_repo(repo, &1))
+              TriOnyx.RiskManifest.put(definition.name, canonical, taint_level, sensitivity_level)
+            end
+
             Logger.info(
               "Workspace: committed #{String.slice(sha, 0, 10)} to #{RepoStore.ref(repo)} " <>
                 "for #{definition.name}/#{session_id}"
@@ -243,7 +249,7 @@ defmodule TriOnyx.Workspace do
           {:ok, {:conflict, branch}} ->
             Logger.warning(
               "Workspace: session #{session_id} changes to #{RepoStore.ref(repo)} " <>
-                "parked on #{branch}"
+                "parked on #{branch} — paths left unlabeled (not on main)"
             )
 
           {:error, reason} ->
@@ -299,9 +305,11 @@ defmodule TriOnyx.Workspace do
 
   @doc """
   Records writes made by the gateway itself (connectors polling email,
-  calendar, feedback queues) into an agent's tree: updates the risk
-  manifest and commits + pushes immediately so provenance is durable and
-  readers of the repo see the files.
+  calendar, feedback queues) into an agent's tree: commits + pushes
+  immediately so provenance is durable and readers of the repo see the
+  files, then labels the paths in the risk manifest. As in
+  `commit_session/4`, labels are only recorded for content that reached
+  `main`.
 
   `paths` are relative to the agent's tree. `source` names the writer
   (e.g. `"email-connector"`).
@@ -310,16 +318,32 @@ defmodule TriOnyx.Workspace do
           {:ok, term()} | {:error, term()}
   def record_external_write(agent_name, source, paths, taint, sensitivity) do
     repo = {:agent, agent_name}
-    canonical = Enum.map(paths, &canonical_for_repo(repo, &1))
-    TriOnyx.RiskManifest.put(agent_name, canonical, taint, sensitivity)
 
-    RepoStore.commit_and_push(agent_name, repo,
-      author: source,
-      message: "#{source}: deliver to #{agent_name}",
-      trailers: ["Taint-Level: #{taint}", "Sensitivity-Level: #{sensitivity}"],
-      session_id: "connector",
-      paths: paths
-    )
+    result =
+      RepoStore.commit_and_push(agent_name, repo,
+        author: source,
+        message: "#{source}: deliver to #{agent_name}",
+        trailers: ["Taint-Level: #{taint}", "Sensitivity-Level: #{sensitivity}"],
+        session_id: "connector",
+        paths: paths
+      )
+
+    case result do
+      {:ok, sha} when is_binary(sha) ->
+        canonical = Enum.map(paths, &canonical_for_repo(repo, &1))
+        TriOnyx.RiskManifest.put(agent_name, canonical, taint, sensitivity)
+
+      {:ok, {:conflict, branch}} ->
+        Logger.warning(
+          "Workspace: #{source} delivery to #{agent_name} parked on #{branch} — " <>
+            "paths left unlabeled (not on main)"
+        )
+
+      _ ->
+        :ok
+    end
+
+    result
   end
 
   @doc """
@@ -361,10 +385,12 @@ defmodule TriOnyx.Workspace do
   @doc """
   Marks the given artifact paths (canonical form) as reviewed by a human.
 
-  Resets each path's taint to `"low"` in the live risk manifest but leaves
-  sensitivity unchanged, then records the review as an empty commit on
-  each affected repo carrying one `Reviewed-Path` trailer per path — the
-  durable record `TriOnyx.RiskManifest` replays when rebuilding.
+  Records the review as an empty commit on each affected repo carrying one
+  `Reviewed-Path` trailer per path — the durable record
+  `TriOnyx.RiskManifest` replays when rebuilding — and only then resets
+  each path's taint to `"low"` in the live manifest (sensitivity is left
+  unchanged). Doing the durable commits first means a failed review leaves
+  the taint intact instead of downgrading it in memory only.
   """
   @spec review_artifacts([String.t()], String.t()) :: {:ok, [String.t()]} | {:error, term()}
   def review_artifacts(paths, reviewer) when is_list(paths) and is_binary(reviewer) do
@@ -376,23 +402,37 @@ defmodule TriOnyx.Workspace do
         {:error, :invalid_path}
 
       true ->
-        :ok = TriOnyx.RiskManifest.review(paths, reviewer)
-
         paths
         |> Enum.group_by(fn path ->
           {:ok, {repo, _rel}} = resolve_canonical(path)
           repo
         end)
-        |> Enum.reduce_while({:ok, paths}, fn {repo, repo_paths}, acc ->
+        |> Enum.reduce_while(:ok, fn {repo, repo_paths}, acc ->
           trailers =
             ["Taint-Level: low", "Reviewed-By: #{reviewer}"] ++
               Enum.map(repo_paths, &"Reviewed-Path: #{&1}")
 
           case RepoStore.empty_commit(repo, reviewer, "review by #{reviewer}", trailers) do
-            {:ok, _sha} -> {:cont, acc}
-            {:error, reason} -> {:halt, {:error, reason}}
+            {:ok, _sha} ->
+              {:cont, acc}
+
+            {:error, reason} ->
+              Logger.error(
+                "Workspace: review commit failed on #{RepoStore.ref(repo)}: #{inspect(reason)} " <>
+                  "— taint left unchanged"
+              )
+
+              {:halt, {:error, reason}}
           end
         end)
+        |> case do
+          :ok ->
+            :ok = TriOnyx.RiskManifest.review(paths, reviewer)
+            {:ok, paths}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -496,6 +536,32 @@ defmodule TriOnyx.Workspace do
 
   def resolve_canonical(_), do: :error
 
+  @doc """
+  Labels applied to content whose provenance is unknown.
+
+  Unknown provenance is treated as the worst case (`{:high, :high}`) so
+  that nothing enters a repo's history unlabeled — used by
+  `RepoStore.Sweeper` for trees orphaned by a crashed session and by
+  `ItemFeedback` when copying a file that has no manifest entry.
+  """
+  @spec unlabeled_levels() :: {atom(), atom()}
+  def unlabeled_levels, do: @unlabeled_levels
+
+  @doc """
+  Risk labels `{taint, sensitivity}` for a canonical path: the risk
+  manifest's entry, or `unlabeled_levels/0` when the path has none.
+  """
+  @spec labels_for(String.t()) :: {atom(), atom()}
+  def labels_for(canonical_path) do
+    case TriOnyx.RiskManifest.lookup(canonical_path) do
+      {:ok, entry} ->
+        {level(entry["taint_level"]), level(entry["sensitivity_level"])}
+
+      :error ->
+        @unlabeled_levels
+    end
+  end
+
   @doc "Canonical path for a file in a specific repo."
   @spec canonical_for_repo(RepoStore.repo_id(), String.t()) :: String.t()
   def canonical_for_repo({:agent, name}, rel), do: "agents/#{name}/#{rel}"
@@ -551,6 +617,14 @@ defmodule TriOnyx.Workspace do
       {:error, reason} -> Logger.error("Workspace: seed commit failed: #{inspect(reason)}")
     end
   end
+
+  # Manifest entries store levels as strings; anything unrecognized falls
+  # back to the conservative floor rather than being trusted as low.
+  @spec level(String.t() | nil) :: atom()
+  defp level("low"), do: :low
+  defp level("medium"), do: :medium
+  defp level("high"), do: :high
+  defp level(_), do: :high
 
   @spec read_file_or_nil(String.t()) :: String.t() | nil
   defp read_file_or_nil(path) do

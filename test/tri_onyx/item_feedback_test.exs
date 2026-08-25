@@ -4,6 +4,7 @@ defmodule TriOnyx.ItemFeedbackTest do
   alias TriOnyx.AgentDefinition
   alias TriOnyx.ItemFeedback
   alias TriOnyx.RepoStore
+  alias TriOnyx.RiskManifest
 
   @url "https://example.com/articles/some-story"
   @channel %{"platform" => "slack", "room_id" => "C123"}
@@ -184,6 +185,64 @@ defmodule TriOnyx.ItemFeedbackTest do
 
       assert {:handled, []} = ItemFeedback.handle_vote(defn, ctx("up"))
       assert [%{"vote" => "up"}] = read_queue(workspace)
+    end
+  end
+
+  describe "provenance of shared-repo copies" do
+    setup do
+      RiskManifest.clear()
+      on_exit(fn -> RiskManifest.clear() end)
+      :ok
+    end
+
+    @source_canonical "agents/newsy/plugins/newsagg/saved/some-story.md"
+    @dest_canonical "shared/knowledge/obsidian/shared/sources/articles/some-story.md"
+
+    defp copy_commit_body do
+      {out, 0} =
+        System.cmd(
+          "git",
+          [
+            "--git-dir",
+            RepoStore.bare_dir({:shared, "knowledge"}),
+            "log",
+            "-1",
+            "--format=%an|%B"
+          ],
+          stderr_to_stdout: true
+        )
+
+      out
+    end
+
+    test "the copy carries the source file's labels", %{tree: tree} do
+      write_saved_article(tree)
+      :ok = RiskManifest.put("newsy", [@source_canonical], :high, :medium)
+
+      assert {:handled, [_frame]} =
+               ItemFeedback.handle_vote(definition(%{upvote: upvote_config()}), ctx("up"))
+
+      body = copy_commit_body()
+      assert body =~ "newsy-feedback|"
+      assert body =~ "Taint-Level: high"
+      assert body =~ "Sensitivity-Level: medium"
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "medium"}} =
+               RiskManifest.lookup(@dest_canonical)
+    end
+
+    test "an unlabeled source copies at the conservative floor", %{tree: tree} do
+      write_saved_article(tree)
+
+      assert {:handled, [_frame]} =
+               ItemFeedback.handle_vote(definition(%{upvote: upvote_config()}), ctx("up"))
+
+      body = copy_commit_body()
+      assert body =~ "Taint-Level: high"
+      assert body =~ "Sensitivity-Level: high"
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "high"}} =
+               RiskManifest.lookup(@dest_canonical)
     end
   end
 end
