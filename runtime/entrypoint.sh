@@ -37,17 +37,68 @@ fi
 # Plugins with a pyproject.toml need their dependencies available in the
 # container. TRI_ONYX_PLUGIN_PATHS is a comma-separated list of
 # name=container-path pairs pointing into the mounted repo trees. Install
-# into the system Python BEFORE network lockdown so PyPI is reachable.
+# BEFORE network lockdown so PyPI is still reachable.
+#
+# The plugin directory is an agent-writable mount, so nothing from it is
+# ever handed to the installer as a build target — that would execute the
+# plugin's own build backend, here, as root. Instead:
+#   * only the declared [project].dependencies are installed (parsed with
+#     tomllib — no plugin code runs),
+#   * --only-binary :all: keeps a malicious *dependency* from running an
+#     sdist build hook either,
+#   * the install runs as tri_onyx into a user-owned directory that is put
+#     on PYTHONPATH/PATH for the agent process below.
+# Consequence: a plugin that is also an installable package does not get
+# its console scripts. Plugin code is run from its mount (`uv run
+# /workspace/plugins/<p>/...`) or imported via PYTHONPATH.
+
+PLUGIN_SITE="/home/tri_onyx/.plugin-site"
+
+plugin_dependencies() {
+    # Print one PEP 508 requirement per line from [project].dependencies.
+    python3 - "$1" <<'PYEOF'
+import sys, tomllib
+
+with open(sys.argv[1], "rb") as fh:
+    project = tomllib.load(fh).get("project") or {}
+for dep in project.get("dependencies") or []:
+    if isinstance(dep, str) and dep.strip():
+        print(dep.strip())
+PYEOF
+}
 
 if [ -n "${TRI_ONYX_PLUGIN_PATHS:-}" ]; then
+    mkdir -p "$PLUGIN_SITE"
+    chown tri_onyx:tri_onyx "$PLUGIN_SITE"
+
     IFS=',' read -ra PLUGIN_ENTRIES <<< "$TRI_ONYX_PLUGIN_PATHS"
     for entry in "${PLUGIN_ENTRIES[@]}"; do
         plugin="${entry%%=*}"
         plugin_path="${entry#*=}"
-        if [ -f "${plugin_path}/pyproject.toml" ]; then
-            log "Installing Python deps for plugin '${plugin}' from ${plugin_path}"
-            uv pip install --system "$plugin_path" 2>&1 | while read -r line; do log "  $line"; done
+        [ -f "${plugin_path}/pyproject.toml" ] || continue
+
+        if ! dep_lines=$(plugin_dependencies "${plugin_path}/pyproject.toml" 2>&1); then
+            log "WARNING: cannot read dependencies of plugin '${plugin}', skipping"
+            log "  ${dep_lines}"
+            continue
         fi
+
+        deps=()
+        while IFS= read -r dep; do
+            [ -n "$dep" ] && deps+=("$dep")
+        done <<< "$dep_lines"
+
+        if [ ${#deps[@]} -eq 0 ]; then
+            log "Plugin '${plugin}' declares no dependencies, nothing to install"
+            continue
+        fi
+
+        log "Installing ${#deps[@]} declared dep(s) for plugin '${plugin}' into ${PLUGIN_SITE}"
+        gosu tri_onyx uv pip install \
+            --python /usr/local/bin/python3 \
+            --target "$PLUGIN_SITE" \
+            --only-binary :all: \
+            "${deps[@]}" 2>&1 | while read -r line; do log "  $line"; done
     done
 fi
 
@@ -252,11 +303,27 @@ fi
 # 4. Drop privileges
 # -----------------------------------------------------------------------
 
-# GitHub clones under /github are created by the gateway (possibly as a
-# different UID); git refuses to operate on repos with mismatched
-# ownership unless marked safe.
+# GitHub clones under /github and /github-ro are created by the gateway
+# (possibly as a different UID); git refuses to operate on repos with
+# mismatched ownership unless marked safe. Mark exactly those clones —
+# `safe.directory '*'` would also cover every future mount and any repo
+# the agent can create itself.
 if command -v git >/dev/null 2>&1; then
-    gosu tri_onyx git config --global --add safe.directory '*' || true
+    for clone in /github/*/* /github-ro/*/*; do
+        [ -d "$clone" ] || continue
+        gosu tri_onyx git config --global --add safe.directory "$clone" || true
+    done
+fi
+
+# Dependencies of pyproject-based plugins were installed into a
+# tri_onyx-owned directory (see section 1); make them importable and their
+# console scripts runnable for the agent and every tool subprocess.
+# Caveat: PYTHONPATH takes precedence over site-packages, so a plugin that
+# declares a dependency the runner also uses (pydantic, httpx, mcp, …) will
+# shadow the version `uv run --script` resolved for agent_runner.py.
+if [ -d "$PLUGIN_SITE" ]; then
+    export PYTHONPATH="${PLUGIN_SITE}${PYTHONPATH:+:${PYTHONPATH}}"
+    export PATH="${PLUGIN_SITE}/bin:${PATH}"
 fi
 
 log "Dropping privileges to tri_onyx user"

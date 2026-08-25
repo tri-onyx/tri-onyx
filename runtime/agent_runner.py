@@ -2785,6 +2785,29 @@ async def run_prompt_interruptible(
 # ---------------------------------------------------------------------------
 
 
+def log_dropped_control(read_task: "asyncio.Task[dict[str, Any] | None]") -> str | None:
+    """Log a control message that raced the shutdown event, if any.
+
+    ``asyncio.wait(FIRST_COMPLETED)`` can report *both* waiters as done, so a
+    control message may already have been dequeued when SIGTERM wins. It
+    cannot be serviced — the loop is exiting and the SDK client is about to
+    disconnect — so name it in the log instead of losing it silently.
+
+    Returns the dropped message type (for tests), or ``None`` if nothing was
+    dropped.
+    """
+    if not read_task.done() or read_task.cancelled() or read_task.exception() is not None:
+        return None
+
+    msg_raw = read_task.result()
+    if msg_raw is None:
+        return None
+
+    msg_type = msg_raw.get("type", "unknown") if isinstance(msg_raw, dict) else type(msg_raw).__name__
+    log.warning("Dropping control message received during shutdown: type=%s", msg_type)
+    return msg_type
+
+
 async def main() -> None:
     """Main entry point: read messages from stdin and dispatch."""
     log.info("Agent runner started (pid=%d)", os.getpid())
@@ -2831,6 +2854,7 @@ async def main() -> None:
                         task.cancel()
 
             if shutdown_event.is_set():
+                log_dropped_control(read_task)
                 log.info("Shutdown event set, exiting main loop")
                 break
 
