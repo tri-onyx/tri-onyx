@@ -7,12 +7,15 @@ import hashlib
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+from mcp.server.auth.middleware.auth_context import auth_context_var
+from mcp.server.auth.middleware.bearer_auth import AuthenticatedUser
+from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.testclient import TestClient
 
 from mcp_server.auth import TriOnyxAuthProvider
 from mcp_server.config import ConfigError, parse_config
-from mcp_server.gateway_bridge import GatewayError, TurnStatus
+from mcp_server.gateway_bridge import GatewayError, TurnStatus, make_room_id
 from mcp_server.server import build_app, build_server, client_ip
 from mcp_server.storage import OAuthStore
 
@@ -35,6 +38,8 @@ class StubBridge:
         elapsed: float = 50.0,
         checks: int = 1,
         partial_chars: int = 0,
+        stale: bool = False,
+        prompt: str = "",
     ):
         self.reply = reply
         self.error = error
@@ -43,6 +48,8 @@ class StubBridge:
         self.elapsed = elapsed
         self.checks = checks
         self.partial_chars = partial_chars
+        self.stale = stale
+        self.prompt = prompt
         self.calls: list[tuple[str, str, str]] = []
         self.timeouts: list[tuple[float | None, float | None]] = []
         self.connected = True
@@ -59,6 +66,8 @@ class StubBridge:
             activity=self.activity,
             checks=self.checks,
             partial_chars=self.partial_chars,
+            stale=self.stale,
+            prompt=self.prompt,
         )
 
 
@@ -743,6 +752,80 @@ async def test_colliding_sanitized_tool_names_are_rejected(tmp_path, bridge):
         build_server(config, provider, bridge)
 
 
+async def test_parked_reply_is_labelled_and_says_the_new_message_was_dropped(tmp_path):
+    bridge = StubBridge(reply="the earlier answer", stale=True, prompt="the earlier question")
+    mcp = pending_server(tmp_path, bridge)
+    text = (await mcp.call_tool("main", {"message": "something else"})).content[0].text
+    assert "EARLIER message" in text
+    assert "the earlier question" in text
+    assert "NOT delivered" in text
+    assert text.endswith("the earlier answer")
+
+
+async def test_a_normal_reply_carries_no_stale_notice(tmp_path):
+    mcp = pending_server(tmp_path, StubBridge(reply="fresh"))
+    text = (await mcp.call_tool("main", {"message": "hi"})).content[0].text
+    assert text == "fresh"
+
+
+async def test_tool_scopes_the_room_id_to_the_authenticated_client(wired, bridge):
+    _config, _provider, mcp, _app = wired
+    token = AccessToken(
+        token="t", client_id="client-abc", scopes=["trionyx:chat"], expires_at=None
+    )
+    reset = auth_context_var.set(AuthenticatedUser(token))
+    try:
+        await mcp.call_tool("main", {"message": "hello", "conversation_id": "c1"})
+    finally:
+        auth_context_var.reset(reset)
+    room_id = bridge.calls[0][2]
+    assert room_id != "mcp-c1"  # scoped to the credential
+    assert room_id.endswith("-c1")
+    assert make_room_id("mcp", "c1", "client-abc") == room_id
+    assert make_room_id("mcp", "c1", "another-client") != room_id
+
+
+def test_login_with_a_non_ascii_txn_is_refused_not_a_500(client):
+    """hmac.compare_digest rejects non-ASCII str operands with a TypeError —
+    the txn is attacker-supplied, so it has to be compared as bytes."""
+    page = client.get("/login", params={"txn": "é"})
+    assert page.status_code == 400
+
+    response = client.post(
+        "/login", data={"txn": "é", "password": OPERATOR_PASSWORD}, follow_redirects=False
+    )
+    assert response.status_code == 400
+    assert "location" not in response.headers
+
+
+def test_register_is_rate_limited_per_ip(tmp_path, bridge):
+    config = parse_config(
+        raw_config(auth={"data_dir": str(tmp_path), "max_registrations_per_ip": 2}),
+        path="t",
+    )
+    provider = TriOnyxAuthProvider(config, OAuthStore(config.auth.store_path))
+    app = build_app(config, build_server(config, provider, bridge))
+    with TestClient(app, base_url="https://testserver") as c:
+        assert register_client(c).status_code == 201
+        assert register_client(c).status_code == 201
+        flooded = register_client(c)
+    assert flooded.status_code == 429
+    assert flooded.headers["cache-control"] == "no-store"
+
+
+def test_rate_limiting_register_does_not_touch_the_login_limiter(tmp_path, bridge):
+    config = parse_config(
+        raw_config(auth={"data_dir": str(tmp_path), "max_registrations_per_ip": 1}),
+        path="t",
+    )
+    provider = TriOnyxAuthProvider(config, OAuthStore(config.auth.store_path))
+    app = build_app(config, build_server(config, provider, bridge))
+    with TestClient(app, base_url="https://testserver") as c:
+        register_client(c)
+        register_client(c)
+    assert provider.limiter.global_delay() == 0.0
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -754,7 +837,18 @@ class _FakeRequest:
         self.client = type("C", (), {"host": host})()
 
 
-def test_client_ip_prefers_cloudflare_headers():
+def test_client_ip_prefers_the_cloudflare_header_behind_the_tunnel():
     assert client_ip(_FakeRequest({"cf-connecting-ip": "203.0.113.7"})) == "203.0.113.7"
-    assert client_ip(_FakeRequest({"x-forwarded-for": "203.0.113.8, 10.0.0.2"})) == "203.0.113.8"
     assert client_ip(_FakeRequest({})) == "10.0.0.1"
+
+
+def test_client_ip_ignores_x_forwarded_for():
+    # Its first hop is caller-supplied: honouring it would hand an attacker a
+    # fresh per-IP budget on every request.
+    request = _FakeRequest({"x-forwarded-for": "203.0.113.8, 10.0.0.2"})
+    assert client_ip(request) == "10.0.0.1"
+
+
+def test_client_ip_uses_the_socket_peer_when_proxy_headers_are_untrusted():
+    request = _FakeRequest({"cf-connecting-ip": "203.0.113.7"})
+    assert client_ip(request, trust_proxy_headers=False) == "10.0.0.1"

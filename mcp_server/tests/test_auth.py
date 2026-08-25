@@ -16,6 +16,7 @@ from mcp.server.auth.provider import (
     TokenError,
 )
 
+import mcp_server.auth as auth_module
 from mcp_server.auth import (
     LoginExpired,
     LoginLocked,
@@ -231,6 +232,9 @@ async def test_duplicate_submit_with_a_wrong_password_is_refused(provider):
     provider.complete_login(txn, OPERATOR_PASSWORD, "1.2.3.4")
     with pytest.raises(LoginExpired):
         provider.complete_login(txn, "not-the-password", "1.2.3.4")
+    # A password *was* evaluated, so the guess costs a limiter attempt — the
+    # replay window is not a rate-limit-free oracle for a known-good txn.
+    assert provider.limiter.failures("1.2.3.4") == 1
 
 
 async def test_completed_login_replay_window_expires(provider):
@@ -657,3 +661,56 @@ def test_store_prunes_stale_tokenless_clients(tmp_path):
 def test_config_scope_is_used_for_registration(config):
     assert config.auth.scope == "trionyx:chat"
     assert parse_config(raw_config(auth={"scope": "custom"}), path="t").auth.scope == "custom"
+
+
+def test_store_prefers_evicting_a_client_with_no_pending_authorization(tmp_path):
+    store = OAuthStore(tmp_path / "store.json", max_clients=2)
+    store.put_client("mid-login", {"client_id": "mid-login", "client_id_issued_at": 100})
+    store.put_client("idle", {"client_id": "idle", "client_id_issued_at": 200})
+    # The oldest tokenless client is the one the operator is mid-login on, so
+    # the flood evicts the idle registration instead.
+    assert store.put_client(
+        "flood", {"client_id": "flood"}, protected={"mid-login"}
+    )
+    assert store.get_client("mid-login") is not None
+    assert store.get_client("idle") is None
+
+
+def test_store_still_evicts_when_every_candidate_is_protected(tmp_path):
+    store = OAuthStore(tmp_path / "store.json", max_clients=1)
+    store.put_client("only", {"client_id": "only", "client_id_issued_at": 100})
+    assert store.put_client("next", {"client_id": "next"}, protected={"only"})
+    assert store.get_client("next") is not None
+
+
+async def test_registration_does_not_evict_a_client_mid_authorization(tmp_path, config):
+    store = OAuthStore(tmp_path / "store.json", max_clients=2)
+    provider = TriOnyxAuthProvider(config, store)
+
+    operator_client = make_client(client_id="operator")
+    await provider.register_client(operator_client)
+    await provider.register_client(make_client(client_id="idle"))
+    await provider.authorize(operator_client, auth_params())  # parks a txn
+
+    await provider.register_client(make_client(client_id="flood"))
+    assert store.get_client("operator") is not None
+    assert store.get_client("idle") is None
+
+
+async def test_pending_authorizations_are_capped(provider):
+    client = make_client()
+    await provider.register_client(client)
+    for _ in range(auth_module._MAX_PENDING + 5):
+        await provider.authorize(client, auth_params())
+    assert len(provider._pending) <= auth_module._MAX_PENDING
+
+
+async def test_the_newest_pending_authorization_survives_a_flood(provider):
+    client = make_client()
+    await provider.register_client(client)
+    for _ in range(auth_module._MAX_PENDING - 1):
+        await provider.authorize(client, auth_params())
+    mine = parse_qs(urlsplit(await provider.authorize(client, auth_params())).query)["txn"][0]
+    for _ in range(10):
+        await provider.authorize(client, auth_params())
+    assert provider.has_pending(mine)

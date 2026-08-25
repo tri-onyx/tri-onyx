@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 
 import pytest
 from connector.protocol import (
@@ -115,6 +116,19 @@ def test_room_id_prefix_is_configurable():
     assert make_room_id("custom", "abc") == "custom-abc"
 
 
+def test_room_id_is_scoped_to_the_authenticated_client():
+    # Same conversation id, two credentials -> two keys, so neither can attach
+    # to the other's turn or collect its reply.
+    one = make_room_id("mcp", "shared", "client-one")
+    two = make_room_id("mcp", "shared", "client-two")
+    assert one != two
+    assert one.endswith("-shared") and two.endswith("-shared")
+    # Stable for a given client (a token refresh keeps the conversation).
+    assert make_room_id("mcp", "shared", "client-one") == one
+    # No credential material is echoed into the room id.
+    assert "client-one" not in one
+
+
 # ---------------------------------------------------------------------------
 # Request / response
 # ---------------------------------------------------------------------------
@@ -137,7 +151,8 @@ async def test_ask_collects_text_until_agent_result():
     assert sent.agent_name == "main"
     assert sent.content == "hello"
     assert sent.channel == CHANNEL
-    assert sent.trust == {"level": "verified", "sender": "mcp-operator"}
+    # No sender identity behind an LLM-composed message: untrusted content.
+    assert sent.trust == {"level": "unverified", "sender": "mcp-operator"}
 
     await client.emit(AgentTextMessage(type="agent_text", agent_name="main", channel=CHANNEL, content="part one"))
     await client.emit(AgentStepMessage(type="agent_step", agent_name="main", channel=CHANNEL, step_type="tool_use", name="Read"))
@@ -316,7 +331,8 @@ async def test_parked_result_is_delivered_to_the_next_call():
 
 async def test_parked_result_is_delivered_even_to_a_new_substantive_message():
     # The contract's sharp edge: a genuinely new question arriving on a parked
-    # key receives the previous reply and its own message is dropped.
+    # key receives the previous reply and its own message is dropped — so the
+    # status says so, naming the message the reply actually answers.
     bridge = make_bridge(soft_timeout=0.02)
     client = bridge._client
     await bridge.ask("main", "hello", "mcp-conv-1")
@@ -324,7 +340,31 @@ async def test_parked_result_is_delivered_even_to_a_new_substantive_message():
 
     status = await bridge.ask("main", "a totally new question", "mcp-conv-1")
     assert status.reply == "old reply"
+    assert status.stale is True
+    assert status.prompt == "hello"
     assert len(client.sent) == 1
+
+
+async def test_a_fresh_turns_reply_is_not_marked_stale():
+    bridge = make_bridge()
+    client = bridge._client
+    task = asyncio.create_task(bridge.ask("main", "hello", "mcp-conv-1"))
+    await asyncio.sleep(0.01)
+    await finish(client, "answer")
+    status = await task
+    assert status.stale is False
+    assert status.prompt == ""
+
+
+async def test_parked_error_delivered_to_a_later_call_says_which_message_it_is():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "the first question", "mcp-conv-1")
+    await client.emit(
+        AgentErrorMessage(type="agent_error", agent_name="main", channel=CHANNEL, error="crashed")
+    )
+    with pytest.raises(GatewayError, match="the first question"):
+        await bridge.ask("main", "an unrelated new question", "mcp-conv-1")
 
 
 async def test_parked_error_is_delivered_to_the_next_call():
@@ -566,3 +606,110 @@ async def test_stop_wakes_waiters_and_leaves_no_watchdog_tasks():
     await asyncio.sleep(0)
     leftovers = [t for t in asyncio.all_tasks() if (t.get_name() or "").startswith("turn-deadline")]
     assert leftovers == []
+
+
+# ---------------------------------------------------------------------------
+# Abandoned turns
+# ---------------------------------------------------------------------------
+
+
+async def test_late_frames_from_an_abandoned_turn_do_not_settle_the_next_turn():
+    # The gateway has no cancel frame, so a turn we gave up on keeps running
+    # there and still emits its result. It must not settle the turn that took
+    # over the key in the meantime.
+    bridge = make_bridge(default_timeout=0.05, soft_timeout=0.02)
+    client = bridge._client
+    assert (await bridge.ask("main", "first", "mcp-conv-1")).pending is True
+    await asyncio.sleep(0.1)  # the hard deadline abandons the turn
+    with pytest.raises(GatewayError, match="did not respond within"):
+        await bridge.ask("main", "poll", "mcp-conv-1")
+    assert bridge._turns == {}
+
+    second = asyncio.create_task(
+        bridge.ask("main", "second", "mcp-conv-1", wait_timeout=0.05, hard_timeout=5.0)
+    )
+    await asyncio.sleep(0.01)
+    await finish(client, "the FIRST message's answer")
+
+    status = await second
+    assert status.pending is True  # swallowed, not delivered as the new answer
+    assert status.partial_chars == 0
+    assert KEY in bridge._turns
+
+    # Resynchronised: the new turn's own frames settle it.
+    await finish(client, "the second message's answer")
+    collected = await bridge.ask("main", "poll", "mcp-conv-1")
+    assert collected.reply == "the second message's answer"
+
+
+async def test_only_one_terminal_frame_is_swallowed_per_abandoned_turn():
+    bridge = make_bridge(default_timeout=0.05, soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "first", "mcp-conv-1")
+    await asyncio.sleep(0.1)
+    with pytest.raises(GatewayError):
+        await bridge.ask("main", "poll", "mcp-conv-1")
+
+    assert len(bridge._abandoned[KEY]) == 1
+    await finish(client, "late")
+    assert KEY not in bridge._abandoned
+
+
+async def test_a_disconnect_abandons_in_flight_turns():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await client.drop()
+    assert len(bridge._abandoned[KEY]) == 1
+
+    # The reply the gateway kept working on is not handed to the next turn.
+    client.registered = True
+    with pytest.raises(GatewayError, match="(?i)connection.*lost"):
+        await bridge.ask("main", "poll", "mcp-conv-1")
+    await finish(client, "from the lost turn")
+    assert (await bridge.ask("main", "next", "mcp-conv-1")).pending is True
+
+
+async def test_abandonment_bookkeeping_expires(monkeypatch):
+    # Belt and braces: a frame that can never arrive (its result was emitted
+    # while no connector was attached) must not swallow frames forever.
+    monkeypatch.setattr(gateway_bridge_module, "_ABANDONED_TTL_S", 0.01)
+    bridge = make_bridge(default_timeout=0.05, soft_timeout=0.02)
+    await bridge.ask("main", "hello", "mcp-conv-1")
+    await asyncio.sleep(0.1)
+    assert bridge._abandoned[KEY]
+    bridge._expire_abandoned(time.monotonic())
+    assert bridge._abandoned == {}
+
+
+# ---------------------------------------------------------------------------
+# Lock table
+# ---------------------------------------------------------------------------
+
+
+async def test_idle_locks_are_pruned(monkeypatch):
+    monkeypatch.setattr(gateway_bridge_module, "_SWEEP_INTERVAL_S", 0.02)
+    bridge = make_bridge()
+    client = bridge._client
+    await bridge.start()
+    try:
+        task = asyncio.create_task(bridge.ask("main", "hi", "mcp-conv-1"))
+        await asyncio.sleep(0.01)
+        await finish(client, "done")
+        await task
+        assert bridge._locks  # the key's lock is still there
+        await asyncio.sleep(0.1)
+        assert bridge._locks == {}  # nothing in flight, nothing parked
+    finally:
+        await bridge.stop()
+
+
+async def test_a_lock_in_use_is_never_pruned():
+    bridge = make_bridge(soft_timeout=0.02)
+    client = bridge._client
+    await bridge.ask("main", "hi", "mcp-conv-1")  # leaves a running turn
+    assert bridge._prune_locks() == 0
+    assert KEY in bridge._locks
+
+    await finish(client, "done")  # parked, still not collected
+    assert bridge._prune_locks() == 0

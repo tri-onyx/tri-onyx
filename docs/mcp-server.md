@@ -59,13 +59,21 @@ channel gives a persistent session. Each agent tool maps its `conversation_id`
 onto the channel's `room_id`:
 
 ```
-room_id = "<room_prefix>-<sanitized conversation_id>"      # default: "mcp-default"
+room_id = "<room_prefix>-<client-id hash>-<sanitized conversation_id>"
+                                       # unauthenticated: "mcp-default"
 ```
 
 The id is stripped to `[A-Za-z0-9_-]`, truncated to 64 characters, and prefixed
 (`mcp-` by default), so an MCP conversation can never collide with a Matrix or
 Slack room and cannot be used to smuggle path-like values. Reusing a
 `conversation_id` continues the same agent session; a new one starts fresh.
+
+The authenticated OAuth **client id** is hashed (8 hex characters) into the
+room_id as well, which makes both the gateway session and the bridge's turn key
+per-credential: two tokens passing the same `conversation_id` get separate
+sessions and can never attach to each other's in-flight turns or collect each
+other's replies. The *client* id is used rather than the access token, so the
+hourly token refresh does not silently start a new conversation.
 
 The gateway streams a turn's answer as `agent_text` frames terminated by
 `agent_result`, and the bridge collapses that into one string.
@@ -94,6 +102,21 @@ runs each `(agent, conversation)` key through a small state machine:
   one-turn-per-key correlation. This also means a genuinely new message sent
   mid-turn is dropped in favour of the previous reply — the notice warns the
   calling model about exactly this.
+- A call that collects a **parked** reply gets it prefixed with a notice naming
+  the earlier message the reply answers, and stating that the message this call
+  carried was *not* delivered and should be resent (the key is idle again by
+  then). Parked *errors* carry the same sentence. Nothing else can distinguish a
+  poll from a new question, so saying so is what stops the model from reading an
+  old answer as the answer to its new one.
+- A turn this side gives up on (hard timeout, dropped connection) keeps running
+  **in the gateway** — the connector protocol has no cancel/interrupt frame — so
+  its `agent_text`/`agent_result` frames still arrive, possibly after a new turn
+  has taken the key. Each abandonment is counted per key and exactly one
+  terminal frame is swallowed per count before frames are accepted again (the
+  gateway serves one prompt at a time per session, so the ordering is
+  guaranteed). The counters expire after 15 minutes, which self-heals the one
+  case where the frame can never arrive: a result emitted while no connector was
+  attached.
 - A reply (or error) that lands with nobody waiting is parked and delivered to
   the next call; uncollected results are swept after
   `session.parked_result_ttl_seconds` (default **600 s**). A background turn is
@@ -112,13 +135,21 @@ still-working notice, lower it; every early return logs the elapsed time, so
 the real client timeout can be measured from production logs. Config changes
 are restart-only (`docker compose --profile mcp up -d mcp`), no rebuild.
 
-Every forwarded message carries `trust: {level: verified, sender: mcp-operator}`
-— the operator is the only principal that can be behind a valid token.
+Every forwarded message carries
+`trust: {level: unverified, sender: mcp-operator}`. The token proves the operator
+authorized the *client*, but the content is text an LLM composed with no sender
+identity behind it, so it enters the gateway as untrusted input and is subject to
+the same taint rules as any other unverified channel. Override with
+`session.trust_level` only if you accept that consequence.
 
 ## Security model
 
 The threat is simple to state: the endpoint is public, so anyone can reach
-`/register`, `/authorize` and `/token`. The design makes that harmless.
+`/register`, `/authorize` and `/token`. None of them yields access without the
+operator password, and the state they can touch is bounded and rate-limited (see
+below) — but `/register` is not *free*: it is the one endpoint that writes
+persistent state without a credential, so it is treated as an abuse surface
+rather than as harmless.
 
 ### Only the operator can authorize
 
@@ -129,10 +160,24 @@ interactive page where a single high-entropy secret (`MCP_OPERATOR_PASSWORD`)
 must be entered. No password, no authorization code, ever. The comparison is
 `hmac.compare_digest`; the page never hints at how close an attempt was.
 
-Because registration is unauthenticated, the client store is bounded: at
-`max_registered_clients` (default 10) the oldest registration without live
-tokens is evicted, and tokenless registrations older than `client_ttl_seconds`
-(default 30 days) are pruned. A client that holds live tokens is never evicted.
+Because registration is unauthenticated, `/register` is rate-limited *and* its
+effect on the store is bounded:
+
+- **Per IP:** `max_registrations_per_ip` (default 20) POSTs per
+  `lockout_seconds` window, then 429. The counter is the login limiter's, but a
+  separate instance, so a registration flood cannot slow the operator's own
+  login through the global backoff.
+- **Store cap:** `max_registered_clients` (default 32). At capacity one
+  registration without live tokens is evicted — preferring one that has *no
+  parked authorization*, so a flood cannot knock out the registration the
+  operator is at that moment approving at `/login`. A client holding live tokens
+  is never evicted; if every stored client does, registration fails with
+  `invalid_client_metadata` instead of evicting anything.
+- **TTL:** tokenless registrations older than `client_ttl_seconds` (default 30
+  days) are pruned.
+
+Parked `/authorize` transactions are capped too (64, oldest evicted first), so
+`/authorize` cannot be used to grow memory either.
 
 ### The login is bound to the initiating browser
 
@@ -162,9 +207,13 @@ an `/authorize` round-trip (and hold the matching cookie) per guess.
 - The per-IP table is swept (stale sub-threshold entries dropped) and
   hard-capped, so rotating source addresses cannot grow it without bound.
 
-Client addresses come from `CF-Connecting-IP` / `X-Forwarded-For`, which are
-only as trustworthy as the tunnel — which is exactly why the global backoff
-exists alongside the per-IP rule.
+Client addresses come from `CF-Connecting-IP` alone, which Cloudflare's edge
+overwrites on every request. `X-Forwarded-For` is deliberately ignored: its first
+hop is caller-supplied, so honouring it would hand an attacker a fresh per-IP
+budget on every attempt. The header is still only as trustworthy as the tunnel —
+which is exactly why the global backoff exists alongside the per-IP rule. Set
+`server.trusted_proxy_headers: false` when the server is *not* behind such a
+proxy; the socket peer address is then the only source used.
 
 ### Tokens
 

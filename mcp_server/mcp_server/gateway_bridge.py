@@ -8,7 +8,9 @@ request/response, so this module collapses one gateway turn into one string.
 Correlation is by ``(agent_name, room_id)`` — the gateway echoes the opaque
 channel object back on every frame, and keys its own sessions by
 ``agent_name:hash(channel)``, so a stable room_id gives a persistent agent
-session for a conversation.
+session for a conversation. The authenticated client's identity is folded into
+the room_id (see :func:`make_room_id`), which makes the key per-credential
+without needing a key component the gateway does not echo back.
 
 A turn can outlive the tool call that started it: the first message to an agent
 boots a container and can take minutes, while the MCP client's own tool-call
@@ -18,6 +20,12 @@ background, later calls on the same key attach to it (their message is a poll,
 not a new prompt), and a reply that lands with nobody waiting is parked until
 the next call collects it or a TTL expires it.
 
+A turn this side gives up on (hard deadline, dropped connection) keeps running
+*in the gateway* — the connector protocol has no cancel/interrupt frame — so its
+``agent_text``/``agent_result`` frames still arrive, possibly after a new turn
+has taken the key. Each abandoned turn is therefore counted and exactly one
+terminal frame per abandonment is swallowed before frames are accepted again.
+
 The persistent connection, registration and reconnect/backoff all come from
 :class:`connector.gateway_client.GatewayClient`; nothing about the wire protocol
 is re-implemented here.
@@ -26,6 +34,7 @@ is re-implemented here.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import re
 import time
@@ -50,6 +59,18 @@ PLATFORM = "mcp"
 
 _ROOM_ID_SAFE = re.compile(r"[^A-Za-z0-9_-]+")
 _MAX_ROOM_ID_LEN = 64
+
+#: Hex characters of the client-id digest folded into a room id.
+_PRINCIPAL_HASH_LEN = 8
+
+#: How much of the prompt a turn remembers, for labelling a parked reply.
+_MAX_PROMPT_ECHO = 120
+
+#: How long an abandoned turn's terminal frame is still expected. It bounds the
+#: bookkeeping, and it also self-heals the one case where the frame can never
+#: arrive: a turn abandoned by a disconnect whose result was emitted while no
+#: connector was attached, so nothing is left to swallow.
+_ABANDONED_TTL_S = 900.0
 
 #: Grace for a reconnect blip before failing a call. Reconnect backoff starts
 #: at 1 s, so 10 s covers real blips without eating most of the soft budget.
@@ -76,16 +97,29 @@ class GatewayError(RuntimeError):
     """The gateway could not complete the request."""
 
 
-def make_room_id(prefix: str, conversation_id: str | None) -> str:
+def make_room_id(
+    prefix: str, conversation_id: str | None, client_id: str | None = None
+) -> str:
     """Namespace and sanitize a caller-supplied conversation id.
 
     The result is used as the channel ``room_id``, which the gateway hashes into
     a session key — so it must be stable, bounded, and impossible to confuse
     with another connector's rooms.
+
+    *client_id* is the OAuth client the call was authenticated as. Folding it in
+    makes both the turn key and the gateway session per-credential: two tokens
+    passing the same ``conversation_id`` get separate sessions and can never
+    attach to each other's in-flight turns. It is hashed rather than echoed (the
+    room id stays bounded and carries no credential material), and it is the
+    *client* id rather than the access token so an hourly token refresh does not
+    silently start a new conversation.
     """
     raw = (conversation_id or "default").strip() or "default"
     cleaned = _ROOM_ID_SAFE.sub("-", raw).strip("-") or "default"
     cleaned = cleaned[:_MAX_ROOM_ID_LEN]
+    if client_id:
+        digest = hashlib.sha256(client_id.encode("utf-8")).hexdigest()
+        return f"{prefix}-{digest[:_PRINCIPAL_HASH_LEN]}-{cleaned}"
     return f"{prefix}-{cleaned}"
 
 
@@ -95,6 +129,11 @@ class TurnStatus:
 
     ``elapsed`` is the age of the *turn*, not of this call's wait — it answers
     "how long has the agent been at this", which is what the caller needs.
+
+    ``stale`` marks a reply collected from a *parked* turn: it answers ``prompt``
+    (the message that started that turn), not the message this call carried —
+    which was not delivered. The caller must say so rather than pass the reply
+    off as an answer to the new message.
     """
 
     pending: bool
@@ -103,6 +142,8 @@ class TurnStatus:
     activity: str = ""
     checks: int = 0
     partial_chars: int = 0
+    stale: bool = False
+    prompt: str = ""
 
 
 @dataclass(slots=True)
@@ -114,6 +155,9 @@ class _Turn:
     room_id: str
     started_at: float
     hard_timeout: float
+    #: The (truncated) message that started this turn, so a parked reply can say
+    #: which question it answers.
+    message: str = ""
     texts: list[str] = field(default_factory=list)
     phase: str = "sent"
     tool_name: str = ""
@@ -161,7 +205,9 @@ class _Turn:
         if tool:
             self.tool_name = tool
 
-    def status(self, *, pending: bool, reply: str = "") -> TurnStatus:
+    def status(
+        self, *, pending: bool, reply: str = "", stale: bool = False
+    ) -> TurnStatus:
         return TurnStatus(
             pending=pending,
             reply=reply,
@@ -169,6 +215,8 @@ class _Turn:
             activity=self.activity,
             checks=self.checks,
             partial_chars=self.partial_chars,
+            stale=stale,
+            prompt=self.message if stale else "",
         )
 
 
@@ -182,7 +230,7 @@ class GatewayBridge:
         gateway_token: str,
         connector_id: str = "mcp",
         sender: str = "mcp-operator",
-        trust_level: str = "verified",
+        trust_level: str = "unverified",
         default_timeout: float = 300.0,
         soft_timeout: float = 50.0,
         parked_ttl: float = 600.0,
@@ -200,6 +248,9 @@ class GatewayBridge:
         self._parked_ttl = parked_ttl
         self._turns: dict[tuple[str, str], _Turn] = {}
         self._locks: dict[tuple[str, str], asyncio.Lock] = {}
+        #: key -> monotonic timestamp per turn abandoned locally while still
+        #: running upstream. One terminal frame is swallowed per entry.
+        self._abandoned: dict[tuple[str, str], list[float]] = {}
         self._task: asyncio.Task[None] | None = None
         self._sweeper: asyncio.Task[None] | None = None
         factory = client_factory or GatewayClient
@@ -265,7 +316,9 @@ class GatewayBridge:
         per session, so forwarding a poll would enqueue a second prompt and
         produce a second ``agent_result`` for the same key. A call that finds a
         parked (finished, uncollected) turn returns its reply immediately and
-        likewise drops its own message.
+        likewise drops its own message — but the returned status is flagged
+        ``stale`` and carries the prompt that reply answers, so the caller can
+        tell the model the new message was never delivered.
         """
         wait_timeout = self._soft_timeout if wait_timeout is None else wait_timeout
         hard_timeout = self._default_timeout if hard_timeout is None else hard_timeout
@@ -276,9 +329,10 @@ class GatewayBridge:
             self._expire_parked(time.monotonic())
             turn = self._turns.get(key)
             if turn is not None and turn.future.done():
-                # Parked pickup: this call's message is dropped by contract.
+                # Parked pickup: this call's message is dropped by contract, so
+                # the outcome is labelled with the message it *does* answer.
                 self._drop(key, turn)
-                return self._settled(turn)
+                return self._settled(turn, stale=True)
             if turn is None:
                 if not self._client.is_registered:
                     # Give a reconnect a short grace period rather than failing
@@ -291,7 +345,9 @@ class GatewayBridge:
                 # Register before sending: if the socket dies mid-send, the
                 # receive loop's _on_disconnect fails registered turns, so the
                 # caller is woken instead of waiting on a frame that never comes.
-                turn = self._start_turn(key, agent_name, room_id, hard_timeout)
+                turn = self._start_turn(
+                    key, agent_name, room_id, hard_timeout, message
+                )
                 try:
                     await self._client.send_message(
                         InboundMessage(
@@ -355,6 +411,7 @@ class GatewayBridge:
         agent_name: str,
         room_id: str,
         hard_timeout: float,
+        message: str = "",
     ) -> _Turn:
         loop = asyncio.get_running_loop()
         turn = _Turn(
@@ -363,6 +420,7 @@ class GatewayBridge:
             room_id=room_id,
             started_at=time.monotonic(),
             hard_timeout=hard_timeout,
+            message=message.strip()[:_MAX_PROMPT_ECHO],
         )
         self._turns[key] = turn
         turn.watchdog = asyncio.create_task(
@@ -382,15 +440,22 @@ class GatewayBridge:
             # "Future exception was never retrieved".
             turn.future.exception()
 
-    def _settled(self, turn: _Turn) -> TurnStatus:
+    def _settled(self, turn: _Turn, *, stale: bool = False) -> TurnStatus:
         if turn.future.cancelled():
             raise GatewayError("The MCP server is shutting down.")
         exc = turn.future.exception()
         if exc is not None:
             # A fresh instance per caller: the same parked error may be
             # delivered to several waiters.
-            raise GatewayError(str(exc)) from None
-        return turn.status(pending=False, reply=turn.future.result())
+            detail = str(exc)
+            if stale:
+                detail += (
+                    " (That is the outcome of the earlier message "
+                    f'"{turn.message}" — the message you just sent was not '
+                    "delivered; send it again.)"
+                )
+            raise GatewayError(detail) from None
+        return turn.status(pending=False, reply=turn.future.result(), stale=stale)
 
     def _expire_parked(self, now: float) -> int:
         dropped = 0
@@ -404,17 +469,83 @@ class GatewayBridge:
                 dropped += 1
         return dropped
 
+    def _expire_abandoned(self, now: float) -> None:
+        for key, stamps in list(self._abandoned.items()):
+            fresh = [at for at in stamps if now - at <= _ABANDONED_TTL_S]
+            if fresh:
+                self._abandoned[key] = fresh
+            else:
+                self._abandoned.pop(key, None)
+
+    def _prune_locks(self) -> int:
+        """Drop per-key locks that nothing can still be using.
+
+        A lock is only reachable through ``ask``, which takes it immediately
+        after ``setdefault`` with no await in between — so a lock that is not
+        held and whose key has neither a turn nor an outstanding abandonment is
+        garbage.
+        """
+        dropped = 0
+        for key, lock in list(self._locks.items()):
+            if lock.locked() or key in self._turns or key in self._abandoned:
+                continue
+            del self._locks[key]
+            dropped += 1
+        return dropped
+
     async def _sweep_loop(self) -> None:
         while True:
             await asyncio.sleep(_SWEEP_INTERVAL_S)
-            dropped = self._expire_parked(time.monotonic())
-            if dropped:
+            now = time.monotonic()
+            dropped = self._expire_parked(now)
+            self._expire_abandoned(now)
+            locks = self._prune_locks()
+            if dropped or locks:
                 logger.info(
-                    "Swept %d uncollected parked result(s); %d turn(s), %d lock(s) live",
+                    "Swept %d uncollected parked result(s) and %d idle lock(s); "
+                    "%d turn(s), %d lock(s) live",
                     dropped,
+                    locks,
                     len(self._turns),
                     len(self._locks),
                 )
+
+    def _abandon(self, turn: _Turn) -> None:
+        """Note that a locally failed turn may still be running upstream.
+
+        The connector protocol has no cancel/interrupt frame (see
+        ``connector/connector/protocol.py``), so a turn we stop waiting for keeps
+        running in the gateway and will still emit its ``agent_text`` and
+        terminal ``agent_result``/``agent_error`` frames. Without this counter
+        those frames would settle whichever turn holds the key next — one caller
+        receiving another caller's answer.
+        """
+        self._abandoned.setdefault((turn.agent_name, turn.room_id), []).append(
+            time.monotonic()
+        )
+
+    def _swallow_abandoned(self, key: tuple[str, str], msg: OutboundMessage) -> bool:
+        """True if *msg* belongs to an abandoned turn and must be ignored.
+
+        The gateway serves one prompt at a time per session, so the abandoned
+        turn's frames all precede the next turn's: consuming everything up to and
+        including one terminal frame per abandonment is enough to resynchronise.
+        """
+        stamps = self._abandoned.get(key)
+        if not stamps:
+            return False
+        if isinstance(msg, (AgentResultMessage, AgentErrorMessage)):
+            stamps.pop(0)
+            if not stamps:
+                self._abandoned.pop(key, None)
+            logger.info(
+                "   agent=%s room=%s discarded the terminal frame of an abandoned "
+                "turn (%d still outstanding)",
+                key[0],
+                key[1],
+                len(stamps),
+            )
+        return True
 
     async def _hard_deadline(self, turn: _Turn) -> None:
         await asyncio.sleep(turn.hard_timeout)
@@ -429,6 +560,7 @@ class GatewayBridge:
         turn.fail(
             f"Agent '{turn.agent_name}' did not respond within {turn.hard_timeout:.0f}s."
         )
+        self._abandon(turn)
 
     # ------------------------------------------------------------------
     # Gateway frames
@@ -437,6 +569,8 @@ class GatewayBridge:
     async def _on_outbound(self, msg: OutboundMessage) -> None:
         room_id = (msg.channel or {}).get("room_id", "")
         key = (msg.agent_name, room_id)
+        if self._swallow_abandoned(key, msg):
+            return
         turn = self._turns.get(key)
 
         if isinstance(msg, AgentStepMessage):
@@ -486,3 +620,6 @@ class GatewayBridge:
         )
         for turn in pending:
             turn.fail("Connection to the TriOnyx gateway was lost.")
+            # The gateway kept running them; after the reconnect their frames
+            # arrive on a key that may already hold a new turn.
+            self._abandon(turn)

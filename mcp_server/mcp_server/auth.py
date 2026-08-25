@@ -101,6 +101,11 @@ class _CompletedLogin:
 #: How long a finished login transaction stays replayable.
 _COMPLETED_LOGIN_TTL = 60.0
 
+#: Ceiling on parked /authorize transactions. Any registered client can park
+#: one, so the table is bounded; the oldest goes first (it is the closest to its
+#: TTL anyway, and the operator is working on the newest).
+_MAX_PENDING = 64
+
 
 @dataclass(slots=True)
 class _IpState:
@@ -298,6 +303,7 @@ class TriOnyxAuthProvider(
         stored = self._store.put_client(
             client_info.client_id,
             client_info.model_dump(mode="json", exclude_none=True),
+            protected=self._pending_client_ids(),
         )
         if not stored:
             logger.warning(
@@ -351,6 +357,13 @@ class TriOnyxAuthProvider(
             )
 
         self._prune_pending()
+        while len(self._pending) >= _MAX_PENDING:
+            oldest = min(self._pending, key=lambda t: self._pending[t].created_at)
+            self._pending.pop(oldest, None)
+            logger.warning(
+                "Pending-authorization table full — evicted the oldest parked "
+                "transaction"
+            )
         txn = secrets.token_urlsafe(_TXN_BYTES)
         self._pending[txn] = _PendingAuthorization(
             client_id=client.client_id,
@@ -386,6 +399,11 @@ class TriOnyxAuthProvider(
             "redirect_uri": pending.redirect_uri,
         }
 
+    def _pending_client_ids(self) -> set[str]:
+        """Clients with a parked authorization — not eviction fodder."""
+        self._prune_pending()
+        return {p.client_id for p in self._pending.values()}
+
     def has_pending(self, txn: str) -> bool:
         self._prune_pending()
         return txn in self._pending
@@ -411,17 +429,29 @@ class TriOnyxAuthProvider(
             # same single-use code, nothing new is minted — but only for a
             # requester that still presents the correct password.
             completed = self._completed.get(txn)
-            if completed is not None and hmac.compare_digest(
-                self._auth.operator_password.encode("utf-8"),
-                password.encode("utf-8"),
-            ):
-                logger.info(
-                    "Replaying completed login redirect for duplicate submit "
-                    "from %s (txn=%s…)",
+            if completed is not None:
+                if hmac.compare_digest(
+                    self._auth.operator_password.encode("utf-8"),
+                    password.encode("utf-8"),
+                ):
+                    logger.info(
+                        "Replaying completed login redirect for duplicate submit "
+                        "from %s (txn=%s…)",
+                        client_ip,
+                        txn[:8],
+                    )
+                    return completed.redirect_url
+                # A password was evaluated here, so this attempt has to cost the
+                # same as any other wrong guess — otherwise the replay window is
+                # a rate-limit-free oracle for a known-good txn. The raised error
+                # stays LoginExpired: which precondition failed is not disclosed.
+                self.limiter.record_failure(client_ip)
+                logger.warning(
+                    "Wrong password on a completed-login replay from %s "
+                    "(%d failure(s) recorded)",
                     client_ip,
-                    txn[:8],
+                    self.limiter.failures(client_ip),
                 )
-                return completed.redirect_url
             # A valid pending transaction is a precondition for evaluating the
             # password at all: without one there is nothing to authorize, and
             # requiring it means a password guess costs an /authorize round-trip.

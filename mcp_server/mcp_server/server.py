@@ -13,6 +13,7 @@ import re
 from typing import Annotated, Any
 from urllib.parse import parse_qs, urlsplit
 
+from mcp.server.auth.middleware.auth_context import get_access_token
 from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions
 from mcp.server.mcpserver import MCPServer
 from mcp.server.transport_security import TransportSecuritySettings
@@ -25,6 +26,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 from mcp_server.auth import (
     LoginExpired,
     LoginLocked,
+    LoginRateLimiter,
     LoginRejected,
     TriOnyxAuthProvider,
 )
@@ -56,6 +58,24 @@ arrives; the turn is abandoned after {hard:.0f}s total. While it runs, your
 instructions until the reply arrives, and don't switch `conversation_id` (that
 starts a separate session). Once you have the reply, stop calling: the next
 call starts a new turn."""
+
+#: Prefixed to a reply collected from a *parked* turn. That reply answers an
+#: earlier message; the message this call carried was never delivered, and
+#: saying so is the only thing that stops the model from reading the reply as an
+#: answer to the question it just asked.
+_STALE_REPLY_NOTICE = """\
+[TriOnyx: this is the reply to your EARLIER message, not to the one you just sent]
+
+(Reply to your earlier message: "{prompt}")
+
+Your new message was NOT delivered: a finished reply was waiting on this
+conversation, and one call can only collect one. The conversation is idle again,
+so if what you just sent was a real instruction rather than a poll, send it
+again now.
+
+--- the earlier reply follows ---
+
+"""
 
 
 def _progress_phrase(status: TurnStatus) -> str:
@@ -125,20 +145,23 @@ _SECURITY_HEADERS = {
 }
 
 
-def client_ip(request: Request) -> str:
+def client_ip(request: Request, *, trust_proxy_headers: bool = True) -> str:
     """Best-effort client address.
 
-    Behind the Cloudflare tunnel the real address arrives in ``CF-Connecting-IP``
-    (set by Cloudflare's edge) or ``X-Forwarded-For`` (appended by cloudflared).
-    Both are only as trustworthy as the tunnel — which is why the global backoff
-    exists alongside the per-IP lockout.
+    Behind the Cloudflare tunnel the real address arrives in ``CF-Connecting-IP``,
+    set by Cloudflare's edge and overwritten there on every request — so with
+    ``trust_proxy_headers`` (the deployed topology) that one header is used and
+    nothing else. ``X-Forwarded-For`` is deliberately *not* consulted: its first
+    hop is caller-supplied, which would let one attacker spend the whole per-IP
+    budget under a different address on every attempt.
+
+    With ``trust_proxy_headers`` false (direct exposure, or a proxy that does not
+    rewrite the header) the socket peer is the only trustworthy source.
     """
-    header = request.headers.get("cf-connecting-ip")
-    if header:
-        return header.strip()
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    if trust_proxy_headers:
+        header = request.headers.get("cf-connecting-ip")
+        if header:
+            return header.strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -286,12 +309,25 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
             # (`/library:action`) pass through to the agent and stay allowed.
             # Rejected here, before the bridge, so a rejected message never
             # consumes a parked result.
+            #
+            # Defense in depth only — the gateway decides what a system command
+            # is. Source of truth: TriOnyx.SystemCommand.parse/1 in
+            # lib/tri_onyx/system_command.ex; this guard is deliberately wider
+            # (every unknown "/word") so it cannot fall behind that list.
             raise ValueError(
                 "Messages must not start with '/': gateway system commands are "
                 "not available through this connector."
             )
 
-        room_id = make_room_id(config.session.room_prefix, conversation_id)
+        # The authenticated client scopes the conversation: turn keys (and the
+        # gateway sessions behind them) are per-credential, so two tokens cannot
+        # attach to each other's in-flight turns or collect each other's replies.
+        token = get_access_token()
+        room_id = make_room_id(
+            config.session.room_prefix,
+            conversation_id,
+            token.client_id if token is not None else None,
+        )
         logger.info(
             "tool agent=%s room=%s message=%.120s%s",
             agent_name,
@@ -320,11 +356,14 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
                 soft=config.session.soft_timeout_seconds,
                 hard=config.session.timeout_seconds,
             )
-        if not status.reply:
-            return (
-                f"Agent '{agent_name}' finished without producing any text output."
-            )
-        return status.reply
+        reply = status.reply or (
+            f"Agent '{agent_name}' finished without producing any text output."
+        )
+        if status.stale:
+            # Collected from a parked turn: label whose question it answers and
+            # tell the caller its own message never reached the agent.
+            return _STALE_REPLY_NOTICE.format(prompt=status.prompt or "…") + reply
+        return reply
 
     def register_agent_tool(entry: AgentEntry) -> None:
         purpose = (entry.description or f"The TriOnyx agent '{entry.name}'").rstrip(".")
@@ -410,7 +449,13 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
 
     def _txn_cookie_ok(request: Request, txn: str) -> bool:
         cookie = request.cookies.get(TXN_COOKIE, "")
-        return bool(txn) and bool(cookie) and hmac.compare_digest(cookie, txn)
+        # Compared as bytes: hmac.compare_digest refuses non-ASCII str operands
+        # with a TypeError, and the txn is attacker-supplied form/query data.
+        return (
+            bool(txn)
+            and bool(cookie)
+            and hmac.compare_digest(cookie.encode("utf-8"), txn.encode("utf-8"))
+        )
 
     @mcp.custom_route("/login", methods=["GET"])
     async def login_form(request: Request) -> Response:
@@ -431,7 +476,7 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
         form = await request.form()
         txn = str(form.get("txn") or "")
         password = str(form.get("password") or "")
-        ip = client_ip(request)
+        ip = client_ip(request, trust_proxy_headers=config.trusted_proxy_headers)
         logger.info(
             "POST /login from %s txn=%s… ua=%r referer=%r",
             ip,
@@ -510,6 +555,60 @@ def build_server(config: McpConfig, provider: TriOnyxAuthProvider, bridge: Gatew
     return mcp
 
 
+class RegisterRateLimitMiddleware:
+    """Per-IP rate limit on the unauthenticated ``/register`` endpoint.
+
+    Dynamic Client Registration has to stay open (the MCP spec requires it), but
+    it is the one endpoint that writes to persistent state without a credential:
+    a flood churns the bounded client store and, before the eviction rules were
+    tightened, could push out the operator's own pending registration. The
+    counting is the login limiter's — every attempt, successful or not, spends
+    one — so ``max_registrations_per_ip`` attempts are allowed per
+    ``lockout_seconds`` window and the rest get a 429.
+    """
+
+    def __init__(
+        self,
+        app: Any,
+        *,
+        max_per_ip: int,
+        lockout_seconds: float,
+        trust_proxy_headers: bool = True,
+    ) -> None:
+        self.app = app
+        self.trust_proxy_headers = trust_proxy_headers
+        self.limiter = LoginRateLimiter(
+            max_failures=max_per_ip, lockout_seconds=float(lockout_seconds)
+        )
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if (
+            scope["type"] != "http"
+            or scope["method"] != "POST"
+            or scope["path"].rstrip("/") != "/register"
+        ):
+            await self.app(scope, receive, send)
+            return
+
+        ip = client_ip(
+            Request(scope), trust_proxy_headers=self.trust_proxy_headers
+        )
+        if self.limiter.locked_for(ip) > 0:
+            logger.warning("Rate-limited client registration from %s", ip)
+            response = JSONResponse(
+                {
+                    "error": "invalid_client_metadata",
+                    "error_description": "too many registration attempts — try again later",
+                },
+                status_code=429,
+                headers={"Cache-Control": "no-store"},
+            )
+            await response(scope, receive, send)
+            return
+        self.limiter.record_failure(ip)
+        await self.app(scope, receive, send)
+
+
 class TxnCookieMiddleware:
     """Sets the txn-binding cookie on the /authorize -> /login redirect.
 
@@ -577,6 +676,12 @@ def build_app(config: McpConfig, mcp: MCPServer) -> Starlette:
         TxnCookieMiddleware,
         secure=config.public_url.startswith("https://"),
         max_age=config.auth.pending_authorization_ttl_seconds,
+    )
+    app.add_middleware(
+        RegisterRateLimitMiddleware,
+        max_per_ip=config.auth.max_registrations_per_ip,
+        lockout_seconds=config.auth.lockout_seconds,
+        trust_proxy_headers=config.trusted_proxy_headers,
     )
     return app
 

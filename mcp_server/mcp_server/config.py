@@ -71,7 +71,9 @@ class AuthConfig:
     lockout_seconds: int = 900
     global_failure_threshold: int = 20
     global_backoff_max_seconds: float = 30.0
-    max_registered_clients: int = 10
+    max_registered_clients: int = 32
+    #: Registrations one address may make per ``lockout_seconds`` window.
+    max_registrations_per_ip: int = 20
     client_ttl_seconds: int = 30 * 24 * 3600
     data_dir: str = "/data"
 
@@ -85,7 +87,10 @@ class SessionConfig:
     """How agent conversations are mapped onto gateway sessions."""
 
     sender: str = "mcp-operator"
-    trust_level: str = "verified"
+    #: Messages arrive as LLM-composed text with no sender identity behind them
+    #: (the OAuth token proves the operator authorized the *client*, not who
+    #: typed what), so they enter the gateway as untrusted content.
+    trust_level: str = "unverified"
     room_prefix: str = "mcp"
     #: Hard ceiling for one background agent turn.
     timeout_seconds: float = 300.0
@@ -109,6 +114,10 @@ class McpConfig:
     server_title: str = "TriOnyx"
     instructions: str = ""
     dns_rebinding_protection: bool = True
+    #: True when a proxy that rewrites ``CF-Connecting-IP`` sits in front of the
+    #: server (the Cloudflare-tunnel deployment). False makes rate limiting use
+    #: the socket peer instead of any header.
+    trusted_proxy_headers: bool = True
     extra_allowed_hosts: tuple[str, ...] = ()
     gateway_url: str = "ws://gateway:4000/connectors/ws"
     gateway_token: str = ""
@@ -253,7 +262,8 @@ def parse_config(raw: dict[str, Any], *, path: str = "<memory>") -> McpConfig:
         global_backoff_max_seconds=float(
             auth_raw.get("global_backoff_max_seconds", 30.0)
         ),
-        max_registered_clients=int(auth_raw.get("max_registered_clients", 10)),
+        max_registered_clients=int(auth_raw.get("max_registered_clients", 32)),
+        max_registrations_per_ip=int(auth_raw.get("max_registrations_per_ip", 20)),
         client_ttl_seconds=int(auth_raw.get("client_ttl_seconds", 30 * 24 * 3600)),
         data_dir=str(auth_raw.get("data_dir", "/data")),
     )
@@ -262,7 +272,7 @@ def parse_config(raw: dict[str, Any], *, path: str = "<memory>") -> McpConfig:
 
     session = SessionConfig(
         sender=str(session_raw.get("sender", "mcp-operator")),
-        trust_level=str(session_raw.get("trust_level", "verified")),
+        trust_level=str(session_raw.get("trust_level", "unverified")),
         room_prefix=str(session_raw.get("room_prefix", "mcp")),
         timeout_seconds=float(session_raw.get("timeout_seconds", 300.0)),
         soft_timeout_seconds=float(session_raw.get("soft_timeout_seconds", 50.0)),
@@ -297,6 +307,7 @@ def parse_config(raw: dict[str, Any], *, path: str = "<memory>") -> McpConfig:
         dns_rebinding_protection=bool(
             server_raw.get("dns_rebinding_protection", True)
         ),
+        trusted_proxy_headers=bool(server_raw.get("trusted_proxy_headers", True)),
         extra_allowed_hosts=tuple(
             str(h) for h in (server_raw.get("allowed_hosts") or [])
         ),

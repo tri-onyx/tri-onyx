@@ -21,9 +21,11 @@
 2. ✅ **[HIGH] Gateway system commands blocked** — agent tools reject messages
    whose first token starts with `/` unless it is `/library:action` skill
    syntax, so `/restart <off-allowlist agent>` cannot be smuggled through.
-3. ✅ **[MEDIUM] DCR store bounded** — `max_registered_clients` (default 10;
-   oldest tokenless registration evicted, a client with live tokens is never
-   evicted) + `client_ttl_seconds` prune (default 30 d).
+3. ✅ **[MEDIUM] DCR store bounded** — `max_registered_clients` (default 32;
+   oldest tokenless registration evicted, preferring one with no parked
+   authorization; a client with live tokens is never evicted) +
+   `client_ttl_seconds` prune (default 30 d), plus a per-IP rate limit on
+   `/register` (`max_registrations_per_ip`, default 20). See 2026-08-25 below.
 4. ✅ **[MEDIUM] Login rate limit is real** — the password is only evaluated
    against a live pending txn, and the backoff section runs under a
    `Semaphore(4)` so the delay bounds throughput.
@@ -51,6 +53,40 @@
     set, `secrets/mcp-config.yaml` filled, Cloudflare Access (One-time PIN,
     operator email) on `/login` + `/authorize` only, connector added in
     claude.ai, `news`-agent round-trip verified end-to-end.
+
+## Completed (2026-08-25 review round)
+
+14. ✅ **[HIGH] Abandoned turns can no longer cross-talk** — the gateway has no
+    cancel/interrupt frame, so a turn abandoned by the hard deadline or a
+    disconnect kept running there and its late `agent_result` settled the *next*
+    turn on the same key. Abandonments are now counted per key and one terminal
+    frame is swallowed per count (counters expire after 15 min).
+15. ✅ **[HIGH] Turns isolated per credential** — the authenticated client id is
+    hashed into the `room_id`, so two tokens sharing a `conversation_id` cannot
+    attach to each other's turns. (Folded into the room id rather than added as a
+    third key component: gateway frames only echo `agent_name` + `room_id`.)
+16. ✅ **[MEDIUM] Parked replies are labelled** — a parked reply/error now names
+    the message it answers and states that the message the collecting call
+    carried was not delivered and should be resent.
+17. ✅ **[MEDIUM] `/register` flood mitigated** — per-IP rate limit
+    (`RegisterRateLimitMiddleware`, its own limiter instance so it cannot slow
+    the operator's login), eviction prefers clients with no parked
+    authorization, cap raised 10 → 32.
+18. ✅ **[MEDIUM] `_pending` authorizations capped** (64, oldest first) and
+    expired entries pruned on insert.
+19. ✅ **[MEDIUM] `trust.level` is `unverified`** — messages are LLM-composed
+    text with no sender identity; `verified` overstated it. Check that the live
+    `secrets/mcp-config.yaml` does not pin `session.trust_level: verified`.
+20. ✅ **[MEDIUM] Completed-login replay is rate-limited** — a wrong password on
+    the 60 s replay window now records a limiter failure (it was a free oracle
+    for a known-good txn).
+21. ✅ **[LOW] `client_ip` no longer trusts `X-Forwarded-For`** — CF only, and
+    only when `server.trusted_proxy_headers` (default true); otherwise the
+    socket peer.
+22. ✅ **[LOW] Non-ASCII `txn` no longer 500s** — `hmac.compare_digest` is given
+    bytes.
+23. ✅ **[LOW] Lock table pruned** — `_locks` entries with no turn, no
+    abandonment and no holder are swept.
 
 ## Lower priority (can follow first exposure)
 

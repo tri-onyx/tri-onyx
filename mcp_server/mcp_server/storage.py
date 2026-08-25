@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import time
+from collections.abc import Collection
 from pathlib import Path
 from typing import Any
 
@@ -124,16 +125,24 @@ class OAuthStore:
         record = self._clients.get(client_id)
         return dict(record) if record is not None else None
 
-    def put_client(self, client_id: str, record: dict[str, Any]) -> bool:
+    def put_client(
+        self,
+        client_id: str,
+        record: dict[str, Any],
+        *,
+        protected: Collection[str] = (),
+    ) -> bool:
         """Store a client registration, bounded by ``max_clients``.
 
         Registration is unauthenticated, so the store must not grow without
         limit: at capacity the oldest *tokenless* registration is evicted to
-        make room. Returns False (nothing stored) only in the pathological case
-        where every stored client holds live tokens.
+        make room. Clients in *protected* (those with an authorization the
+        operator may be in the middle of approving) are evicted only if there is
+        nothing else to take. Returns False (nothing stored) only in the
+        pathological case where every stored client holds live tokens.
         """
         if client_id not in self._clients and len(self._clients) >= self._max_clients:
-            if not self._evict_one_client():
+            if not self._evict_one_client(protected):
                 return False
         # RFC 7591 field; anchor for the TTL prune if the SDK didn't set it.
         record.setdefault("client_id_issued_at", int(time.time()))
@@ -158,12 +167,16 @@ class OAuthStore:
         except (TypeError, ValueError):
             return 0.0
 
-    def _evict_one_client(self) -> bool:
+    def _evict_one_client(self, protected: Collection[str] = ()) -> bool:
         live = self._client_ids_with_tokens()
         candidates = [cid for cid in self._clients if cid not in live]
         if not candidates:
             return False
-        oldest = min(candidates, key=lambda cid: self._issued_at(self._clients[cid]))
+        # A registration with a parked authorization is one operator password
+        # away from holding live tokens, so a /register flood must not be able
+        # to evict it while any idle registration is still available.
+        preferred = [cid for cid in candidates if cid not in protected] or candidates
+        oldest = min(preferred, key=lambda cid: self._issued_at(self._clients[cid]))
         self._clients.pop(oldest, None)
         logger.info("Evicted tokenless OAuth client %s (store at capacity)", oldest)
         return True
