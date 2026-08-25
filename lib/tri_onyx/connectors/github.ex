@@ -3,11 +3,13 @@ defmodule TriOnyx.Connectors.GitHub do
   Gateway-side executor for the GitHub tool.
 
   Holds per-repository fine-grained tokens and executes `gh` / `git`
-  commands on behalf of agents. The agent works in a host-side clone
-  under `{workspace_dir}/repos/{owner}/{repo}` (visible to it through
-  its FUSE mount); only the operations that need credentials — the gh
-  CLI and remote git verbs — pass through here. The token never enters
-  the agent container.
+  commands on behalf of agents. The clone is gateway-owned, lives at
+  `{workspace_dir}/data/github/{owner}/{repo}`, and is bind-mounted rw
+  into the agent container at `/github/{owner}/{repo}` (see
+  `TriOnyx.Sandbox` — the mount set is the ACL, there is no FUSE layer).
+  The agent runs local git in that mount itself; only the operations that
+  need credentials — the gh CLI and remote git verbs — pass through here.
+  The token never enters the agent container.
 
   Policy classification of commands is owned by
   `TriOnyx.GitHub.CommandPolicy`; this module assumes the caller has
@@ -32,8 +34,14 @@ defmodule TriOnyx.Connectors.GitHub do
 
   # Git credentials are supplied via an inline credential helper reading
   # GH_TOKEN from the environment, so the token never appears in argv
-  # (visible in /proc) or in the clone's git config.
+  # (visible in /proc) or in the clone's git config. The helper is bound to
+  # `credential.https://github.com.helper`, never to the global
+  # `credential.helper`: a global helper answers for *any* host git is sent
+  # to, which would hand the repo PAT to an attacker-supplied remote.
   @credential_helper "!f() { echo username=x-access-token; echo password=$GH_TOKEN; }; f"
+
+  # Only this origin ever receives credentials.
+  @credential_scope "https://github.com"
 
   @doc """
   Executes a gh or git command for `repo` ("owner/repo").
@@ -101,9 +109,11 @@ defmodule TriOnyx.Connectors.GitHub do
   @doc """
   Ensures the host-side clone for `repo` exists, cloning it if not.
 
-  The clone is configured with `core.symlinks=false` (the FUSE driver
-  denies symlinks unconditionally, so git must materialize them as plain
-  files) and the bot identity for commits made by the gateway.
+  The clone is configured with `core.symlinks=false` — it is bind-mounted
+  into agent containers, and a checked-out symlink is resolved on the
+  container side, so materializing them as plain files keeps repo content
+  from pointing outside the mount — plus the bot identity for commits made
+  by the gateway.
   """
   @spec ensure_clone(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def ensure_clone(repo, token) do
@@ -178,6 +188,29 @@ defmodule TriOnyx.Connectors.GitHub do
     end
   end
 
+  @doc """
+  Returns the `git -c` arguments that bind the token-reading credential
+  helper to `#{@credential_scope}` only.
+
+  Exposed for tests: a helper configured globally (`credential.helper`)
+  would answer for every host, so a redirect or an attacker-chosen remote
+  could collect the repo PAT.
+  """
+  @spec credential_args() :: [String.t()]
+  def credential_args do
+    [
+      # Empty value resets the inherited (multi-valued) helper list, so no
+      # helper from the gateway's system/global config can answer.
+      "-c",
+      "credential.helper=",
+      "-c",
+      "credential.#{@credential_scope}.helper=#{@credential_helper}",
+      # Match on the host alone, not on the repo path.
+      "-c",
+      "credential.#{@credential_scope}.useHttpPath=false"
+    ]
+  end
+
   # --- Private ---
 
   defp clone(repo, token, dir) do
@@ -234,10 +267,6 @@ defmodule TriOnyx.Connectors.GitHub do
     )
   end
 
-  defp credential_args do
-    # Leading empty helper clears any helpers inherited from system config.
-    ["-c", "credential.helper=", "-c", "credential.helper=#{@credential_helper}"]
-  end
 
   defp config do
     case Application.get_env(:tri_onyx, :github) do
