@@ -22,7 +22,7 @@ When building new features, follow these steps in order:
 2. **Build the feature** — Make code changes. Rebuild any affected images before moving on (see Container Rebuilds below).
 
 3. **Run existing tests** — Always run the relevant test suite after making changes:
-   - Elixir (gateway): `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
+   - Elixir (gateway): `docker run --rm -v $(pwd):/app -w /app trionyx-gateway:latest mix test`
    - Python (connector): `docker run --rm -v $(pwd)/connector:/app -w /app trionyx-connector:latest uv run pytest`
    - Python (mcp server): `docker run --rm -v $(pwd)/mcp_server/mcp_server:/app/mcp_server:ro -v $(pwd)/mcp_server/tests:/app/tests:ro -v $(pwd)/connector/connector:/app/connector:ro -w /app trionyx-mcp:latest uv run --no-sync pytest -q`
 
@@ -37,7 +37,7 @@ When building new features, follow these steps in order:
 ## Testing
 
 - **Always run tests inside Docker containers** — never run mix or python tests directly on the host
-- Elixir tests: `docker run --rm -v $(pwd):/app -w /app tri-onyx-gateway:latest mix test`
+- Elixir tests: `docker run --rm -v $(pwd):/app -w /app trionyx-gateway:latest mix test`
 
 ## Per-Agent Repos (`TriOnyx.RepoStore`)
 
@@ -54,8 +54,8 @@ Every filesystem boundary is a git repository — there is no FUSE layer and no 
 - **Always rebuild containers after making changes** that affect baked-in artifacts
 - The `runtime/` directory (including `agent_runner.py`, `protocol.py`, `entrypoint.sh`) is bind-mounted read-only at `/opt/tri_onyx`, so **Python/runtime changes take effect on next container start without rebuilding**. Only rebuild the agent image if `agent.Dockerfile` changes:
   `docker build --no-cache --build-arg HOST_UID=$(id -u) --build-arg HOST_GID=$(id -g) -t tri-onyx-agent:latest -f agent.Dockerfile .`
-- The gateway image (`tri-onyx-gateway`) mounts Elixir source at runtime, so it only needs rebuilding if `gateway.Dockerfile` itself changes:
-  `docker build -t tri-onyx-gateway:latest -f gateway.Dockerfile .`
+- The gateway image (`trionyx-gateway`) mounts Elixir source at runtime, so it only needs rebuilding if `gateway.Dockerfile` itself changes:
+  `docker build -t trionyx-gateway:latest -f gateway.Dockerfile .`
 - After rebuilding, restart any running containers to pick up the new image
 - For runtime-only changes (Python files under `runtime/`), just restart the agent container — no rebuild needed
 
