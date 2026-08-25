@@ -7,6 +7,7 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.safestring import mark_safe
+from django.views.decorators.clickjacking import xframe_options_exempt
 
 from trionyx_ui import gateway
 from trionyx_ui.schema_cache import sse_event_types, visible_event_types
@@ -256,6 +257,7 @@ def session_audio(request, agent_name, session_id, audio_id):
 _COMMIT_SHA_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
 
 
+@xframe_options_exempt
 def session_page(request, commit, page_path):
     if not _COMMIT_SHA_RE.match(commit):
         return HttpResponse(status=400)
