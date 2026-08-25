@@ -1,17 +1,15 @@
 import json
 import logging
-import re
 
 from django.http import HttpResponse
 from django.shortcuts import render
 from django.utils.safestring import mark_safe
-from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
-from trionyx_ui.views.helpers import resolve_connected_agents as _resolve_connected_agents
-
-_md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
-_xml_tag_re = re.compile(r"</?[a-z][a-z0-9_-]*\s*/?>", re.IGNORECASE)
+from trionyx_ui.views.helpers import (
+    render_markdown as _render_md,
+    resolve_connected_agents as _resolve_connected_agents,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -121,9 +119,8 @@ def builder_delete(request, name):
 def builder_context(request, name):
     try:
         context = gateway.get_agent_context(name)
-        clean = _xml_tag_re.sub("", context)
         return render(request, "partials/builder_context.html", {
-            "context_html": mark_safe(_md.render(clean)),
+            "context_html": mark_safe(_render_md(context)),
         })
     except gateway.GatewayError:
         return HttpResponse('<div class="builder-empty">Context unavailable</div>')

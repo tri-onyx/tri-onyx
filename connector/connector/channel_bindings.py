@@ -58,8 +58,38 @@ def channel_name_for_repo(repo: str, prefix: str, qualified: bool = False) -> st
     return (prefix + sanitized)[:_MAX_CHANNEL_NAME_LEN]
 
 
+# Numeric suffixes tried after the owner-qualified name is also taken.
+_MAX_NAME_ATTEMPTS = 50
+
+
+def _with_suffix(name: str, n: int) -> str:
+    """Append ``-n`` to a channel name, staying inside Slack's length limit."""
+    tag = f"-{n}"
+    return name[: _MAX_CHANNEL_NAME_LEN - len(tag)].rstrip("-") + tag
+
+
+def _unique_name(repo: str, prefix: str, taken: dict[str, str]) -> str:
+    """First unused channel name for *repo*: bare, owner-qualified, then -2, -3…
+
+    Two agents must never share a channel — that would cross-route every
+    message in it — so this keeps widening the name until it is free, and
+    raises rather than returning a colliding one.
+    """
+    bare = channel_name_for_repo(repo, prefix)
+    qualified = channel_name_for_repo(repo, prefix, qualified=True)
+    candidates = [bare, qualified] + [_with_suffix(qualified, n) for n in range(2, _MAX_NAME_ATTEMPTS + 2)]
+    for candidate in candidates:
+        if candidate not in taken:
+            return candidate
+    raise ValueError(
+        f"Cannot derive a unique Slack channel name for repo {repo!r} with "
+        f"prefix {prefix!r}: {candidates[0]!r} and {_MAX_NAME_ATTEMPTS} "
+        f"variants are all taken by other agents"
+    )
+
+
 def _resolve_names(bindings: list[dict[str, Any]], prefix: str) -> dict[str, str]:
-    """Map agent → desired channel name, owner-qualifying name collisions."""
+    """Map agent → desired channel name, resolving name collisions."""
     repo_bindings = [b for b in bindings if b.get("github_repo") and not b.get("slack_channel")]
 
     names: dict[str, str] = {}
@@ -67,9 +97,7 @@ def _resolve_names(bindings: list[dict[str, Any]], prefix: str) -> dict[str, str
     for binding in repo_bindings:
         agent = binding["agent"]
         repo = binding["github_repo"]
-        name = channel_name_for_repo(repo, prefix)
-        if name in seen:
-            name = channel_name_for_repo(repo, prefix, qualified=True)
+        name = _unique_name(repo, prefix, seen)
         seen[name] = agent
         names[agent] = name
     return names

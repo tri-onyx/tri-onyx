@@ -107,8 +107,11 @@ services:
         condition: service_healthy
 
   # Public MCP entry point for claude.ai custom connectors. The mcp/cloudflared
-  # pair live on dedicated networks (see `networks:` at the bottom) so the
-  # internet-facing containers can only ever reach each other and the gateway.
+  # pair live on dedicated networks (see `networks:` at the bottom) so neither
+  # internet-facing container can reach the default network — no frontend
+  # (DEBUG=1), no other service. What they *can* reach: each other, the
+  # gateway (mcp only), and the public internet (see the `networks:` note on
+  # mcp_edge — cloudflared has to dial out, so that network is not internal).
   #
   # Behind the `mcp` profile so a plain `docker compose up` is unaffected until
   # the operator has created secrets/mcp-config.yaml and set the two secrets:
@@ -146,8 +149,10 @@ services:
       - MCP_OPERATOR_PASSWORD
       - MCP_PUBLIC_URL
       - MCP_LOG_LEVEL=${MCP_LOG_LEVEL:-INFO}
-    # Deliberately NOT on the default network: the only things this container
-    # can reach are the tunnel (mcp_edge) and the gateway (mcp_internal).
+    # Deliberately NOT on the default network — the frontend and the other
+    # services are unreachable from here. Reachable: cloudflared and the
+    # public internet over mcp_edge (which carries outbound NAT for the
+    # tunnel), and the gateway over mcp_internal.
     networks:
       - mcp_edge
       - mcp_internal
@@ -209,6 +214,8 @@ networks:
   default:
   # cloudflared <-> mcp only: the blast radius of a Cloudflare dashboard
   # routing mistake is limited to the (OAuth-protected) MCP server.
+  # Not `internal: true` — cloudflared dials the Cloudflare edge outbound,
+  # so this network provides internet access to both its members.
   mcp_edge:
   # mcp <-> gateway connector WebSocket. Internal: no outbound NAT needed.
   mcp_internal:

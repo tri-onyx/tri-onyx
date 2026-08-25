@@ -1,6 +1,24 @@
 """Helpers shared by the view modules."""
 
+from markdown_it import MarkdownIt
+
 from trionyx_ui import gateway
+
+# Agent- and gateway-authored markdown is untrusted input: ``html: False``
+# makes markdown-it escape raw HTML instead of passing it through, which is
+# what lets callers ``mark_safe()`` the result. (The "commonmark" preset
+# enables raw HTML by default — the override is load-bearing.)
+_md = MarkdownIt("commonmark", {"breaks": True, "html": False}).enable("table")
+
+
+def render_markdown(text: str) -> str:
+    """Render untrusted markdown to HTML safe to ``mark_safe()``.
+
+    Links open in a new tab: the rendered text lives inside the dashboard,
+    and following a link should not navigate away from it.
+    """
+    html = _md.render(text or "")
+    return html.replace("<a ", '<a target="_blank" rel="noopener" ')
 
 
 def short_path(path: str) -> str:

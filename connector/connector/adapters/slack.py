@@ -154,6 +154,64 @@ class ChannelCache:
         tmp.rename(self._path)
 
 
+# An approval nobody reacted to within this window is abandoned; its message
+# ts is forgotten so the map cannot grow without bound.
+_APPROVAL_TTL_S = 7 * 24 * 3600
+
+
+class ApprovalStore:
+    """Persistent message-ts -> approval-id map for thumbs-up/down voting.
+
+    Reactions arrive whenever the owner gets round to them - often after a
+    connector restart - so, like :class:`ChannelCache`, the map lives on the
+    persistent volume rather than in memory. Entries are dropped as soon as
+    the approval is voted on, and expire after ``ttl_s`` otherwise.
+    """
+
+    def __init__(self, path: str | Path, ttl_s: float = _APPROVAL_TTL_S) -> None:
+        self._path = Path(path)
+        self._ttl_s = ttl_s
+        self._data: dict[str, dict[str, Any]] = {}
+        if self._path.exists():
+            self._data = yaml.safe_load(self._path.read_text()) or {}
+        if self._expire():
+            self._flush()
+
+    def get(self, ts: str) -> str | None:
+        if self._expire():
+            self._flush()
+        entry = self._data.get(ts)
+        return entry.get("approval_id") if entry else None
+
+    def put(self, ts: str, approval_id: str) -> None:
+        self._data[ts] = {"approval_id": approval_id, "created_at": time.time()}
+        self._expire()
+        self._flush()
+
+    def resolve(self, ts: str) -> None:
+        """Forget an approval that has been voted on."""
+        if self._data.pop(ts, None) is not None:
+            self._flush()
+
+    def __len__(self) -> int:
+        return len(self._data)
+
+    def _expire(self) -> bool:
+        cutoff = time.time() - self._ttl_s
+        stale = [ts for ts, e in self._data.items() if e.get("created_at", 0) < cutoff]
+        for ts in stale:
+            del self._data[ts]
+        if stale:
+            logger.info("Expired %d stale Slack approval mapping(s)", len(stale))
+        return bool(stale)
+
+    def _flush(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self._path.with_suffix(".tmp")
+        tmp.write_text(yaml.dump(self._data, default_flow_style=False))
+        tmp.rename(self._path)
+
+
 class SlackAdapter(BaseAdapter):
     """Bridges Slack DMs to the TriOnyx gateway via Socket Mode.
 
@@ -194,7 +252,10 @@ class SlackAdapter(BaseAdapter):
         )
 
         self._consent = ConsentStore(self._consent_path)
+        # Our own identity, resolved in start(): the user id we post as and
+        # the bot id Slack stamps on those posts.
         self._bot_user_id: str = ""
+        self._bot_id: str = ""
 
         # Display name cache: user_id -> display_name
         self._display_names: dict[str, str] = {}
@@ -202,8 +263,11 @@ class SlackAdapter(BaseAdapter):
         # Track typing indicator messages per channel so we can delete them
         self._typing_messages: dict[str, str] = {}  # channel_id -> message ts
 
-        # Approval tracking: message ts -> approval_id (for 👍/👎 reactions)
-        self._approval_events: dict[str, str] = {}
+        # Approval tracking: message ts -> approval_id (for 👍/👎 reactions),
+        # persisted so a connector restart does not orphan pending approvals
+        self._approval_events = ApprovalStore(
+            self._config.extra.get("approval_store_path", "/data/slack/approvals.yaml")
+        )
 
         # Auto-provisioned channel name -> ID cache (persistent volume)
         self._channel_cache = ChannelCache(
@@ -228,7 +292,11 @@ class SlackAdapter(BaseAdapter):
         # Resolve our own bot user ID
         auth = await self._web_client.auth_test()
         self._bot_user_id = auth["user_id"]
-        logger.info("Slack adapter authenticated as %s (%s)", auth["user"], self._bot_user_id)
+        self._bot_id = auth.get("bot_id", "") or ""
+        logger.info(
+            "Slack adapter authenticated as %s (%s, bot_id=%s)",
+            auth["user"], self._bot_user_id, self._bot_id or "unknown",
+        )
 
         self._socket_client = SocketModeClient(
             app_token=self._app_token,
@@ -264,7 +332,12 @@ class SlackAdapter(BaseAdapter):
             event = req.payload.get("event", {})
             event_type = event.get("type", "")
 
-            if event_type == "message" and event.get("subtype") is None:
+            # "bot_message" is the subtype Slack stamps on posts from apps
+            # using an incoming webhook or a legacy bot user (the GitHub app
+            # among them); those belong in repo-bound channels, so they are
+            # handled alongside plain messages. Every other subtype
+            # (edits, joins, file shares, …) is ignored.
+            if event_type == "message" and event.get("subtype") in (None, "bot_message"):
                 await self._handle_message(event)
             elif event_type == "reaction_added":
                 await self._handle_reaction(event)
@@ -272,13 +345,17 @@ class SlackAdapter(BaseAdapter):
     async def _handle_message(self, event: dict[str, Any]) -> None:
         """Handle an incoming Slack message event."""
         user_id = event.get("user", "")
+        bot_id = event.get("bot_id", "")
         text = event.get("text", "").strip()
         channel = event.get("channel", "")
         channel_type = event.get("channel_type", "")
 
-        # Ignore messages from our own bot or any bot (prevents loops with
-        # agent replies and inter-agent mirrors posted by this app)
-        if user_id == self._bot_user_id or event.get("bot_id"):
+        # Ignore our own output — agent replies, approval requests and
+        # inter-agent mirrors are posted by this app and would loop straight
+        # back in. Other apps are *not* filtered here: in a repo-bound
+        # channel, GitHub/CI notifications are exactly what the agent is
+        # there to react to.
+        if self._is_own_message(user_id, bot_id):
             return
 
         # Ignore empty messages
@@ -297,6 +374,13 @@ class SlackAdapter(BaseAdapter):
 
         # Only DMs beyond this point (im = direct message)
         if channel_type != "im":
+            return
+
+        # The DM path is the public-access path: consent gating, owner
+        # detection and postambles all assume a human counterpart, so other
+        # apps' DMs are dropped here rather than in the shared filter above.
+        if bot_id:
+            logger.debug("Ignoring DM from app %s", bot_id)
             return
 
         display_name = await self._get_display_name(user_id)
@@ -391,6 +475,7 @@ class SlackAdapter(BaseAdapter):
         no @-mention needed.
         """
         user_id = event.get("user", "")
+        bot_id = event.get("bot_id", "")
         channel = event.get("channel", "")
         text = event.get("text", "").strip()
 
@@ -399,19 +484,27 @@ class SlackAdapter(BaseAdapter):
         if not text:
             return
 
-        display_name = await self._get_display_name(user_id)
-        is_owner = user_id == self._owner_user_id
-
-        if is_owner:
+        if not user_id and bot_id:
+            # Another app posted (GitHub, CI, …). It has no Slack user, so
+            # name it from the event itself.
+            display_name = self._app_name(event)
             user_context = (
-                f"SYSTEM: This message is from the system owner "
-                f"({display_name}, ID: {user_id}) in your Slack channel."
+                f"SYSTEM: This message was posted by the Slack app "
+                f"{display_name} (bot ID: {bot_id}) in your channel — there is "
+                f"no human sender to reply to."
             )
         else:
-            user_context = (
-                f"SYSTEM: This message is from team member {display_name} "
-                f"(ID: {user_id}) in your Slack channel."
-            )
+            display_name = await self._get_display_name(user_id)
+            if user_id == self._owner_user_id:
+                user_context = (
+                    f"SYSTEM: This message is from the system owner "
+                    f"({display_name}, ID: {user_id}) in your Slack channel."
+                )
+            else:
+                user_context = (
+                    f"SYSTEM: This message is from team member {display_name} "
+                    f"(ID: {user_id}) in your Slack channel."
+                )
 
         msg = InboundMessage(
             agent_name=room_cfg.agent,
@@ -442,7 +535,8 @@ class SlackAdapter(BaseAdapter):
         if item.get("type") != "message":
             return
 
-        approval_id = self._approval_events.get(item.get("ts", ""))
+        message_ts = item.get("ts", "")
+        approval_id = self._approval_events.get(message_ts)
         if not approval_id:
             return
 
@@ -455,6 +549,11 @@ class SlackAdapter(BaseAdapter):
         if emoji is None:
             return
 
+        # This vote resolves the approval — forget the mapping so later
+        # reactions on the same message are no longer forwarded and the
+        # store does not accumulate entries.
+        self._approval_events.resolve(message_ts)
+
         sender = await self._get_display_name(user_id)
         logger.info(
             "Approval reaction %s (%s) from %s for %s",
@@ -466,7 +565,7 @@ class SlackAdapter(BaseAdapter):
             sender=sender,
             channel={"platform": "slack", "channel_id": item.get("channel", "")},
             approval_id=approval_id,
-            event_id=item.get("ts", ""),
+            event_id=message_ts,
             trust={"level": "verified" if user_id == self._owner_user_id else "unverified"},
         )
 
@@ -744,7 +843,7 @@ class SlackAdapter(BaseAdapter):
 
         try:
             resp = await self._web_client.chat_postMessage(channel=room_id, text=body)
-            self._approval_events[resp["ts"]] = approval_id
+            self._approval_events.put(resp["ts"], approval_id)
         except Exception:
             logger.exception("Slack approval request post failed to %s", room_id)
 
@@ -754,6 +853,7 @@ class SlackAdapter(BaseAdapter):
             "connected": connected,
             "bot_user_id": self._bot_user_id,
             "consent_count": len(self._consent._data.get("users", {})),
+            "pending_approvals": len(self._approval_events),
         }
 
     def format_message(self, markdown: str) -> str:
@@ -779,6 +879,24 @@ class SlackAdapter(BaseAdapter):
             )
         except Exception:
             logger.exception("Slack post failed to %s", channel_id)
+
+    def _is_own_message(self, user_id: str, bot_id: str) -> bool:
+        """True for messages this app posted itself.
+
+        Matched on our own user id *and* our own bot id: agent replies come
+        back with both, but a post made through an incoming webhook carries
+        only ``bot_id``. Other apps' messages deliberately do not match —
+        they are legitimate traffic in a repo-bound channel.
+        """
+        if user_id and user_id == self._bot_user_id:
+            return True
+        return bool(bot_id) and bot_id == self._bot_id
+
+    @staticmethod
+    def _app_name(event: dict[str, Any]) -> str:
+        """Human-readable name of the app that posted a bot message."""
+        profile = event.get("bot_profile") or {}
+        return profile.get("name") or event.get("username") or "unknown app"
 
     async def _get_display_name(self, user_id: str) -> str:
         """Look up a user's display name, with caching."""

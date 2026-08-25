@@ -7,7 +7,6 @@ from django.http import HttpResponse
 from django.shortcuts import redirect, render
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from markdown_it import MarkdownIt
 
 from trionyx_ui import gateway
 from trionyx_ui.schema_cache import sse_event_types, visible_event_types
@@ -17,17 +16,9 @@ from trionyx_ui.tool_briefs import (
 )
 from trionyx_ui.views.helpers import (
     format_session_cost as _format_session_cost,
+    render_markdown as _render_md,
     resolve_connected_agents as _resolve_connected_agents,
 )
-
-_md = MarkdownIt("commonmark", {"breaks": True}).enable("table")
-
-
-def _render_md(text: str) -> str:
-    html = _md.render(text)
-    return html.replace("<a ", '<a target="_blank" rel="noopener" ')
-
-
 
 
 def agent_chat(request, name):

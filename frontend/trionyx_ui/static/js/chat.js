@@ -259,12 +259,12 @@ function renderEvent(type, data) {
 
     case 'image':
       return `<div class="msg msg-agent msg-image" data-ts="${escapeAttr(ts)}">` +
-        `<img src="/workspace/images/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${escapeAttr(data.image_id)}"` +
+        `<img src="/workspace/images/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${encodeURIComponent(data.image_id || '')}"` +
         ` alt="${escapeAttr(data.filename || '')}" title="${escapeAttr(data.filename || '')}" loading="lazy">` +
         `<span class="image-caption">${escapeHtml(data.filename || '')}</span></div>`;
 
     case 'audio': {
-      const audioUrl = `/workspace/audio/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${escapeAttr(data.audio_id)}`;
+      const audioUrl = `/workspace/audio/${encodeURIComponent(agentName)}/${encodeURIComponent(sessionId)}/${encodeURIComponent(data.audio_id || '')}`;
       return `<div class="msg msg-agent msg-audio" data-ts="${escapeAttr(ts)}">` +
         `<audio controls preload="metadata" src="${audioUrl}"></audio>` +
         `<span class="audio-caption">${escapeHtml(data.text_preview || '')}</span></div>`;

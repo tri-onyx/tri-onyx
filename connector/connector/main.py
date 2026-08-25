@@ -128,17 +128,12 @@ async def _route_outbound(
                 )
         return
 
-    # Text output from sessions without a routable channel (inter-agent
-    # spawned sessions, the test harness, heartbeats) is posted to the
-    # agent's own room so channel-bound agents are visible there
-    # regardless of what triggered them.
-    if adapter is None and isinstance(msg, (AgentTextMessage, AgentErrorMessage)) and msg.agent_name:
-        content = (msg.error or msg.message) if isinstance(msg, AgentErrorMessage) else msg.content
-        if content:
-            for resolved_adapter, channel in _resolve_agent_room(adapters, msg.agent_name):
-                await resolved_adapter.send_text(channel, content, agent_name=msg.agent_name)
-        return
-
+    # No agent_text/agent_error fallback here: the gateway only emits those
+    # for sessions a connector is tracking, which always carry the channel
+    # the session was started from (TriOnyx.ConnectorHandler.handle_event_bus).
+    # Output from untracked sessions (heartbeats, inter-agent spawns, the
+    # frontend's HTTP prompts) reaches rooms as a heartbeat_notification
+    # broadcast instead.
     if adapter is None:
         logger.warning("No adapter for platform %s", platform)
         return
