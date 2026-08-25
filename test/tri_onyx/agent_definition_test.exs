@@ -1345,6 +1345,57 @@ defmodule TriOnyx.AgentDefinitionTest do
     end
   end
 
+  describe "name validation" do
+    defp definition_named(name) do
+      """
+      ---
+      name: #{name}
+      tools: Read
+      ---
+
+      Body.
+      """
+    end
+
+    test "rejects path traversal in the name" do
+      assert {:error, {:invalid_agent_name, "../../etc/pwned"}} =
+               AgentDefinition.parse(definition_named("\"../../etc/pwned\""))
+    end
+
+    test "rejects slashes, dots, spaces, and empty names" do
+      for bad <- ["\"a/b\"", "\"a b\"", "\"a.b\"", "\"..\"", "\"-lead\"", "\"trail-\"", "\"\""] do
+        assert {:error, {:invalid_agent_name, _}} = AgentDefinition.parse(definition_named(bad)),
+               "expected #{bad} to be rejected"
+      end
+    end
+
+    test "rejects names longer than 64 bytes" do
+      long = String.duplicate("a", 65)
+      assert {:error, {:invalid_agent_name, ^long}} =
+               AgentDefinition.parse(definition_named(long))
+    end
+
+    test "accepts alphanumeric names with inner hyphens and underscores" do
+      for good <- ["main", "code-reviewer", "agent_1", "a", "A9"] do
+        assert {:ok, %{name: ^good}} = AgentDefinition.parse(definition_named(good))
+      end
+    end
+
+    test "valid_name?/1 is the shared predicate" do
+      assert AgentDefinition.valid_name?("code-reviewer")
+      refute AgentDefinition.valid_name?("../etc")
+      refute AgentDefinition.valid_name?(:main)
+      refute AgentDefinition.valid_name?("")
+    end
+
+    test "format_error/1 reports the name field" do
+      assert %{field: "name", message: message} =
+               AgentDefinition.format_error({:invalid_agent_name, "../x"})
+
+      assert message =~ "Agent name must be"
+    end
+  end
+
   describe "parse!/1" do
     test "returns definition on success" do
       assert %AgentDefinition{name: "simple-agent"} = AgentDefinition.parse!(@minimal_definition)

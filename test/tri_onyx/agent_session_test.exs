@@ -264,7 +264,7 @@ defmodule TriOnyx.AgentSessionTest do
       {:reply, :ok, new_state} =
         AgentSession.handle_call({:prompt, payload, metadata}, {self(), make_ref()}, state)
 
-      assert new_state.prompt_queue == [{payload, metadata}]
+      assert new_state.prompt_queue == [{payload, metadata, false}]
       refute_receive {:"$gen_cast", {:send, %{"type" => "interrupt"}}}
     end
 
@@ -275,7 +275,7 @@ defmodule TriOnyx.AgentSessionTest do
       {:reply, :ok, new_state} =
         AgentSession.handle_call({:prompt, "hello", metadata}, {self(), make_ref()}, state)
 
-      assert new_state.prompt_queue == [{"hello", metadata}]
+      assert new_state.prompt_queue == [{"hello", metadata, true}]
       assert_receive {:"$gen_cast", {:send, %{"type" => "interrupt"}}}
     end
 
@@ -307,16 +307,52 @@ defmodule TriOnyx.AgentSessionTest do
     end
 
     test "interrupted event flushes the next queued prompt and keeps the rest" do
-      state = queue_state(%{prompt_queue: [{"first", %{}}, {"second", %{}}]})
+      state = queue_state(%{prompt_queue: [{"first", %{}, true}, {"second", %{}, true}]})
 
       {:noreply, new_state} =
         AgentSession.handle_info({:agent_event, self(), {:interrupted, "user_message"}}, state)
 
       assert new_state.status == :running
-      assert new_state.prompt_queue == [{"second", %{}}]
+      assert new_state.prompt_queue == [{"second", %{}, true}]
 
       expected = "[Previous task was interrupted by user]\n\nfirst"
       assert_receive {:"$gen_cast", {:send, %{"type" => "prompt", "content" => ^expected}}}
+    end
+
+    test "interrupted event does not prefix a prompt that was queued without an interrupt" do
+      # A reaction-sourced prompt sits at the head of the queue; the
+      # interrupt belongs to the user message behind it.
+      state =
+        queue_state(%{
+          prompt_queue: [
+            {"reaction-payload", %{"trigger_subtype" => "reaction"}, false},
+            {"user-message", %{}, true}
+          ]
+        })
+
+      {:noreply, new_state} =
+        AgentSession.handle_info({:agent_event, self(), {:interrupted, "user_message"}}, state)
+
+      assert new_state.prompt_queue == [{"user-message", %{}, true}]
+
+      assert_receive {:"$gen_cast",
+                      {:send, %{"type" => "prompt", "content" => "reaction-payload"}}}
+    end
+
+    test "reaction prompts are tagged as non-interrupting, user messages as interrupting" do
+      state = queue_state(%{})
+
+      {:reply, :ok, state} =
+        AgentSession.handle_call(
+          {:prompt, "react", %{"trigger_subtype" => "reaction"}},
+          {self(), make_ref()},
+          state
+        )
+
+      {:reply, :ok, state} =
+        AgentSession.handle_call({:prompt, "msg", %{}}, {self(), make_ref()}, state)
+
+      assert Enum.map(state.prompt_queue, &elem(&1, 2)) == [false, true]
     end
   end
 
@@ -357,6 +393,40 @@ defmodule TriOnyx.AgentSessionTest do
       Process.cancel_timer(ref)
 
       refute_receive :idle_timeout, 200
+    end
+  end
+
+  describe "port startup" do
+    # RepoStore.prepare_session/1 is the last chance to guarantee that every
+    # bind mount exists and holds the state the gateway vouches for. If it
+    # fails, no container may start.
+    test "a failed repo preparation refuses to start the container" do
+      previous = Application.get_env(:tri_onyx, :workspace_dir)
+      # A regular file where the workspace root belongs: every repo
+      # operation under it fails.
+      blocked = Path.join("test/tmp", "blocked_ws_#{System.unique_integer([:positive])}")
+      File.mkdir_p!("test/tmp")
+      File.write!(blocked, "not a directory\n")
+      Application.put_env(:tri_onyx, :workspace_dir, blocked)
+
+      on_exit(fn ->
+        if previous do
+          Application.put_env(:tri_onyx, :workspace_dir, previous)
+        else
+          Application.delete_env(:tri_onyx, :workspace_dir)
+        end
+
+        File.rm_rf!(blocked)
+      end)
+
+      Process.flag(:trap_exit, true)
+
+      assert {:error, {:repo_prepare_failed, {:prepare_failed, "agents/test-agent", _}}} =
+               TriOnyx.AgentPort.start_link(
+                 notify: self(),
+                 definition: @test_definition,
+                 session_id: "prep-fail"
+               )
     end
   end
 end

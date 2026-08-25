@@ -136,6 +136,36 @@ defmodule TriOnyx.AgentDefinition do
   @spec default_model() :: String.t()
   def default_model, do: @default_model
 
+  # The agent name is used as a filesystem path segment (definition file,
+  # bare repo directory, docker mount source), so it must be a single safe
+  # segment: starts and ends alphanumeric, hyphens/underscores inside, no
+  # dots, slashes, or whitespace. This is the single source of truth for
+  # the pattern — the HTTP router validates path params against it too.
+  @name_pattern ~r/\A[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?\z/
+  @name_max_bytes 64
+
+  @doc """
+  Returns true if `name` is a valid agent name.
+
+  Valid names are 1–#{@name_max_bytes} bytes of letters, digits, hyphens,
+  and underscores, starting and ending with an alphanumeric character.
+  Anything else could escape the directory it names.
+  """
+  @spec valid_name?(term()) :: boolean()
+  def valid_name?(name) when is_binary(name) do
+    byte_size(name) > 0 and byte_size(name) <= @name_max_bytes and
+      Regex.match?(@name_pattern, name)
+  end
+
+  def valid_name?(_other), do: false
+
+  @doc "Human-readable description of the agent name rules."
+  @spec name_rules() :: String.t()
+  def name_rules do
+    "Agent name must be 1-#{@name_max_bytes} characters of letters, digits, " <>
+      "hyphens, or underscores, starting and ending with a letter or digit"
+  end
+
   @enforce_keys [:name, :tools, :system_prompt]
   defstruct [
     :name,
@@ -262,6 +292,10 @@ defmodule TriOnyx.AgentDefinition do
   @spec format_error(term()) :: %{field: String.t(), message: String.t()}
   def format_error({:missing_required_field, field}) do
     %{field: field, message: "#{field} is required"}
+  end
+
+  def format_error({:invalid_agent_name, _value}) do
+    %{field: "name", message: name_rules()}
   end
 
   def format_error({:empty_tools_list}) do
@@ -722,7 +756,7 @@ defmodule TriOnyx.AgentDefinition do
 
   @spec build_definition(map(), String.t()) :: {:ok, t()} | {:error, term()}
   defp build_definition(yaml, body) do
-    with {:ok, name} <- require_string(yaml, "name"),
+    with {:ok, name} <- require_name(yaml),
          {:ok, tools} <- parse_tools(yaml),
          {:ok, model} <- parse_model(yaml),
          {:ok, network} <- parse_network(yaml),
@@ -824,6 +858,19 @@ defmodule TriOnyx.AgentDefinition do
          reflection: reflection,
          feedback: feedback
        }}
+    end
+  end
+
+  # Every loader path (files on disk, the HTTP builder, tests) goes through
+  # parsing, so validating the name here covers them all.
+  @spec require_name(map()) :: {:ok, String.t()} | {:error, term()}
+  defp require_name(yaml) do
+    with {:ok, name} <- require_string(yaml, "name") do
+      if valid_name?(name) do
+        {:ok, name}
+      else
+        {:error, {:invalid_agent_name, name}}
+      end
     end
   end
 

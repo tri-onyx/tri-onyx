@@ -1360,25 +1360,32 @@ defmodule TriOnyx.Router do
   # --- Session Audio (Speak tool output) ---
 
   get "/audio/:agent_name/:session_id/:audio_id" do
-    audio_dir = Path.join(["logs", agent_name, "#{session_id}_audio"])
-    file_path = Path.join(audio_dir, audio_id) |> Path.expand()
-    safe_prefix = Path.expand(audio_dir)
+    # The directory itself is built from path params, so traversal in the
+    # agent name or session id would move the safe prefix along with the
+    # target and defeat the prefix check below. Validate them first.
+    if not (valid_agent_name?(agent_name) and valid_session_id?(session_id)) do
+      conn |> send_resp(400, "invalid path")
+    else
+      audio_dir = Path.join(["logs", agent_name, "#{session_id}_audio"])
+      file_path = Path.join(audio_dir, audio_id) |> Path.expand()
+      safe_prefix = Path.expand(audio_dir)
 
-    cond do
-      not String.starts_with?(file_path, safe_prefix) ->
-        conn |> send_resp(403, "forbidden")
+      cond do
+        not String.starts_with?(file_path, safe_prefix) ->
+          conn |> send_resp(403, "forbidden")
 
-      Path.extname(audio_id) != ".ogg" ->
-        conn |> send_resp(403, "forbidden")
+        Path.extname(audio_id) != ".ogg" ->
+          conn |> send_resp(403, "forbidden")
 
-      not File.regular?(file_path) ->
-        conn |> send_resp(404, "not found")
+        not File.regular?(file_path) ->
+          conn |> send_resp(404, "not found")
 
-      true ->
-        conn
-        |> put_resp_content_type("audio/ogg")
-        |> put_resp_header("cache-control", "private, max-age=3600")
-        |> send_resp(200, File.read!(file_path))
+        true ->
+          conn
+          |> put_resp_content_type("audio/ogg")
+          |> put_resp_header("cache-control", "private, max-age=3600")
+          |> send_resp(200, File.read!(file_path))
+      end
     end
   end
 
@@ -1857,17 +1864,22 @@ defmodule TriOnyx.Router do
     end)
   end
 
-  @agent_name_re ~r/^[a-zA-Z0-9]([a-zA-Z0-9_-]*[a-zA-Z0-9])?$/
+  # AgentDefinition owns the name pattern — see AgentDefinition.valid_name?/1.
+  defp valid_agent_name?(name), do: AgentDefinition.valid_name?(name)
 
-  defp valid_agent_name?(name) when is_binary(name) do
-    byte_size(name) > 0 and byte_size(name) <= 64 and Regex.match?(@agent_name_re, name)
-  end
+  # Session ids are gateway-generated tokens (hex, optionally prefixed:
+  # "reflection-…", "bcp-…", or "manual"). They land in filesystem paths,
+  # so keep them to a single safe segment.
+  @session_id_re ~r/\A[A-Za-z0-9_-]{1,64}\z/
+
+  defp valid_session_id?(id) when is_binary(id), do: Regex.match?(@session_id_re, id)
+  defp valid_session_id?(_other), do: false
 
   defp send_invalid_name(conn) do
     conn
     |> send_json(400, %{
       "error" => "invalid_name",
-      "message" => "Agent name must be 1-64 alphanumeric characters, hyphens, or underscores"
+      "message" => AgentDefinition.name_rules()
     })
   end
 

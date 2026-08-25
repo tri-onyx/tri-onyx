@@ -10,10 +10,15 @@ defmodule TriOnyx.RateLimiter do
 
   Uses a single ETS table per limiter instance. When a request arrives:
 
-  1. Look up the key in ETS
-  2. If the current window has expired, reset the counter
-  3. If the counter is below the limit, increment and allow
+  1. Atomically increment the key's counter (inserting a fresh bucket if
+     absent) and read back the new count together with the bucket start
+  2. If the bucket's window has expired, reset it to a new window and allow
+  3. If the new count is within the limit, allow
   4. Otherwise, reject with rate limit info
+
+  The increment happens *before* the limit comparison, so concurrent
+  callers can never both observe the same pre-increment count and both be
+  allowed past the limit.
 
   The GenServer exists only for ownership of the ETS table and periodic
   cleanup. The hot-path `check_rate/4` reads and updates ETS directly
@@ -60,21 +65,25 @@ defmodule TriOnyx.RateLimiter do
     now = System.system_time(:millisecond)
     window_start_cutoff = now - window_ms
 
-    case :ets.lookup(table, key) do
-      [{^key, count, bucket_start}] when bucket_start > window_start_cutoff ->
-        if count < limit do
-          :ets.update_counter(table, key, {2, 1})
-          :ok
-        else
-          retry_after_ms = window_ms - (now - bucket_start)
-          retry_after_s = max(div(retry_after_ms, 1000), 1)
-          {:error, :rate_limited, retry_after_s}
-        end
+    # Increment first, then compare: a read-then-increment sequence lets two
+    # concurrent callers both see the same pre-increment count and both slip
+    # past the limit. The default tuple creates the bucket when absent, and
+    # the `{3, 0}` term reads the bucket start in the same atomic operation.
+    [count, bucket_start] = :ets.update_counter(table, key, [{2, 1}, {3, 0}], {key, 0, now})
 
-      _ ->
-        # Window expired or no entry — start fresh
+    cond do
+      bucket_start <= window_start_cutoff ->
+        # Window expired — start a fresh one
         :ets.insert(table, {key, 1, now})
         :ok
+
+      count <= limit ->
+        :ok
+
+      true ->
+        retry_after_ms = window_ms - (now - bucket_start)
+        retry_after_s = max(div(retry_after_ms, 1000), 1)
+        {:error, :rate_limited, retry_after_s}
     end
   rescue
     ArgumentError ->

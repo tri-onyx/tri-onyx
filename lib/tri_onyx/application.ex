@@ -46,8 +46,8 @@ defmodule TriOnyx.Application do
       # 4b. BCP rate limiter — must start before Router
       TriOnyx.BCP.RateLimiter,
 
-      # 4c. Risk manifest — in-memory provenance store, rebuilt from
-      # workspace git history; must start before sessions and Committer
+      # 4c. Risk manifest — in-memory provenance store, rebuilt from the
+      # per-agent repo history; must start before sessions
       TriOnyx.RiskManifest,
 
       # 5. Agent session supervisor

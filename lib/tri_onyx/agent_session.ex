@@ -48,7 +48,7 @@ defmodule TriOnyx.AgentSession do
           last_text: String.t() | nil,
           shutdown_reason: String.t() | nil,
           memory_save_timer: reference() | nil,
-          prompt_queue: [{String.t(), map()}],
+          prompt_queue: [{String.t(), map(), boolean()}],
           session_key: String.t() | nil,
           session_label: String.t() | nil,
           mode: :normal | :reflection
@@ -312,11 +312,15 @@ defmodule TriOnyx.AgentSession do
     end
   end
 
+  @interrupt_prefix "[Previous task was interrupted by user]\n\n"
+
   # Prompts that arrive while the runtime is busy are queued FIFO, never
   # overwritten — rapid successive prompts (e.g. several upvote reactions)
-  # must all be processed.
-  defp enqueue_prompt(state, content, metadata) do
-    %{state | prompt_queue: state.prompt_queue ++ [{content, metadata}]}
+  # must all be processed. Each entry records whether it triggered an
+  # interrupt, so only those prompts get the "[Previous task was
+  # interrupted by user]" prefix when the interrupt lands.
+  defp enqueue_prompt(state, content, metadata, interrupted? \\ false) do
+    %{state | prompt_queue: state.prompt_queue ++ [{content, metadata, interrupted?}]}
   end
 
   # Reactions (item feedback) piggyback on the running prompt's completion
@@ -350,7 +354,9 @@ defmodule TriOnyx.AgentSession do
     # Reaction-sourced prompts (item feedback) must not interrupt in-flight
     # work — an upvote's multi-step handling would be cut short by the next
     # upvote. They queue and run after the current prompt completes.
-    if interrupting_prompt?(metadata) do
+    interrupting? = interrupting_prompt?(metadata)
+
+    if interrupting? do
       Logger.info("AgentSession #{state.id}: interrupting running prompt for new user message")
       AgentPort.send_interrupt(port, "user_message")
     else
@@ -358,7 +364,7 @@ defmodule TriOnyx.AgentSession do
     end
 
     state = state |> maybe_elevate_from_metadata(metadata)
-    {:reply, :ok, enqueue_prompt(state, content, metadata)}
+    {:reply, :ok, enqueue_prompt(state, content, metadata, interrupting?)}
   end
 
   def handle_call({:prompt, _content, _metadata}, _from, state) do
@@ -565,13 +571,13 @@ defmodule TriOnyx.AgentSession do
     # it into a proper prompt.  Sending the trigger payload too would
     # override the structured content with a useless summary string.
     case state.prompt_queue do
-      [{content, metadata} | rest] when had_bcp == false ->
+      [{content, metadata, _interrupted?} | rest] when had_bcp == false ->
         Logger.info("AgentSession #{state.id}: flushing queued prompt (#{byte_size(content)} bytes, #{length(rest)} more queued)")
         broadcast_event(state, %{"type" => "user_prompt", "content" => content})
         AgentPort.send_prompt(state.port, content, metadata)
         {:noreply, %{state | status: :running, prompt_queue: rest}}
 
-      [{_content, _metadata} | rest] ->
+      [{_content, _metadata, _interrupted?} | rest] ->
         Logger.info("AgentSession #{state.id}: discarding trigger prompt (BCP messages already flushed)")
         {:noreply, %{state | status: :running, prompt_queue: rest}}
 
@@ -590,11 +596,15 @@ defmodule TriOnyx.AgentSession do
     state = %{state | status: :ready}
 
     case state.prompt_queue do
-      [{content, metadata} | rest] ->
-        prefixed = "[Previous task was interrupted by user]\n\n" <> content
-        Logger.info("AgentSession #{state.id}: sending queued interrupt prompt (#{byte_size(prefixed)} bytes, #{length(rest)} more queued)")
-        broadcast_event(state, %{"type" => "user_prompt", "content" => prefixed})
-        AgentPort.send_prompt(state.port, prefixed, metadata)
+      [{content, metadata, interrupted?} | rest] ->
+        # Only the prompt that caused the interrupt gets the prefix. A
+        # non-interrupting prompt (e.g. a reaction) may sit ahead of it in
+        # the queue and must be delivered untouched.
+        content = if interrupted?, do: @interrupt_prefix <> content, else: content
+
+        Logger.info("AgentSession #{state.id}: sending queued prompt after interrupt (#{byte_size(content)} bytes, #{length(rest)} more queued)")
+        broadcast_event(state, %{"type" => "user_prompt", "content" => content})
+        AgentPort.send_prompt(state.port, content, metadata)
         {:noreply, %{state | status: :running, prompt_queue: rest}}
 
       [] ->
@@ -1563,7 +1573,7 @@ defmodule TriOnyx.AgentSession do
         # the completed work, or the result arrived before the runtime saw an
         # interrupt. Both cases: the prompt completed normally, so send the
         # next queued prompt without the [interrupted] prefix.
-        [{content, metadata} | rest] = state.prompt_queue
+        [{content, metadata, _interrupted?} | rest] = state.prompt_queue
         state = %{state | status: :ready, prompt_queue: rest}
         Logger.info("AgentSession #{state.id}: result complete, sending next queued prompt (#{length(rest)} more queued)")
         broadcast_event(state, %{"type" => "user_prompt", "content" => content})

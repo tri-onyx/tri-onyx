@@ -24,8 +24,8 @@ defmodule TriOnyx.TaintMatrix do
   | WebSearch             | high   | Returns internet search results              |
   | Bash (no network)     | low    | Shell execution, container-local only        |
   | Bash (with network)   | high   | Shell + network = can curl/wget external data|
-  | Read (external path)  | high   | Reads from outside /workspace or /mnt/host   |
-  | Read (controlled path)| low    | Reads from /workspace or /mnt/host           |
+  | Read (external path)  | high   | Reads from outside /workspace or /repos/      |
+  | Read (controlled path)| low    | Reads from /workspace or /repos/             |
   | GitHub                | high   | Returns issue/PR/comment text from arbitrary GitHub users |
   | CalendarQuery          | low    | Gateway-mediated, returns structured JSON     |
   | CalendarCreate         | low    | Gateway-mediated, returns structured JSON     |
@@ -127,7 +127,7 @@ defmodule TriOnyx.TaintMatrix do
   Returns the taint level for a tool result given its context.
 
   For Read:
-  - `:controlled` — path inside `/workspace` or `/mnt/host` → `:low`
+  - `:controlled` — path inside `/workspace` or `/repos/` → `:low`
   - `:external` — any other path → `:high`
 
   For Bash:

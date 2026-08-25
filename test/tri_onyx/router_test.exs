@@ -252,6 +252,53 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "POST /agents name validation" do
+    test "rejects a traversal name instead of writing outside the agents dir" do
+      payload =
+        Jason.encode!(%{
+          "name" => "../../etc/pwned",
+          "tools" => ["Read"],
+          "system_prompt" => "nope"
+        })
+
+      conn =
+        conn(:post, "/agents", payload)
+        |> put_req_header("content-type", "application/json")
+        |> call_router()
+
+      assert conn.status == 400
+      body = Jason.decode!(conn.resp_body)
+      assert body["error"] == "validation_failed"
+      assert [%{"field" => "name"}] = body["details"]
+
+      refute File.exists?(Path.join(TriOnyx.agents_dir(), "../../etc/pwned.md"))
+    end
+  end
+
+  describe "GET /audio/:agent_name/:session_id/:audio_id" do
+    test "rejects traversal in the agent name" do
+      conn =
+        conn(:get, "/audio/#{URI.encode("../../..", &(&1 != ?/))}/abc123/clip.ogg")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/audio/test-agent/#{URI.encode("../../..", &(&1 != ?/))}/clip.ogg")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/audio/test-agent/abc123/clip.ogg") |> call_router()
+
+      assert conn.status == 404
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()
