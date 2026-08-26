@@ -299,6 +299,62 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    test "rejects traversal in the agent name" do
+      conn =
+        conn(:get, "/images/#{URI.encode("../../..", &(&1 != ?/))}/abc123/pic.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode("../../..", &(&1 != ?/))}/pic.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/images/test-agent/abc123/pic.png") |> call_router()
+
+      assert conn.status == 404
+    end
+
+    test "does not serve files outside the logs/ sandbox via agent_name traversal" do
+      # Unlike /audio (which validates agent_name/session_id before building
+      # the path — see the comment on that route), /images built its
+      # safe_prefix straight from the unvalidated params. Since agent_name
+      # and session_id are folded into safe_prefix itself, traversal there
+      # relocates the "sandbox" along with the target and defeats the
+      # containment check, letting an unauthenticated caller read any file
+      # on the host whose parent directory they can name.
+      secret_dir =
+        Path.join(System.tmp_dir!(), "router_test_poc_#{System.unique_integer([:positive])}_images")
+
+      File.mkdir_p!(secret_dir)
+      secret_path = Path.join(secret_dir, "secret.txt")
+      File.write!(secret_path, "top secret host file, outside logs/")
+      on_exit(fn -> File.rm_rf!(secret_dir) end)
+
+      parent = Path.dirname(secret_dir)
+      session_id = Path.basename(secret_dir) |> String.replace_suffix("_images", "")
+      # Enough ".." to reach "/" regardless of the test runner's cwd depth —
+      # Path.expand caps at the root instead of erroring, so extras are inert.
+      traversal = String.duplicate("../", 30) <> String.trim_leading(parent, "/")
+      encoded_agent = URI.encode(traversal, &(&1 != ?/))
+
+      conn =
+        conn(:get, "/images/#{encoded_agent}/#{session_id}/secret.txt")
+        |> call_router()
+
+      refute conn.status == 200,
+             "expected the traversal to be rejected, but the gateway served " <>
+               "#{inspect(secret_path)} (status #{conn.status}, body: #{inspect(conn.resp_body)})"
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()
