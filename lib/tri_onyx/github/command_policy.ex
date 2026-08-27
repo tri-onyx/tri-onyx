@@ -197,6 +197,8 @@ defmodule TriOnyx.GitHub.CommandPolicy do
   # so `git -c core.sshCommand=… fetch` and `git ls-remote ext::sh -c …`
   # are rejected the same way as their `clone` / `remote add` spellings.
   defp guard_argv(args) do
+    candidate = remote_candidate(args)
+
     cond do
       arg = Enum.find(args, &denied_option?/1) ->
         {:deny,
@@ -206,7 +208,7 @@ defmodule TriOnyx.GitHub.CommandPolicy do
       upload_pack_short?(args) ->
         {:deny, "git option -u is --upload-pack for this command and is not allowed"}
 
-      arg = Enum.find(args, &(not remote_url_ok?(&1))) ->
+      arg = Enum.find(args, &(not remote_url_ok?(&1, candidate))) ->
         {:deny,
          "git remote #{inspect(arg)} is not allowed — remotes must be a " <>
            "named remote (e.g. origin) or an https://github.com/... URL"}
@@ -225,16 +227,33 @@ defmodule TriOnyx.GitHub.CommandPolicy do
       Enum.any?(args, &String.starts_with?(&1, "-u"))
   end
 
+  # The argv position git itself treats as the remote for every mediated
+  # verb (`fetch`/`pull`/`ls-remote [options] <remote>`, `push [options]
+  # <remote> <refspec>...`): the first non-flag argument after the verb.
+  # Only this position is allowed to name a transport target — refspecs
+  # (which legitimately contain ':', e.g. `feature:refs/heads/feature`)
+  # come after it and are never treated as a remote.
+  defp remote_candidate([_verb | rest]), do: Enum.find(rest, &(not flag?(&1)))
+  defp remote_candidate([]), do: nil
+
   # An argv element that could name a transport target — an explicit
   # scheme, git's `helper::` remote syntax, scp-style `user@host:path`, or
   # a filesystem path — is acceptable only as an https://github.com/ URL.
   # Everything else (remote names, refspecs, branch names, flag values)
-  # cannot name a host, a path or a program, so it passes through.
-  defp remote_url_ok?(arg) do
-    if remote_like?(arg) do
-      String.starts_with?(arg, "https://github.com/") and not String.contains?(arg, "..")
-    else
-      true
+  # cannot name a host, a path or a program, so it passes through — except
+  # the remote-position argument itself, which is additionally checked for
+  # scp-like `host:path` syntax with no `user@` (still a valid ssh
+  # transport target to git, e.g. `evil.example:x` or `127.0.0.1:2222/x`).
+  defp remote_url_ok?(arg, candidate) do
+    cond do
+      remote_like?(arg) ->
+        String.starts_with?(arg, "https://github.com/") and not String.contains?(arg, "..")
+
+      arg == candidate and scp_like?(arg) ->
+        false
+
+      true ->
+        true
     end
   end
 
@@ -242,6 +261,17 @@ defmodule TriOnyx.GitHub.CommandPolicy do
     String.contains?(arg, "://") or String.contains?(arg, "::") or
       String.starts_with?(arg, ["/", "./", "../", "~"]) or
       Regex.match?(~r{\A[^/:]+@}, arg)
+  end
+
+  # git's scp-like syntax (`[user@]host.xz:path`) is recognized whenever
+  # there are no slashes before the first colon — no explicit scheme or
+  # '@' required. `remote_like?/1` already covers the `user@` and `://`
+  # forms; this catches the bare `host:path` form it misses.
+  defp scp_like?(arg) do
+    case String.split(arg, ":", parts: 2) do
+      [before, _rest] -> before != "" and not String.contains?(before, "/")
+      _ -> false
+    end
   end
 
   defp classify_git_verb(["push" | rest], opts) do
