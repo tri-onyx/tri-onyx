@@ -106,6 +106,13 @@ Messages starting with `/` are intercepted by the gateway's `SystemCommand`
 module before reaching agents. Known commands (e.g., `/restart`) are executed
 directly. Unknown commands return an error.
 
+`/restart <other-agent>` sent through a connector channel is scoped to the
+channel's own agent (the frame's `agent_name`): it may always restart itself,
+but restarting a *different* agent requires that agent to be listed in the
+channel's own agent's `restart_targets` — the same allowlist an agent's own
+`RestartAgent` tool call is checked against. A bare `/restart` always targets
+the channel's own agent and needs no allowlist entry.
+
 **Skill invocations** use colons (`/newsagg:fetchnews`) to distinguish
 themselves from system commands. The parser detects the `:` and passes the
 message through to the agent instead of intercepting it:
