@@ -15,6 +15,34 @@ defmodule TriOnyx.SystemCommandTest do
     system_prompt: "You are a test agent."
   }
 
+  @channel_definition %AgentDefinition{
+    name: "channel-agent",
+    description: "The agent a connector channel is bound to",
+    model: "claude-sonnet-4-20250514",
+    tools: ["Read"],
+    network: :none,
+    system_prompt: "You are the channel's own agent.",
+    restart_targets: ["allowed-target"]
+  }
+
+  @other_definition %AgentDefinition{
+    name: "allowed-target",
+    description: "An agent the channel agent is allowed to restart",
+    model: "claude-sonnet-4-20250514",
+    tools: ["Read"],
+    network: :none,
+    system_prompt: "You are an allowed restart target."
+  }
+
+  @victim_definition %AgentDefinition{
+    name: "victim-agent",
+    description: "An agent the channel agent is NOT allowed to restart",
+    model: "claude-sonnet-4-20250514",
+    tools: ["Read"],
+    network: :none,
+    system_prompt: "You are an unrelated agent."
+  }
+
   # --- parse/1 tests ---
 
   describe "parse/1" do
@@ -64,7 +92,12 @@ defmodule TriOnyx.SystemCommandTest do
         TriggerRouter.start_link(
           name: router_name,
           supervisor: sup_name,
-          definitions: [@test_definition]
+          definitions: [
+            @test_definition,
+            @channel_definition,
+            @other_definition,
+            @victim_definition
+          ]
         )
 
       on_exit(fn ->
@@ -112,6 +145,78 @@ defmodule TriOnyx.SystemCommandTest do
                  router: router,
                  supervisor: sup,
                  force: true
+               )
+
+      assert msg =~ "was not running"
+    end
+
+    test "a connector channel may always restart its own agent", %{
+      router_name: router,
+      sup_name: sup
+    } do
+      assert {:ok, msg} =
+               SystemCommand.execute(:restart, ["channel-agent"], %{agent_name: "channel-agent"},
+                 router: router,
+                 supervisor: sup
+               )
+
+      assert msg =~ "was not running"
+    end
+
+    test "a connector channel may restart a declared restart_target", %{
+      router_name: router,
+      sup_name: sup
+    } do
+      assert {:ok, msg} =
+               SystemCommand.execute(
+                 :restart,
+                 ["allowed-target"],
+                 %{agent_name: "channel-agent"},
+                 router: router,
+                 supervisor: sup
+               )
+
+      assert msg =~ "was not running"
+    end
+
+    test "a connector channel cannot restart an agent outside its restart_targets", %{
+      router_name: router,
+      sup_name: sup
+    } do
+      # A message arriving through the channel bound to 'channel-agent' must
+      # not be able to interrupt an unrelated agent it was never authorized
+      # for — the same rule AgentSession enforces via `restart_targets` for
+      # agent-initiated restarts (lib/tri_onyx/agent_session.ex) must also
+      # hold for connector-initiated ones (lib/tri_onyx/connector_handler.ex),
+      # which call this same function with `context: %{agent_name: <channel's
+      # own agent>}`.
+      assert {:error, message} =
+               SystemCommand.execute(
+                 :restart,
+                 ["victim-agent"],
+                 %{agent_name: "channel-agent"},
+                 router: router,
+                 supervisor: sup
+               )
+
+      assert message =~ "not reachable from this context"
+
+      # And, crucially, the victim was never touched.
+      assert :error = AgentSupervisor.find_session(sup, "victim-agent")
+    end
+
+    test "a call with no session context (agent-to-agent restart) is unaffected", %{
+      router_name: router,
+      sup_name: sup
+    } do
+      # AgentSession pre-authorizes the target against its own in-memory
+      # `restart_targets` before ever calling `execute/4`, and passes an
+      # empty context (see handle_agent_event({:restart_agent_request, ...})).
+      # That call site must keep working exactly as before.
+      assert {:ok, msg} =
+               SystemCommand.execute(:restart, ["victim-agent"], %{},
+                 router: router,
+                 supervisor: sup
                )
 
       assert msg =~ "was not running"

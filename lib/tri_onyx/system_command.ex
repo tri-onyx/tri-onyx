@@ -82,13 +82,21 @@ defmodule TriOnyx.SystemCommand do
         [] -> Map.get(context, :agent_name)
       end
 
-    if is_nil(agent_name) or agent_name == "" do
-      {:error, "No agent specified"}
-    else
-      router = Keyword.get(opts, :router, TriggerRouter)
-      supervisor = Keyword.get(opts, :supervisor, AgentSupervisor)
-      force = Keyword.get(opts, :force, false)
-      do_restart(agent_name, router, supervisor, force)
+    router = Keyword.get(opts, :router, TriggerRouter)
+    supervisor = Keyword.get(opts, :supervisor, AgentSupervisor)
+    force = Keyword.get(opts, :force, false)
+
+    cond do
+      is_nil(agent_name) or agent_name == "" ->
+        {:error, "No agent specified"}
+
+      not authorized_restart_target?(args, context, router) ->
+        {:error,
+         "agent '#{agent_name}' is not reachable from this context " <>
+           "(not in restart_targets)"}
+
+      true ->
+        do_restart(agent_name, router, supervisor, force)
     end
   end
 
@@ -103,6 +111,37 @@ defmodule TriOnyx.SystemCommand do
   end
 
   # --- Private ---
+
+  # A bare "/restart" (no explicit target) always resolves to the calling
+  # context's own agent via the `agent_name` fallback above, which needs no
+  # further check. An *explicit* target is only authorized when it is that
+  # same agent (self-restart) or is declared in that agent's
+  # `restart_targets` allowlist — the same rule `AgentSession` already
+  # enforces for agent-initiated cross-agent restarts (see
+  # `handle_agent_event({:restart_agent_request, ...})`). A context with no
+  # `:agent_name` at all (the agent-to-agent call site, which authorizes its
+  # target against its own in-memory definition before ever calling this
+  # function) is unscoped here and skips this check.
+  @spec authorized_restart_target?([String.t()], map(), GenServer.server()) :: boolean()
+  defp authorized_restart_target?([], _context, _router), do: true
+
+  defp authorized_restart_target?([target | _], context, router) do
+    case Map.fetch(context, :agent_name) do
+      :error ->
+        true
+
+      {:ok, session_agent} ->
+        target == session_agent or target in restart_targets_of(router, session_agent)
+    end
+  end
+
+  @spec restart_targets_of(GenServer.server(), String.t()) :: [String.t()]
+  defp restart_targets_of(router, agent_name) do
+    case TriggerRouter.get_agent(router, agent_name) do
+      {:ok, definition} -> definition.restart_targets
+      :error -> []
+    end
+  end
 
   @spec do_restart(String.t(), GenServer.server(), GenServer.server(), boolean()) ::
           {:ok, String.t()} | {:error, String.t()}
