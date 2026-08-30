@@ -332,7 +332,9 @@ defmodule TriOnyx.ConnectorHandlerTest do
       {:ok, state: authed_state}
     end
 
-    test "thumbsup approval reaction calls ApprovalQueue.approve", %{state: state} do
+    test "thumbsup approval reaction from a verified sender calls ApprovalQueue.approve", %{
+      state: state
+    } do
       {:ok, approval_id} =
         TriOnyx.BCP.ApprovalQueue.submit(%{
           query: %{},
@@ -347,7 +349,8 @@ defmodule TriOnyx.ConnectorHandlerTest do
           "approval_id" => approval_id,
           "emoji" => "👍",
           "sender" => "@human:matrix.org",
-          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"}
+          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"},
+          "trust" => %{"level" => "verified"}
         })
 
       assert {:ok, _state} =
@@ -357,7 +360,9 @@ defmodule TriOnyx.ConnectorHandlerTest do
       assert [] = TriOnyx.BCP.ApprovalQueue.list_pending()
     end
 
-    test "thumbsdown approval reaction calls ApprovalQueue.reject", %{state: state} do
+    test "thumbsdown approval reaction from a verified sender calls ApprovalQueue.reject", %{
+      state: state
+    } do
       {:ok, approval_id} =
         TriOnyx.BCP.ApprovalQueue.submit(%{
           query: %{},
@@ -372,7 +377,8 @@ defmodule TriOnyx.ConnectorHandlerTest do
           "approval_id" => approval_id,
           "emoji" => "👎",
           "sender" => "@human:matrix.org",
-          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"}
+          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"},
+          "trust" => %{"level" => "verified"}
         })
 
       assert {:ok, _state} =
@@ -380,6 +386,62 @@ defmodule TriOnyx.ConnectorHandlerTest do
 
       # Verify it was rejected (no longer pending)
       assert [] = TriOnyx.BCP.ApprovalQueue.list_pending()
+    end
+
+    test "thumbsup approval reaction from an unverified sender is ignored", %{state: state} do
+      {:ok, approval_id} =
+        TriOnyx.BCP.ApprovalQueue.submit(%{
+          query: %{},
+          from_agent: "controller",
+          to_agent: "reader",
+          justification: "test"
+        })
+
+      frame =
+        Jason.encode!(%{
+          "type" => "reaction",
+          "approval_id" => approval_id,
+          "emoji" => "👍",
+          "sender" => "@random-room-member:matrix.org",
+          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"},
+          "trust" => %{"level" => "unverified"}
+        })
+
+      assert {:ok, _state} =
+               ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
+
+      # The mandatory human-in-the-loop gate (docs/bcp.md) must not be
+      # satisfiable by an unverified room/channel member — the item stays
+      # pending rather than being silently approved.
+      assert Enum.any?(TriOnyx.BCP.ApprovalQueue.list_pending(), &(&1.id == approval_id))
+
+      TriOnyx.BCP.ApprovalQueue.reject(approval_id, "test cleanup")
+    end
+
+    test "thumbsup approval reaction with no trust field at all is ignored", %{state: state} do
+      {:ok, approval_id} =
+        TriOnyx.BCP.ApprovalQueue.submit(%{
+          query: %{},
+          from_agent: "controller",
+          to_agent: "reader",
+          justification: "test"
+        })
+
+      frame =
+        Jason.encode!(%{
+          "type" => "reaction",
+          "approval_id" => approval_id,
+          "emoji" => "👍",
+          "sender" => "@random-room-member:matrix.org",
+          "channel" => %{"platform" => "matrix", "room_id" => "!room:matrix.org"}
+        })
+
+      assert {:ok, _state} =
+               ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
+
+      assert Enum.any?(TriOnyx.BCP.ApprovalQueue.list_pending(), &(&1.id == approval_id))
+
+      TriOnyx.BCP.ApprovalQueue.reject(approval_id, "test cleanup")
     end
 
     test "reaction with no approval_id or agent_name is handled gracefully", %{state: state} do
