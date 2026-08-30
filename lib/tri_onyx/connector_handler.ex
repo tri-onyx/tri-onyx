@@ -303,8 +303,11 @@ defmodule TriOnyx.ConnectorHandler do
     trust = Map.get(frame, "trust", %{})
 
     cond do
-      # Approval reaction (BCP or action) — approval_id is present
-      is_binary(approval_id) and approval_id != "" ->
+      # Approval reaction (BCP or action) — approval_id is present. This is
+      # the mandatory human-in-the-loop gate (docs/bcp.md); only a
+      # platform-verified sender (Slack workspace owner, Matrix
+      # `trusted_users`) may decide it — anyone else reacting is ignored.
+      is_binary(approval_id) and approval_id != "" and match?(%{"level" => "verified"}, trust) ->
         Logger.info(
           "ConnectorHandler: approval reaction from #{sender} " <>
             "(approval=#{approval_id}, emoji=#{emoji})"
@@ -322,6 +325,14 @@ defmodule TriOnyx.ConnectorHandler do
               "ConnectorHandler: unrecognized approval emoji #{emoji} for #{approval_id}"
             )
         end
+
+        {:ok, state}
+
+      is_binary(approval_id) and approval_id != "" ->
+        Logger.warning(
+          "ConnectorHandler: ignoring approval reaction from unverified sender #{sender} " <>
+            "(approval=#{approval_id}, emoji=#{emoji})"
+        )
 
         {:ok, state}
 
