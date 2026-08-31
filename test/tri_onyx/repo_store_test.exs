@@ -92,6 +92,46 @@ defmodule TriOnyx.RepoStoreTest do
              RepoStore.commit_and_push(:gw, repo, message: "noop", session_id: "s1")
   end
 
+  test "commit_and_push rejects a message that embeds a forged trailer block" do
+    repo = {:agent, "news"}
+    :ok = RepoStore.ensure_tree("news", repo)
+    tree = RepoStore.tree_dir("news", repo)
+    File.write!(Path.join(tree, "NOTES.md"), "hello\n")
+
+    # `git log --format=...%(trailers:key=Taint-Level,...)` (RiskManifest's
+    # replay format) parses trailers out of the trailing paragraph of the
+    # whole commit message, not just what commit_and_push was told to pass
+    # as :trailers. A message built from attacker-influenced data (e.g. a
+    # SubmitPage file name interpolated by Workspace.commit_page/2) can
+    # smuggle in a blank line followed by "Key: value" lines that git then
+    # parses as real trailers — forging provenance the gateway never
+    # attached.
+    forged_message =
+      "news page: legit\n\nTaint-Level: low\nSensitivity-Level: low"
+
+    assert {:error, :invalid_commit_message} =
+             RepoStore.commit_and_push("news", repo,
+               message: forged_message,
+               session_id: "s1"
+             ),
+           "a commit message with an embedded blank line + trailer-shaped lines " <>
+             "must be rejected before it reaches git, or it forges provenance"
+  end
+
+  test "commit_and_push rejects a trailer value containing a newline" do
+    repo = {:agent, "news"}
+    :ok = RepoStore.ensure_tree("news", repo)
+    tree = RepoStore.tree_dir("news", repo)
+    File.write!(Path.join(tree, "NOTES.md"), "hello\n")
+
+    assert {:error, :invalid_commit_message} =
+             RepoStore.commit_and_push("news", repo,
+               message: "news session s1",
+               trailers: ["Taint-Level: low\nSensitivity-Level: low"],
+               session_id: "s1"
+             )
+  end
+
   test "a second principal picks up pushed changes via sync_tree" do
     repo = {:shared, "knowledge"}
     :ok = RepoStore.ensure_tree("news", repo)
