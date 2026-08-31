@@ -468,12 +468,14 @@ defmodule TriOnyx.RepoStore do
   @spec commit_and_push(principal(), repo_id(), keyword()) ::
           {:ok, String.t()} | {:ok, :no_changes} | {:ok, {:conflict, String.t()}} | {:error, term()}
   def commit_and_push(principal, repo_id, opts) do
-    with :ok <- ensure_tree(principal, repo_id) do
+    message = Keyword.fetch!(opts, :message)
+    trailers = Keyword.get(opts, :trailers, [])
+
+    with :ok <- validate_commit_text(message, trailers),
+         :ok <- ensure_tree(principal, repo_id) do
       gd = gitdir(principal, repo_id)
       tree = tree_dir(principal, repo_id)
       author_name = Keyword.get(opts, :author, principal_dir(principal))
-      message = Keyword.fetch!(opts, :message)
-      trailers = Keyword.get(opts, :trailers, [])
       session_id = Keyword.get(opts, :session_id, "manual")
 
       # `git add -- <path>` fails outright if any pathspec matches nothing
@@ -620,7 +622,8 @@ defmodule TriOnyx.RepoStore do
   @spec empty_commit(repo_id(), String.t(), String.t(), [String.t()]) ::
           {:ok, String.t()} | {:error, term()}
   def empty_commit(repo_id, author_name, message, trailers) do
-    with :ok <- ensure_tree(:gw, repo_id),
+    with :ok <- validate_commit_text(message, trailers),
+         :ok <- ensure_tree(:gw, repo_id),
          :ok <- sync_tree(:gw, repo_id) do
       gd = gitdir(:gw, repo_id)
       tree = tree_dir(:gw, repo_id)
@@ -659,6 +662,29 @@ defmodule TriOnyx.RepoStore do
   end
 
   # --- Private ---
+
+  # `git log --format=...%(trailers:key=...)...` (see RiskManifest) parses
+  # trailers out of the trailing paragraph of the *entire* commit message,
+  # not just the strings passed as `:trailers` here. A commit `message` (or
+  # trailer value) built from attacker-influenced data — e.g. a SubmitPage
+  # file name interpolated into `Workspace.commit_page/2`'s message — can
+  # smuggle in an embedded blank line followed by lines that look like
+  # "Taint-Level: low", which git then parses as a real trailer
+  # indistinguishable from one the gateway actually attached. Rejecting
+  # embedded newlines anywhere in the composed message keeps every commit's
+  # trailer block exactly what `trailers` says it is. Same defense as
+  # `Workspace.review_artifacts/2`'s :invalid_path check on `Reviewed-Path`.
+  @spec validate_commit_text(String.t(), [String.t()]) :: :ok | {:error, :invalid_commit_message}
+  defp validate_commit_text(message, trailers) do
+    if Enum.any?([message | trailers], &contains_newline?/1) do
+      {:error, :invalid_commit_message}
+    else
+      :ok
+    end
+  end
+
+  @spec contains_newline?(String.t()) :: boolean()
+  defp contains_newline?(text), do: String.contains?(text, ["\n", "\r"])
 
   defp normalize_push(:ok), do: :ok
   defp normalize_push({:conflict, branch}), do: {:error, {:conflict, branch}}
