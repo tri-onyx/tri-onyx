@@ -9,6 +9,15 @@ logger = logging.getLogger(__name__)
 _prompt_timestamps: dict[str, float] = {}
 
 
+def _client_ip(request):
+    """The client's real network address. Nothing in this deployment sits
+    in front of the frontend to set X-Forwarded-For, so trusting it would
+    let any client pick their own rate-limit bucket (and forge log lines) by
+    sending an arbitrary value — REMOTE_ADDR is the only identity a client
+    cannot spoof."""
+    return request.META.get("REMOTE_ADDR", "unknown")
+
+
 class PromptRateLimitMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -16,7 +25,7 @@ class PromptRateLimitMiddleware:
 
     def __call__(self, request):
         if request.method == "POST" and request.path.endswith("/prompt"):
-            ip = self._get_client_ip(request)
+            ip = _client_ip(request)
             now = time.monotonic()
             last = _prompt_timestamps.get(ip, 0)
 
@@ -31,12 +40,6 @@ class PromptRateLimitMiddleware:
             self._cleanup(now)
 
         return self.get_response(request)
-
-    def _get_client_ip(self, request):
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "unknown")
 
     def _cleanup(self, now):
         if len(_prompt_timestamps) > 1000:
@@ -60,12 +63,6 @@ class RequestLoggingMiddleware:
             request.method,
             request.path,
             response.status_code,
-            self._get_client_ip(request),
+            _client_ip(request),
         )
         return response
-
-    def _get_client_ip(self, request):
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "unknown")
