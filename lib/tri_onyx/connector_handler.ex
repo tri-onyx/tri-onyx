@@ -144,7 +144,7 @@ defmodule TriOnyx.ConnectorHandler do
 
     expected_token = Application.get_env(:tri_onyx, :connector_token)
 
-    if expected_token != nil and token == expected_token do
+    if expected_token != nil and secure_compare(token, expected_token) do
       Logger.info("ConnectorHandler: connector #{connector_id} (#{platform}) authenticated")
 
       register_connector(connector_id, platform)
@@ -827,6 +827,17 @@ defmodule TriOnyx.ConnectorHandler do
   end
 
   # --- Private Helpers ---
+
+  # Constant-time comparison — mirrors TriOnyx.Triggers.ExternalMessage.secure_compare/2
+  # and TriOnyx.WebhookSignature.constant_time_compare/2. A `==` comparison here
+  # would let an attacker on the unauthenticated /connectors/ws socket recover
+  # connector_token byte by byte via response timing. Exported (not `defp`) so
+  # the timing property below can be verified directly.
+  @doc false
+  @spec secure_compare(String.t(), String.t()) :: boolean()
+  def secure_compare(a, b) when is_binary(a) and is_binary(b) do
+    byte_size(a) == byte_size(b) and :crypto.hash_equals(a, b)
+  end
 
   @spec trust_to_trigger(map()) :: atom()
   defp trust_to_trigger(%{"level" => "verified"}), do: :verified_input
