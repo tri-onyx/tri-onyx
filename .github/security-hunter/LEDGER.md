@@ -1,0 +1,7 @@
+# Security Hunter Ledger
+
+One line per entry, newest last.
+
+- 2026-09-02 | FIXED | gateway-http | ConnectorHandler register-frame auth compared connector_token with `==` instead of a constant-time primitive, letting an attacker on the unauthenticated /connectors/ws socket recover the shared secret via response timing (the sibling secure-compare helpers in ExternalMessage and WebhookSignature already use :crypto.hash_equals/2) | lib/tri_onyx/connector_handler.ex
+- 2026-09-02 | DUPLICATE | gateway-http | GET /images/:agent_name/:session_id/:image_id path traversal (agent_name/session_id baked into the safe_prefix check, same class /audio was hardened against in d5a2fc3) — already fixed in open PR #35 (security-hunter/2026-08-26-images-path-traversal); not re-filed here
+- 2026-09-02 | NOTE | gateway-http | Router.extract_source_ip/1 falls back to trusting the client-supplied X-Forwarded-For header when CF-Connecting-IP is absent, and this value feeds WebhookReceiver.check_ip_allowlist/2 (a real security gate, not just logging/rate-limiting). Not fixed here: exploitability depends on whether the gateway is ever reachable other than through the Cloudflare Tunnel that sets CF-Connecting-IP truthfully (the same judgment call already made, for the same header, in the 2026-08-25 frontend DOWNGRADE entry — worth a human re-check if the gateway port is ever exposed directly, e.g. in local/dev topologies)

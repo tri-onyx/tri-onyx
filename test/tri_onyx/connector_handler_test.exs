@@ -99,6 +99,55 @@ defmodule TriOnyx.ConnectorHandlerTest do
     end
   end
 
+  describe "register token comparison timing" do
+    test "token comparison must not leak the shared secret through response timing" do
+      # A comparison that short-circuits on the first differing byte (like the
+      # `==` operator) takes measurably longer to reject a guess that's wrong
+      # only in its LAST byte than one that's wrong in its FIRST byte. A large
+      # enough secret makes that gap dwarf ordinary scheduling jitter. This
+      # exercises the exact comparison `handle_frame/2`'s register clause
+      # calls (`ConnectorHandler.secure_compare/2`) directly — bypassing the
+      # JSON decode of the register frame, whose own timing noise (decoding a
+      # multi-megabyte string) would otherwise swamp the much smaller
+      # comparison-time signal being measured here.
+      secret = :crypto.strong_rand_bytes(5_000_000)
+      secret_size = byte_size(secret)
+
+      wrong_first_byte = <<0>> <> binary_part(secret, 1, secret_size - 1)
+
+      last_byte = binary_part(secret, secret_size - 1, 1)
+      flipped_last_byte = if last_byte == <<0>>, do: <<1>>, else: <<0>>
+      wrong_last_byte = binary_part(secret, 0, secret_size - 1) <> flipped_last_byte
+
+      avg_time_us = fn candidate ->
+        trials = 50
+
+        Enum.sum(
+          for _ <- 1..trials do
+            t0 = System.monotonic_time(:microsecond)
+            ConnectorHandler.secure_compare(secret, candidate)
+            System.monotonic_time(:microsecond) - t0
+          end
+        ) / trials
+      end
+
+      early_avg = avg_time_us.(wrong_first_byte)
+      late_avg = avg_time_us.(wrong_last_byte)
+
+      ratio = late_avg / max(early_avg, 0.001)
+
+      assert ratio < 20,
+             "ConnectorHandler.secure_compare/2 leaks timing information about " <>
+               "connector_token: rejecting a guess wrong only in its last byte took " <>
+               "#{Float.round(ratio, 1)}x longer (#{Float.round(late_avg, 1)}us avg) than " <>
+               "one wrong in its first byte (#{Float.round(early_avg, 1)}us avg) — an " <>
+               "attacker on the unauthenticated /connectors/ws socket could recover the " <>
+               "secret byte by byte. It must use a constant-time primitive, matching " <>
+               "TriOnyx.Triggers.ExternalMessage.secure_compare/2 and " <>
+               "TriOnyx.WebhookSignature.constant_time_compare/2."
+    end
+  end
+
   describe "unauthenticated message handling" do
     setup do
       {:ok, state} = ConnectorHandler.init([])
