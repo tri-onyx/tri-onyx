@@ -504,15 +504,24 @@ defmodule TriOnyx.Workspace do
   `/repos/<shared>/<rest>` → `shared/<name>/<rest>`;
   `/repos/agents/<other>/<rest>` → `agents/<other>/<rest>`.
   Relative paths are treated as relative to `/workspace`.
+
+  The path is normalized (`Path.expand/2`, anchored at `/workspace`)
+  before mapping, the same way `InformationClassifier.controlled_path?/1`
+  normalizes it to decide whether a path is controlled at all. Without
+  this, a traversal like `/workspace/../repos/<shared>/<file>` — which the
+  container's OS resolves to the exact same real file as
+  `/repos/<shared>/<file>` — would map to a bogus canonical path
+  (`agents/<agent>/../repos/<shared>/<file>`) that never matches the real
+  file's risk-manifest entry, letting a read of already-mounted, already
+  labeled content dodge its recorded sensitivity.
   """
   @spec canonical_path(String.t(), String.t()) :: {:ok, String.t()} | :error
   def canonical_path(agent_name, container_path) do
-    case container_path do
+    case Path.expand(container_path, container_root()) do
       "/workspace/" <> rest -> {:ok, "agents/#{agent_name}/#{rest}"}
       "/repos/agents/" <> rest -> {:ok, "agents/#{rest}"}
       "/repos/" <> rest -> {:ok, "shared/#{rest}"}
-      "/" <> _ -> :error
-      rel -> {:ok, "agents/#{agent_name}/#{rel}"}
+      _ -> :error
     end
   end
 
