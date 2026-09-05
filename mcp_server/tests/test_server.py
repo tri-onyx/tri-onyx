@@ -13,6 +13,7 @@ from mcp.server.auth.provider import AccessToken
 from mcp.server.mcpserver.exceptions import ToolError
 from starlette.testclient import TestClient
 
+from mcp_server import main
 from mcp_server.auth import TriOnyxAuthProvider
 from mcp_server.config import ConfigError, parse_config
 from mcp_server.gateway_bridge import GatewayError, TurnStatus, make_room_id
@@ -436,6 +437,43 @@ def test_repeated_wrong_passwords_lock_the_login_out(client, wired):
     )
     assert response.status_code == 429
     assert provider._codes == {}
+
+
+def test_x_forwarded_for_does_not_bypass_the_login_lockout_as_deployed(wired):
+    """``main._uvicorn_config`` builds the exact ``uvicorn.Config`` production
+    serves the app with. It must not enable uvicorn's own X-Forwarded-For
+    handling: that would make uvicorn itself rewrite ``request.client`` from a
+    caller-supplied header before ``client_ip`` ever runs, so one attacker
+    could spend the per-IP login-lockout budget over and over by sending a
+    different spoofed address on every attempt — exactly what ``client_ip``'s
+    own docstring says ``X-Forwarded-For`` must never be allowed to do.
+    """
+    config, provider, _mcp, app = wired
+    served = main._uvicorn_config(config, app)
+    served.load()
+
+    with TestClient(served.loaded_app, base_url="https://testserver") as c:
+        client_id = register_client(c).json()["client_id"]
+        location = authorize(c, client_id).headers["location"]
+        txn = parse_qs(urlsplit(location).query)["txn"][0]
+
+        for i in range(provider._auth.max_login_failures):
+            c.post(
+                "/login",
+                data={"txn": txn, "password": "wrong"},
+                headers={"x-forwarded-for": f"203.0.113.{i}"},
+            )
+        response = c.post(
+            "/login",
+            data={"txn": txn, "password": OPERATOR_PASSWORD},
+            headers={"x-forwarded-for": "203.0.113.250"},
+            follow_redirects=False,
+        )
+    assert response.status_code == 429, (
+        "a different spoofed X-Forwarded-For on each attempt let the login "
+        f"through with status {response.status_code} instead of being locked "
+        "out by the per-IP limiter"
+    )
 
 
 # ---------------------------------------------------------------------------
