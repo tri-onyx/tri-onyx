@@ -6,10 +6,11 @@ import asyncio
 import logging
 import os
 import sys
+from typing import Any
 
 import uvicorn
 
-from mcp_server.config import ConfigError, load_config
+from mcp_server.config import ConfigError, McpConfig, load_config
 from mcp_server.server import build_all
 
 logger = logging.getLogger("mcp_server")
@@ -24,6 +25,31 @@ def _configure_logging() -> None:
     # uvicorn's access log would record query strings — which carry the
     # single-use `txn` of a pending authorization. Keep it off.
     logging.getLogger("uvicorn.access").disabled = True
+
+
+def _uvicorn_config(config: McpConfig, app: Any) -> uvicorn.Config:
+    """Build the :class:`uvicorn.Config` used to serve *app*.
+
+    ``proxy_headers`` stays off. ``mcp_server.server.client_ip`` already reads
+    Cloudflare's own ``CF-Connecting-IP`` header directly and deliberately
+    ignores ``X-Forwarded-For`` (its first hop is caller-supplied). Turning on
+    uvicorn's own forwarded-header handling here — as this used to, with
+    ``forwarded_allow_ips="*"`` — makes uvicorn itself rewrite
+    ``request.client`` from that same spoofable header on *every* request
+    (``"*"`` means every peer is treated as a trusted proxy), regardless of
+    ``server.trusted_proxy_headers``. That silently defeats the per-IP login
+    lockout and the ``/register`` rate limiter, both of which fall back to
+    ``request.client`` whenever ``CF-Connecting-IP`` is absent.
+    """
+    return uvicorn.Config(
+        app,
+        host=config.bind_host,
+        port=config.bind_port,
+        log_config=None,
+        access_log=False,
+        proxy_headers=False,
+        timeout_graceful_shutdown=10,
+    )
 
 
 async def _serve() -> int:
@@ -43,20 +69,7 @@ async def _serve() -> int:
     )
 
     await bridge.start()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            host=config.bind_host,
-            port=config.bind_port,
-            log_config=None,
-            access_log=False,
-            # The tunnel terminates TLS; we generate our own public URLs from
-            # `public_url`, so forwarded headers are only used for client IPs.
-            proxy_headers=True,
-            forwarded_allow_ips="*",
-            timeout_graceful_shutdown=10,
-        )
-    )
+    server = uvicorn.Server(_uvicorn_config(config, app))
     try:
         await server.serve()
     finally:
