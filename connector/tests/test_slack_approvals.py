@@ -143,3 +143,16 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+    async def test_app_message_trust_is_unverified(self, adapter):
+        """A GitHub/CI app has no human behind it. The gateway maps
+        trust.level == "verified" to the low-taint :verified_input trigger
+        (taint_matrix.ex), the same class as an internal team member's
+        message — an app-authored message (e.g. mirrored GitHub PR/issue
+        text, attacker-controlled) must not get that reduced scrutiny."""
+        await adapter._handle_message(self._event(bot_id="BGITHUB", username="GitHub"))
+        assert adapter._received[0].trust == {"level": "unverified"}
+
+    async def test_human_channel_member_trust_is_still_verified(self, adapter):
+        await adapter._handle_message(self._event(user="UALICE"))
+        assert adapter._received[0].trust == {"level": "verified"}
