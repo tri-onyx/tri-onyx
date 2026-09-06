@@ -470,9 +470,11 @@ class SlackAdapter(BaseAdapter):
         """Route a message in an agent-owned channel to its bound agent.
 
         Bound channels are internal team spaces (the workspace is the trust
-        boundary), so there is no consent gating and members are treated as
-        verified senders. Every message in the channel goes to the agent —
-        no @-mention needed.
+        boundary), so there is no consent gating and human members are
+        treated as verified senders. Every message in the channel goes to
+        the agent — no @-mention needed — but a post from another app
+        (GitHub, CI, …) carries no verified human identity and is always
+        unverified, even in a bound channel.
         """
         user_id = event.get("user", "")
         bot_id = event.get("bot_id", "")
@@ -486,7 +488,9 @@ class SlackAdapter(BaseAdapter):
 
         if not user_id and bot_id:
             # Another app posted (GitHub, CI, …). It has no Slack user, so
-            # name it from the event itself.
+            # name it from the event itself. There is no verified human
+            # behind this content — it must not get the same low-taint
+            # trust level as a real channel member (see trust_level below).
             display_name = self._app_name(event)
             user_context = (
                 f"SYSTEM: This message was posted by the Slack app "
@@ -506,6 +510,12 @@ class SlackAdapter(BaseAdapter):
                     f"(ID: {user_id}) in your Slack channel."
                 )
 
+        # Only a real Slack user is a verified channel member; an app/bot
+        # post has no human behind it and must carry the same trust as
+        # any other unverified input (taint_matrix.ex: verified_input is
+        # low-taint, unverified_input is high-taint).
+        trust_level = "verified" if user_id else "unverified"
+
         msg = InboundMessage(
             agent_name=room_cfg.agent,
             content=f"{text}\n\n---\n{user_context}",
@@ -515,7 +525,7 @@ class SlackAdapter(BaseAdapter):
                 "user_id": user_id,
                 "display_name": display_name,
             },
-            trust={"level": "verified"},
+            trust={"level": trust_level},
         )
 
         if self._on_message:
