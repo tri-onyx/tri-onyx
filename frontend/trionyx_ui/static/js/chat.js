@@ -408,8 +408,33 @@ function escapeAttr(text) {
   return String(text ?? '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+let markedSafetyConfigured = false;
+
+function configureMarkedSafety() {
+  if (markedSafetyConfigured || typeof marked === 'undefined' || typeof MarkdownSafety === 'undefined') return;
+  // Untrusted markdown (agent/tool-result content): raw HTML must never
+  // reach the DOM unescaped, and link/image destinations must be
+  // scheme-checked — see markdown_safety.js for why marked needs this
+  // (unlike the server-rendered page-load path's markdown-it, which
+  // already does both via `html: False` + its default link validator).
+  marked.use({
+    renderer: {
+      html(token) {
+        return MarkdownSafety.escapeHtmlText(token.text);
+      },
+    },
+    walkTokens(token) {
+      if ((token.type === 'link' || token.type === 'image') && !MarkdownSafety.isSafeLinkUrl(token.href)) {
+        token.href = '#';
+      }
+    },
+  });
+  markedSafetyConfigured = true;
+}
+
 function renderMarkdown(text) {
   if (typeof marked !== 'undefined') {
+    configureMarkedSafety();
     marked.setOptions({ breaks: true, gfm: true });
     return marked.parse(text).replace(/<a href="/g, '<a target="_blank" rel="noopener" href="');
   }
