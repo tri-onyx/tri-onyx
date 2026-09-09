@@ -299,6 +299,35 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "POST /hooks/:endpoint_id — source IP used for allowlisting" do
+    test "does not let a caller spoof X-Forwarded-For to bypass the endpoint's IP allowlist" do
+      {:ok, endpoint} =
+        TriOnyx.WebhookRegistry.create(%{
+          "label" => "ip-allowlist-poc",
+          "agents" => ["test-agent"],
+          "signing_mode" => "none",
+          "allowed_ips" => ["203.0.113.9"]
+        })
+
+      on_exit(fn -> TriOnyx.WebhookRegistry.delete(endpoint.id) end)
+
+      # Plug.Test's default remote_ip (127.0.0.1) is not on the allowlist, and
+      # no CF-Connecting-IP header is present (i.e. this request didn't come
+      # through the documented Cloudflare Tunnel), so only a caller relying
+      # on a trustworthy peer address should be rejected here.
+      conn =
+        conn(:post, "/hooks/#{endpoint.id}", Jason.encode!(%{}))
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-forwarded-for", "203.0.113.9")
+        |> call_router()
+
+      assert conn.status == 403,
+             "a caller with no verified route through Cloudflare Tunnel spoofed " <>
+               "X-Forwarded-For to impersonate an allowlisted IP and got status " <>
+               "#{conn.status} (body: #{inspect(conn.resp_body)}) instead of 403 forbidden"
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()

@@ -1600,20 +1600,21 @@ defmodule TriOnyx.Router do
 
   @spec extract_source_ip(Plug.Conn.t()) :: String.t()
   defp extract_source_ip(conn) do
-    # Prefer CF-Connecting-IP (set by Cloudflare Tunnel), then X-Forwarded-For,
-    # then fall back to the raw peer address.
+    # Prefer CF-Connecting-IP (set by Cloudflare Tunnel, the only fronting
+    # proxy this deployment documents — see docs/webhook-receiver-design.md),
+    # then fall back to the raw peer address. X-Forwarded-For is NOT trusted:
+    # nothing in this deployment is documented to set it, so any caller who
+    # can reach this port directly (bypassing the tunnel) could write an
+    # arbitrary value and use it to impersonate an allowed IP against a
+    # webhook endpoint's `allowed_ips` allowlist, or rotate it per request to
+    # dodge the per-source-IP rate limiter — the raw peer address is the only
+    # value here a caller cannot forge.
     case Plug.Conn.get_req_header(conn, "cf-connecting-ip") do
       [ip | _] ->
         String.trim(ip)
 
       [] ->
-        case Plug.Conn.get_req_header(conn, "x-forwarded-for") do
-          [forwarded | _] ->
-            forwarded |> String.split(",") |> List.first() |> String.trim()
-
-          [] ->
-            conn.remote_ip |> :inet.ntoa() |> List.to_string()
-        end
+        conn.remote_ip |> :inet.ntoa() |> List.to_string()
     end
   end
 
