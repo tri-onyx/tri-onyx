@@ -429,4 +429,195 @@ defmodule TriOnyx.AgentSessionTest do
                )
     end
   end
+
+  describe "gateway-mediated action requests require the matching tool grant" do
+    # `@test_definition` declares only ["Read", "Grep"] — none of the
+    # gateway-mediated tools below. These actions run against gateway-held
+    # shared credentials the agent container never sees (see
+    # `TriOnyx.Connectors.Email` / `TriOnyx.Connectors.Calendar` moduledocs:
+    # "Credentials are held by the gateway — agents never see them"), so the
+    # `tools` grant on the agent definition is the *only* authorization
+    # boundary standing between an untrusted request frame and a real
+    # side-effecting action against that shared mailbox/calendar — the same
+    # role it plays for the GitHub tool's own grant check
+    # (`"GitHub" not in state.definition.tools -> {:deny, ...}` in
+    # `handle_agent_event({:github_request, ...}, state)`). Every one of
+    # these request frames must be denied, synchronously and without ever
+    # attempting the underlying action, when the issuing agent's definition
+    # does not declare the corresponding tool.
+    defp ungranted_state(overrides \\ %{}) do
+      Map.merge(%{id: "grant-test-1", definition: @test_definition, port: self()}, overrides)
+    end
+
+    test "send_email_request is denied when SendEmail is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:send_email_request, "req-1", "/workspace/drafts/x.json"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "send_email_response",
+                         "request_id" => "req-1",
+                         "success" => false,
+                         "detail" => "SendEmail tool not granted"
+                       }}},
+                     500
+    end
+
+    test "save_draft_request is denied when SaveDraft is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:save_draft_request, "req-2", "/workspace/drafts/x.json"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "save_draft_response",
+                         "success" => false,
+                         "detail" => "SaveDraft tool not granted"
+                       }}},
+                     500
+    end
+
+    test "move_email_request is denied when MoveEmail is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:move_email_request, "req-3", "42", "INBOX", "Archive"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "move_email_response",
+                         "success" => false,
+                         "detail" => "MoveEmail tool not granted"
+                       }}},
+                     500
+    end
+
+    test "create_folder_request is denied when CreateFolder is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:create_folder_request, "req-4", "Projects"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "create_folder_response",
+                         "success" => false,
+                         "detail" => "CreateFolder tool not granted"
+                       }}},
+                     500
+    end
+
+    test "calendar_query_request is denied when CalendarQuery is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:calendar_query_request, "req-5", %{"calendar" => "work"}}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "calendar_query_response",
+                         "success" => false,
+                         "detail" => "CalendarQuery tool not granted"
+                       }}},
+                     500
+    end
+
+    test "calendar_create_request is denied when CalendarCreate is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:calendar_create_request, "req-6", "/workspace/drafts/e.json"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "calendar_create_response",
+                         "success" => false,
+                         "detail" => "CalendarCreate tool not granted"
+                       }}},
+                     500
+    end
+
+    test "calendar_update_request is denied when CalendarUpdate is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:calendar_update_request, "req-7", "/workspace/drafts/e.json"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "calendar_update_response",
+                         "success" => false,
+                         "detail" => "CalendarUpdate tool not granted"
+                       }}},
+                     500
+    end
+
+    test "calendar_delete_request is denied when CalendarDelete is not granted" do
+      state = ungranted_state()
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:calendar_delete_request, "req-8", "42", "work"}},
+          state
+        )
+
+      assert_receive {:"$gen_cast",
+                      {:send,
+                       %{
+                         "type" => "calendar_delete_response",
+                         "success" => false,
+                         "detail" => "CalendarDelete tool not granted"
+                       }}},
+                     500
+    end
+
+    test "granting the tool allows the request through instead of being denied" do
+      granted = %{@test_definition | tools: ["Read", "Grep", "CalendarQuery"]}
+      state = ungranted_state(%{definition: granted})
+
+      {:noreply, _state} =
+        AgentSession.handle_info(
+          {:agent_event, self(), {:calendar_query_request, "req-9", %{"calendar" => "work"}}},
+          state
+        )
+
+      # Never denied for missing grant — whatever response eventually comes
+      # back (the calendar connector is unconfigured in test, so it will be
+      # an error) is not this specific denial.
+      refute_receive {:"$gen_cast",
+                      {:send, %{"detail" => "CalendarQuery tool not granted"}}},
+                     500
+    end
+  end
 end

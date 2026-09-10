@@ -1040,90 +1040,11 @@ defmodule TriOnyx.AgentSession do
   end
 
   defp handle_agent_event({:send_email_request, req_id, draft_path}, state) do
-    Logger.info("AgentSession #{state.id}: send_email_request draft=#{draft_path}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-
-    # Translate agent path (/workspace/...) to host path
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    # Validate path is within agent workspace (prevent path traversal)
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
-      port = state.port
-      session_id = state.id
-      agent_name = state.definition.name
-
-      Task.start(fn ->
-        proceed =
-          if ToolRegistry.requires_approval?("SendEmail") do
-            # Read draft for approval context
-            draft_summary = read_draft_summary(host_path)
-
-            {:ok, approval_id} =
-              BCP.ApprovalQueue.submit(%{
-                kind: "action",
-                agent_name: agent_name,
-                session_id: session_id,
-                tool_name: "SendEmail",
-                tool_input: Map.merge(%{"draft_path" => draft_path}, draft_summary)
-              })
-
-            approval_frame =
-              Jason.encode!(%{
-                "type" => "approval_request",
-                "approval_id" => approval_id,
-                "kind" => "action",
-                "from_agent" => agent_name,
-                "to_agent" => "",
-                "category" => 0,
-                "query_summary" => "SendEmail: #{Map.get(draft_summary, "subject", draft_path)}",
-                "response_content" => format_draft_for_approval(draft_summary),
-                "anomalies" => []
-              })
-
-            TriOnyx.ConnectorHandler.broadcast_to_connectors(approval_frame)
-
-            case BCP.ApprovalQueue.await_decision(BCP.ApprovalQueue, approval_id) do
-              {:approved, _item} -> :proceed
-              {:rejected, reason} -> {:rejected, reason}
-              {:error, :timeout} -> {:rejected, "approval timed out"}
-            end
-          else
-            :proceed
-          end
-
-        case proceed do
-          :proceed ->
-            case TriOnyx.Connectors.Email.send_email(host_path) do
-              {:ok, message_id} ->
-                AgentPort.send_send_email_response(port, req_id, true, "sent", message_id)
-
-              {:error, reason} ->
-                AgentPort.send_send_email_response(port, req_id, false, reason)
-            end
-
-          {:rejected, reason} ->
-            AgentPort.send_send_email_response(port, req_id, false, "approval rejected: #{reason}")
-        end
-      end)
-
-      broadcast_event(state, %{
-        "type" => "send_email",
-        "agent_name" => state.definition.name,
-        "draft_path" => draft_path,
-        "status" => "pending_approval"
-      })
+    if "SendEmail" in state.definition.tools do
+      do_send_email_request(req_id, draft_path, state)
     else
-      AgentPort.send_send_email_response(state.port, req_id, false, "path traversal rejected")
+      deny_gateway_action(state, "SendEmail", req_id, &AgentPort.send_send_email_response/4)
     end
-
-    {:noreply, state}
   end
 
   defp handle_agent_event({:github_request, req_id, command, args}, state) do
@@ -1191,228 +1112,59 @@ defmodule TriOnyx.AgentSession do
   end
 
   defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
-    Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
-      port = state.port
-
-      Task.start(fn ->
-        case TriOnyx.Connectors.Email.save_draft(host_path) do
-          {:ok, :saved} ->
-            AgentPort.send_save_draft_response(port, req_id, true, "draft saved to IMAP Drafts")
-
-          {:error, reason} ->
-            AgentPort.send_save_draft_response(port, req_id, false, reason)
-        end
-      end)
+    if "SaveDraft" in state.definition.tools do
+      do_save_draft_request(req_id, draft_path, state)
     else
-      AgentPort.send_save_draft_response(state.port, req_id, false, "path traversal rejected")
+      deny_gateway_action(state, "SaveDraft", req_id, &AgentPort.send_save_draft_response/4)
     end
-
-    {:noreply, state}
   end
 
   defp handle_agent_event({:move_email_request, req_id, uid, source_folder, dest_folder}, state) do
-    Logger.info(
-      "AgentSession #{state.id}: move_email_request uid=#{uid} " <>
-        "#{source_folder} -> #{dest_folder}"
-    )
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-    port = state.port
-
-    Task.start(fn ->
-      case TriOnyx.Connectors.Email.move_email(uid, source_folder, dest_folder, agent_dir) do
-        {:ok, :moved} ->
-          AgentPort.send_move_email_response(port, req_id, true, "moved")
-
-        {:error, reason} ->
-          AgentPort.send_move_email_response(port, req_id, false, reason)
-      end
-    end)
-
-    broadcast_event(state, %{
-      "type" => "move_email",
-      "agent_name" => state.definition.name,
-      "uid" => uid,
-      "source_folder" => source_folder,
-      "dest_folder" => dest_folder,
-      "status" => "moving"
-    })
-
-    {:noreply, state}
+    if "MoveEmail" in state.definition.tools do
+      do_move_email_request(req_id, uid, source_folder, dest_folder, state)
+    else
+      deny_gateway_action(state, "MoveEmail", req_id, &AgentPort.send_move_email_response/4)
+    end
   end
 
   defp handle_agent_event({:create_folder_request, req_id, folder_name}, state) do
-    Logger.info("AgentSession #{state.id}: create_folder_request folder=#{folder_name}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-    port = state.port
-
-    Task.start(fn ->
-      case TriOnyx.Connectors.Email.create_folder(folder_name, agent_dir) do
-        {:ok, :created} ->
-          AgentPort.send_create_folder_response(port, req_id, true, "created")
-
-        {:error, reason} ->
-          AgentPort.send_create_folder_response(port, req_id, false, reason)
-      end
-    end)
-
-    broadcast_event(state, %{
-      "type" => "create_folder",
-      "agent_name" => state.definition.name,
-      "folder_name" => folder_name,
-      "status" => "creating"
-    })
-
-    {:noreply, state}
+    if "CreateFolder" in state.definition.tools do
+      do_create_folder_request(req_id, folder_name, state)
+    else
+      deny_gateway_action(state, "CreateFolder", req_id, &AgentPort.send_create_folder_response/4)
+    end
   end
 
   defp handle_agent_event({:calendar_query_request, req_id, params}, state) do
-    Logger.info("AgentSession #{state.id}: calendar_query_request params=#{inspect(params)}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-    port = state.port
-
-    Task.start(fn ->
-      case TriOnyx.Connectors.Calendar.calendar_query(agent_dir, params) do
-        {:ok, events} ->
-          AgentPort.send_calendar_query_response(port, req_id, true, "#{length(events)} events", events)
-
-        {:error, reason} ->
-          AgentPort.send_calendar_query_response(port, req_id, false, reason)
-      end
-    end)
-
-    broadcast_event(state, %{
-      "type" => "calendar_query",
-      "agent_name" => state.definition.name,
-      "params" => params,
-      "status" => "querying"
-    })
-
-    {:noreply, state}
+    if "CalendarQuery" in state.definition.tools do
+      do_calendar_query_request(req_id, params, state)
+    else
+      deny_gateway_action(state, "CalendarQuery", req_id, &AgentPort.send_calendar_query_response/4)
+    end
   end
 
   defp handle_agent_event({:calendar_create_request, req_id, draft_path}, state) do
-    Logger.info("AgentSession #{state.id}: calendar_create_request draft=#{draft_path}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
-      port = state.port
-
-      Task.start(fn ->
-        case TriOnyx.Connectors.Calendar.calendar_create(host_path) do
-          {:ok, event} ->
-            write_calendar_event(agent_dir, event)
-            AgentPort.send_calendar_create_response(port, req_id, true, "created", event)
-
-          {:error, reason} ->
-            AgentPort.send_calendar_create_response(port, req_id, false, reason)
-        end
-      end)
-
-      broadcast_event(state, %{
-        "type" => "calendar_create",
-        "agent_name" => state.definition.name,
-        "draft_path" => draft_path,
-        "status" => "creating"
-      })
+    if "CalendarCreate" in state.definition.tools do
+      do_calendar_create_request(req_id, draft_path, state)
     else
-      AgentPort.send_calendar_create_response(state.port, req_id, false, "path traversal rejected")
+      deny_gateway_action(state, "CalendarCreate", req_id, &AgentPort.send_calendar_create_response/4)
     end
-
-    {:noreply, state}
   end
 
   defp handle_agent_event({:calendar_update_request, req_id, draft_path}, state) do
-    Logger.info("AgentSession #{state.id}: calendar_update_request draft=#{draft_path}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
-      port = state.port
-
-      Task.start(fn ->
-        case TriOnyx.Connectors.Calendar.calendar_update(host_path) do
-          {:ok, event} ->
-            if event["calendar"] != "" and event["uid"] do
-              write_calendar_event(agent_dir, event)
-            end
-
-            AgentPort.send_calendar_update_response(port, req_id, true, "updated", event)
-
-          {:error, reason} ->
-            AgentPort.send_calendar_update_response(port, req_id, false, reason)
-        end
-      end)
-
-      broadcast_event(state, %{
-        "type" => "calendar_update",
-        "agent_name" => state.definition.name,
-        "draft_path" => draft_path,
-        "status" => "updating"
-      })
+    if "CalendarUpdate" in state.definition.tools do
+      do_calendar_update_request(req_id, draft_path, state)
     else
-      AgentPort.send_calendar_update_response(state.port, req_id, false, "path traversal rejected")
+      deny_gateway_action(state, "CalendarUpdate", req_id, &AgentPort.send_calendar_update_response/4)
     end
-
-    {:noreply, state}
   end
 
   defp handle_agent_event({:calendar_delete_request, req_id, uid, calendar}, state) do
-    Logger.info("AgentSession #{state.id}: calendar_delete_request uid=#{uid} calendar=#{calendar}")
-
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
-    port = state.port
-
-    Task.start(fn ->
-      case TriOnyx.Connectors.Calendar.calendar_delete(uid, calendar, agent_dir) do
-        {:ok, :deleted} ->
-          AgentPort.send_calendar_delete_response(port, req_id, true, "deleted")
-
-        {:error, reason} ->
-          AgentPort.send_calendar_delete_response(port, req_id, false, reason)
-      end
-    end)
-
-    broadcast_event(state, %{
-      "type" => "calendar_delete",
-      "agent_name" => state.definition.name,
-      "uid" => uid,
-      "calendar" => calendar,
-      "status" => "deleting"
-    })
-
-    {:noreply, state}
+    if "CalendarDelete" in state.definition.tools do
+      do_calendar_delete_request(req_id, uid, calendar, state)
+    else
+      deny_gateway_action(state, "CalendarDelete", req_id, &AgentPort.send_calendar_delete_response/4)
+    end
   end
 
   defp handle_agent_event({:restart_agent_request, req_id, agent_name, force}, state) do
@@ -1624,6 +1376,337 @@ defmodule TriOnyx.AgentSession do
       :reflection -> {:stop, :normal, new_state}
       _ -> {:noreply, new_state}
     end
+  end
+
+  defp do_send_email_request(req_id, draft_path, state) do
+    Logger.info("AgentSession #{state.id}: send_email_request draft=#{draft_path}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+
+    # Translate agent path (/workspace/...) to host path
+    host_path =
+      draft_path
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    # Validate path is within agent workspace (prevent path traversal)
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+      session_id = state.id
+      agent_name = state.definition.name
+
+      Task.start(fn ->
+        proceed =
+          if ToolRegistry.requires_approval?("SendEmail") do
+            # Read draft for approval context
+            draft_summary = read_draft_summary(host_path)
+
+            {:ok, approval_id} =
+              BCP.ApprovalQueue.submit(%{
+                kind: "action",
+                agent_name: agent_name,
+                session_id: session_id,
+                tool_name: "SendEmail",
+                tool_input: Map.merge(%{"draft_path" => draft_path}, draft_summary)
+              })
+
+            approval_frame =
+              Jason.encode!(%{
+                "type" => "approval_request",
+                "approval_id" => approval_id,
+                "kind" => "action",
+                "from_agent" => agent_name,
+                "to_agent" => "",
+                "category" => 0,
+                "query_summary" => "SendEmail: #{Map.get(draft_summary, "subject", draft_path)}",
+                "response_content" => format_draft_for_approval(draft_summary),
+                "anomalies" => []
+              })
+
+            TriOnyx.ConnectorHandler.broadcast_to_connectors(approval_frame)
+
+            case BCP.ApprovalQueue.await_decision(BCP.ApprovalQueue, approval_id) do
+              {:approved, _item} -> :proceed
+              {:rejected, reason} -> {:rejected, reason}
+              {:error, :timeout} -> {:rejected, "approval timed out"}
+            end
+          else
+            :proceed
+          end
+
+        case proceed do
+          :proceed ->
+            case TriOnyx.Connectors.Email.send_email(host_path) do
+              {:ok, message_id} ->
+                AgentPort.send_send_email_response(port, req_id, true, "sent", message_id)
+
+              {:error, reason} ->
+                AgentPort.send_send_email_response(port, req_id, false, reason)
+            end
+
+          {:rejected, reason} ->
+            AgentPort.send_send_email_response(port, req_id, false, "approval rejected: #{reason}")
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "send_email",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "pending_approval"
+      })
+    else
+      AgentPort.send_send_email_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp do_save_draft_request(req_id, draft_path, state) do
+    Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+
+      Task.start(fn ->
+        case TriOnyx.Connectors.Email.save_draft(host_path) do
+          {:ok, :saved} ->
+            AgentPort.send_save_draft_response(port, req_id, true, "draft saved to IMAP Drafts")
+
+          {:error, reason} ->
+            AgentPort.send_save_draft_response(port, req_id, false, reason)
+        end
+      end)
+    else
+      AgentPort.send_save_draft_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp do_move_email_request(req_id, uid, source_folder, dest_folder, state) do
+    Logger.info(
+      "AgentSession #{state.id}: move_email_request uid=#{uid} " <>
+        "#{source_folder} -> #{dest_folder}"
+    )
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Email.move_email(uid, source_folder, dest_folder, agent_dir) do
+        {:ok, :moved} ->
+          AgentPort.send_move_email_response(port, req_id, true, "moved")
+
+        {:error, reason} ->
+          AgentPort.send_move_email_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "move_email",
+      "agent_name" => state.definition.name,
+      "uid" => uid,
+      "source_folder" => source_folder,
+      "dest_folder" => dest_folder,
+      "status" => "moving"
+    })
+
+    {:noreply, state}
+  end
+
+  defp do_create_folder_request(req_id, folder_name, state) do
+    Logger.info("AgentSession #{state.id}: create_folder_request folder=#{folder_name}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Email.create_folder(folder_name, agent_dir) do
+        {:ok, :created} ->
+          AgentPort.send_create_folder_response(port, req_id, true, "created")
+
+        {:error, reason} ->
+          AgentPort.send_create_folder_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "create_folder",
+      "agent_name" => state.definition.name,
+      "folder_name" => folder_name,
+      "status" => "creating"
+    })
+
+    {:noreply, state}
+  end
+
+  defp do_calendar_query_request(req_id, params, state) do
+    Logger.info("AgentSession #{state.id}: calendar_query_request params=#{inspect(params)}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Calendar.calendar_query(agent_dir, params) do
+        {:ok, events} ->
+          AgentPort.send_calendar_query_response(port, req_id, true, "#{length(events)} events", events)
+
+        {:error, reason} ->
+          AgentPort.send_calendar_query_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "calendar_query",
+      "agent_name" => state.definition.name,
+      "params" => params,
+      "status" => "querying"
+    })
+
+    {:noreply, state}
+  end
+
+  defp do_calendar_create_request(req_id, draft_path, state) do
+    Logger.info("AgentSession #{state.id}: calendar_create_request draft=#{draft_path}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+
+      Task.start(fn ->
+        case TriOnyx.Connectors.Calendar.calendar_create(host_path) do
+          {:ok, event} ->
+            write_calendar_event(agent_dir, event)
+            AgentPort.send_calendar_create_response(port, req_id, true, "created", event)
+
+          {:error, reason} ->
+            AgentPort.send_calendar_create_response(port, req_id, false, reason)
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "calendar_create",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "creating"
+      })
+    else
+      AgentPort.send_calendar_create_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp do_calendar_update_request(req_id, draft_path, state) do
+    Logger.info("AgentSession #{state.id}: calendar_update_request draft=#{draft_path}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+
+    host_path =
+      draft_path
+      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
+      |> then(&Path.join(agent_dir, &1))
+      |> Path.expand()
+
+    expanded_agent_dir = Path.expand(agent_dir)
+
+    if String.starts_with?(host_path, expanded_agent_dir) do
+      port = state.port
+
+      Task.start(fn ->
+        case TriOnyx.Connectors.Calendar.calendar_update(host_path) do
+          {:ok, event} ->
+            if event["calendar"] != "" and event["uid"] do
+              write_calendar_event(agent_dir, event)
+            end
+
+            AgentPort.send_calendar_update_response(port, req_id, true, "updated", event)
+
+          {:error, reason} ->
+            AgentPort.send_calendar_update_response(port, req_id, false, reason)
+        end
+      end)
+
+      broadcast_event(state, %{
+        "type" => "calendar_update",
+        "agent_name" => state.definition.name,
+        "draft_path" => draft_path,
+        "status" => "updating"
+      })
+    else
+      AgentPort.send_calendar_update_response(state.port, req_id, false, "path traversal rejected")
+    end
+
+    {:noreply, state}
+  end
+
+  defp do_calendar_delete_request(req_id, uid, calendar, state) do
+    Logger.info("AgentSession #{state.id}: calendar_delete_request uid=#{uid} calendar=#{calendar}")
+
+    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    port = state.port
+
+    Task.start(fn ->
+      case TriOnyx.Connectors.Calendar.calendar_delete(uid, calendar, agent_dir) do
+        {:ok, :deleted} ->
+          AgentPort.send_calendar_delete_response(port, req_id, true, "deleted")
+
+        {:error, reason} ->
+          AgentPort.send_calendar_delete_response(port, req_id, false, reason)
+      end
+    end)
+
+    broadcast_event(state, %{
+      "type" => "calendar_delete",
+      "agent_name" => state.definition.name,
+      "uid" => uid,
+      "calendar" => calendar,
+      "status" => "deleting"
+    })
+
+    {:noreply, state}
+  end
+
+  # Gateway-mediated actions (SendEmail, SaveDraft, MoveEmail, CreateFolder,
+  # Calendar*) execute against gateway-held shared credentials the agent
+  # container never sees — the `tools` grant on the agent definition is the
+  # only authorization boundary for whether a given agent may trigger them,
+  # the same role it plays for the GitHub tool's own grant check above. A
+  # request frame for one of these tools is honored only when the issuing
+  # agent's definition actually declares that tool; otherwise the runtime
+  # response mirrors the "denied by policy" shape GitHub already uses.
+  @spec deny_gateway_action(map(), String.t(), String.t(), (GenServer.server(), String.t(), boolean(), String.t() -> :ok)) ::
+          {:noreply, map()}
+  defp deny_gateway_action(state, tool_name, req_id, response_fun) do
+    Logger.warning(
+      "AgentSession #{state.id}: #{tool_name} request denied — tool not granted"
+    )
+
+    response_fun.(state.port, req_id, false, "#{tool_name} tool not granted")
+    {:noreply, state}
   end
 
   # --- Risk Level Management ---
