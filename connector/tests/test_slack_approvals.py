@@ -143,3 +143,65 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class TestApprovalReactionAuthorization:
+    """Only the workspace owner may decide a pending approval via reaction.
+
+    ``docs/bcp.md``'s mandatory human-in-the-loop gate must stay decidable
+    by the legitimate approver — an unauthorized reactor must not be able
+    to interfere with that.
+    """
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._reactions = []
+
+        async def capture(msg):
+            adapter._reactions.append(msg)
+
+        adapter._on_reaction = capture
+        return adapter
+
+    @staticmethod
+    def _reaction_event(**overrides):
+        event = {
+            "type": "reaction_added",
+            "user": "UOTHER",
+            "reaction": "+1",
+            "item": {"type": "message", "channel": "C1", "ts": "1700000000.1"},
+        }
+        event.update(overrides)
+        return event
+
+    async def test_non_owner_reaction_is_not_forwarded(self, adapter):
+        adapter._approval_events.put("1700000000.1", "appr-1")
+
+        await adapter._handle_reaction(self._reaction_event(user="UOTHER"))
+
+        assert adapter._reactions == []
+
+    async def test_owner_reaction_still_approves(self, adapter):
+        adapter._approval_events.put("1700000000.1", "appr-1")
+
+        await adapter._handle_reaction(self._reaction_event(user="UOWNER"))
+
+        assert len(adapter._reactions) == 1
+        assert adapter._reactions[0].trust == {"level": "verified"}
+
+    async def test_non_owner_reaction_does_not_block_the_owners_later_vote(self, adapter):
+        adapter._approval_events.put("1700000000.1", "appr-1")
+
+        # An unauthorized channel member reacts first...
+        await adapter._handle_reaction(self._reaction_event(user="UOTHER"))
+        # ...then the real owner reacts to actually decide it.
+        await adapter._handle_reaction(self._reaction_event(user="UOWNER"))
+
+        assert len(adapter._reactions) == 1, (
+            "the owner's approval vote was dropped because an earlier "
+            "unauthorized reaction had already consumed the "
+            "ts -> approval_id mapping"
+        )
+        assert adapter._reactions[0].trust == {"level": "verified"}
+        assert adapter._reactions[0].approval_id == "appr-1"

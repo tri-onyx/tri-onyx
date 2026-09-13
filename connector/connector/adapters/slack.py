@@ -544,6 +544,22 @@ class SlackAdapter(BaseAdapter):
         if user_id == self._bot_user_id:
             return
 
+        # The workspace owner is the only sender this adapter ever calls
+        # "verified" (see trust below) — the sole identity the gateway's
+        # mandatory human-in-the-loop gate (docs/bcp.md) will accept as a
+        # decision. Anyone else reacting on the approval message (another
+        # member of the approval channel) must be ignored *before* the
+        # mapping below is touched: resolving it for an unauthorized
+        # reactor would forget the ts -> approval_id mapping and silently
+        # drop the owner's real vote when it arrives afterwards, blocking
+        # the approval from ever being decided.
+        if user_id != self._owner_user_id:
+            logger.info(
+                "Ignoring approval reaction from non-owner %s for %s",
+                user_id, approval_id,
+            )
+            return
+
         name = event.get("reaction", "")
         emoji = self._REACTION_UNICODE.get(name)
         if emoji is None:
@@ -566,7 +582,7 @@ class SlackAdapter(BaseAdapter):
             channel={"platform": "slack", "channel_id": item.get("channel", "")},
             approval_id=approval_id,
             event_id=message_ts,
-            trust={"level": "verified" if user_id == self._owner_user_id else "unverified"},
+            trust={"level": "verified"},
         )
 
         if self._on_reaction:
