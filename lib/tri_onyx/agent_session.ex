@@ -653,6 +653,7 @@ defmodule TriOnyx.AgentSession do
             tool_name
             |> ToolRegistry.tool_meta()
             |> Map.put(:agent_name, state.definition.name)
+            |> Map.put(:has_network, RiskScorer.has_network?(state.definition.network))
 
           classification = InformationClassifier.classify_tool_result(tool_name, tool_input, tool_meta)
           state = elevate_risk(state, classification)

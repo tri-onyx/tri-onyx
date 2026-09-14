@@ -258,6 +258,20 @@ defmodule TriOnyx.RiskScorer do
     Map.fetch!(@risk_rank, risk) > Map.fetch!(@risk_rank, max_level)
   end
 
+  @doc """
+  Returns true if the network policy grants outbound network access.
+
+  Single source of truth for "does this agent's network policy let Bash
+  reach outside the container" — used both to promote Bash's capability
+  level here and to select Bash's taint context in
+  `InformationClassifier.classify_tool_result/3`.
+  """
+  @spec has_network?(atom() | [String.t()]) :: boolean()
+  def has_network?(:none), do: false
+  def has_network?(:outbound), do: true
+  def has_network?(hosts) when is_list(hosts) and hosts != [], do: true
+  def has_network?(_), do: false
+
   # --- Private ---
 
   @spec tool_data_access_risk([String.t()]) :: atom()
@@ -287,11 +301,4 @@ defmodule TriOnyx.RiskScorer do
     rank = %{low: 0, medium: 1, high: 2}
     if rank[a] >= rank[b], do: a, else: b
   end
-
-  @spec has_network?(atom() | [String.t()]) :: boolean()
-  defp has_network?(:none), do: false
-  defp has_network?(:outbound), do: true
-  defp has_network?(hosts) when is_list(hosts) and hosts != [], do: true
-  defp has_network?(_), do: false
-
 end

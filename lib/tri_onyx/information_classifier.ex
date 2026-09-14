@@ -81,7 +81,7 @@ defmodule TriOnyx.InformationClassifier do
   @spec classify_tool_result(String.t(), map(), map()) :: classification()
   def classify_tool_result(tool_name, input, tool_meta \\ %{})
       when is_binary(tool_name) and is_map(input) do
-    taint = classify_tool_taint(tool_name, input)
+    taint = classify_tool_taint(tool_name, input, tool_meta)
 
     sensitivity =
       if tool_name == "Read" do
@@ -272,14 +272,24 @@ defmodule TriOnyx.InformationClassifier do
     end
   end
 
-  @spec classify_tool_taint(String.t(), map()) :: information_level()
-  defp classify_tool_taint("Read", input) do
+  @spec classify_tool_taint(String.t(), map(), map()) :: information_level()
+  defp classify_tool_taint("Read", input, _tool_meta) do
     path = Map.get(input, "file_path", "")
     context = if controlled_path?(path), do: :controlled, else: :external
     TaintMatrix.tool_taint("Read", context)
   end
 
-  defp classify_tool_taint(tool_name, _input) do
+  defp classify_tool_taint("Bash", _input, tool_meta) do
+    # Bash is the only tool that executes unmediated by the gateway: with
+    # network access it can curl/wget arbitrary external data, same as
+    # WebFetch. `has_network` is threaded in by the caller (AgentSession)
+    # from the agent's network policy — see TaintMatrix's Bash context
+    # table and RiskScorer.has_network?/1, the shared source of truth.
+    context = if Map.get(tool_meta, :has_network, false), do: :network, else: :isolated
+    TaintMatrix.tool_taint("Bash", context)
+  end
+
+  defp classify_tool_taint(tool_name, _input, _tool_meta) do
     TaintMatrix.tool_taint(tool_name)
   end
 
