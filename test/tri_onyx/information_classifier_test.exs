@@ -129,6 +129,34 @@ defmodule TriOnyx.InformationClassifierTest do
       assert %{taint: :low} = result
     end
 
+    test "Bash result has high taint when the agent has network access" do
+      # TaintMatrix documents Bash+network as high taint ("can curl/wget
+      # external data", same class of risk as WebFetch/WebSearch) and
+      # RiskScorer already promotes Bash's *capability* to :high for a
+      # network-enabled agent. The *taint* axis must track the same fact:
+      # a network-capable Bash is how an agent ingests attacker-controlled
+      # content, which is exactly what taint escalation exists to catch.
+      result =
+        InformationClassifier.classify_tool_result(
+          "Bash",
+          %{"command" => "curl http://example.com/payload"},
+          %{has_network: true}
+        )
+
+      assert %{taint: :high} = result
+    end
+
+    test "Bash result stays low taint when the agent has no network access" do
+      result =
+        InformationClassifier.classify_tool_result(
+          "Bash",
+          %{"command" => "ls"},
+          %{has_network: false}
+        )
+
+      assert %{taint: :low} = result
+    end
+
     test "SendMessage result has low taint" do
       result = InformationClassifier.classify_tool_result("SendMessage", %{})
       assert %{taint: :low, reason: reason} = result
