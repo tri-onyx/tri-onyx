@@ -9,6 +9,18 @@ logger = logging.getLogger(__name__)
 _prompt_timestamps: dict[str, float] = {}
 
 
+def _client_ip(request) -> str:
+    """The real connection's address.
+
+    Deliberately ignores X-Forwarded-For: this app has no reverse proxy in
+    front of it (docker-compose.yml binds it to 127.0.0.1 with nothing else
+    in the request path), so that header is fully caller-controlled and
+    trusting it would let any caller pick a fresh value per request to
+    dodge both the prompt rate limit and request logging below.
+    """
+    return request.META.get("REMOTE_ADDR", "unknown")
+
+
 class PromptRateLimitMiddleware:
     def __init__(self, get_response):
         self.get_response = get_response
@@ -16,7 +28,7 @@ class PromptRateLimitMiddleware:
 
     def __call__(self, request):
         if request.method == "POST" and request.path.endswith("/prompt"):
-            ip = self._get_client_ip(request)
+            ip = _client_ip(request)
             now = time.monotonic()
             last = _prompt_timestamps.get(ip, 0)
 
@@ -31,12 +43,6 @@ class PromptRateLimitMiddleware:
             self._cleanup(now)
 
         return self.get_response(request)
-
-    def _get_client_ip(self, request):
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "unknown")
 
     def _cleanup(self, now):
         if len(_prompt_timestamps) > 1000:
@@ -60,12 +66,6 @@ class RequestLoggingMiddleware:
             request.method,
             request.path,
             response.status_code,
-            self._get_client_ip(request),
+            _client_ip(request),
         )
         return response
-
-    def _get_client_ip(self, request):
-        forwarded = request.META.get("HTTP_X_FORWARDED_FOR")
-        if forwarded:
-            return forwarded.split(",")[0].strip()
-        return request.META.get("REMOTE_ADDR", "unknown")
