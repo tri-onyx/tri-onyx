@@ -3,26 +3,34 @@ defmodule TriOnyx.RateLimiter do
   Shared ETS-based fixed-window rate limiter core.
 
   Tracks request counts per caller-defined composite key using a fixed
-  time window. Each bucket stores the count and the window start
-  timestamp (milliseconds).
+  time window aligned to the epoch: a request at time `now` belongs to the
+  window starting at `div(now, window_ms) * window_ms`. The bucket for a
+  given `{key, window_start}` pair is a single counter.
 
   ## Design
 
-  Uses a single ETS table per limiter instance. When a request arrives:
+  Uses a single ETS table per limiter instance. Each request atomically
+  increments the counter for its `{key, window_start}` bucket — creating it
+  at 0 first if absent — via a single `:ets.update_counter/4` call, and is
+  allowed iff the returned count is within the limit.
 
-  1. Atomically increment the key's counter (inserting a fresh bucket if
-     absent) and read back the new count together with the bucket start
-  2. If the bucket's window has expired, reset it to a new window and allow
-  3. If the new count is within the limit, allow
-  4. Otherwise, reject with rate limit info
-
-  The increment happens *before* the limit comparison, so concurrent
-  callers can never both observe the same pre-increment count and both be
-  allowed past the limit.
+  A previous version stored `{key, count, bucket_start}` and reset the
+  bucket with a second, separate `:ets.insert/2` once `bucket_start` was
+  found to be stale. That second write was not atomic with the read that
+  decided to perform it: concurrent callers arriving just as a window
+  expired could all read the same stale `bucket_start`, all decide to
+  reset, and all write `count = 1` and return `:ok` — bypassing the limit
+  entirely for an arbitrarily large burst timed at a window boundary.
+  Keying the bucket by its window's start time instead removes the reset
+  step (and the race) altogether: every caller in the same window
+  increments the *same* ETS object, and `:ets.update_counter/4` (including
+  its default-tuple creation) is atomic per object, so concurrent callers
+  can never both observe the same pre-increment count and both be allowed
+  past the limit.
 
   The GenServer exists only for ownership of the ETS table and periodic
-  cleanup. The hot-path `check_rate/4` reads and updates ETS directly
-  using `:ets.update_counter/4` for atomicity.
+  cleanup of past windows. The hot-path `check_rate/4` reads and updates
+  ETS directly using `:ets.update_counter/4` for atomicity.
 
   Domain-specific limiters (`TriOnyx.WebhookRateLimiter`,
   `TriOnyx.BCP.RateLimiter`) wrap this module with their key shape and
@@ -63,27 +71,22 @@ defmodule TriOnyx.RateLimiter do
           :ok | {:error, :rate_limited, non_neg_integer()}
   def check_rate(table, key, limit, window_ms) do
     now = System.system_time(:millisecond)
-    window_start_cutoff = now - window_ms
+    window_start = div(now, window_ms) * window_ms
+    bucket_key = {key, window_start}
 
-    # Increment first, then compare: a read-then-increment sequence lets two
-    # concurrent callers both see the same pre-increment count and both slip
-    # past the limit. The default tuple creates the bucket when absent, and
-    # the `{3, 0}` term reads the bucket start in the same atomic operation.
-    [count, bucket_start] = :ets.update_counter(table, key, [{2, 1}, {3, 0}], {key, 0, now})
+    # A single atomic increment (creating the bucket at 0 first if absent)
+    # per {key, window_start}. There is no separate reset step to race:
+    # every caller in the same window shares one object, and
+    # :ets.update_counter/4 — including the implicit default-tuple insert —
+    # is atomic with respect to other operations on that object.
+    count = :ets.update_counter(table, bucket_key, {2, 1}, {bucket_key, 0})
 
-    cond do
-      bucket_start <= window_start_cutoff ->
-        # Window expired — start a fresh one
-        :ets.insert(table, {key, 1, now})
-        :ok
-
-      count <= limit ->
-        :ok
-
-      true ->
-        retry_after_ms = window_ms - (now - bucket_start)
-        retry_after_s = max(div(retry_after_ms, 1000), 1)
-        {:error, :rate_limited, retry_after_s}
+    if count <= limit do
+      :ok
+    else
+      retry_after_ms = window_start + window_ms - now
+      retry_after_s = max(div(retry_after_ms, 1000), 1)
+      {:error, :rate_limited, retry_after_s}
     end
   rescue
     ArgumentError ->
@@ -136,8 +139,8 @@ defmodule TriOnyx.RateLimiter do
   defp cleanup_expired(%{table: table, label: label, max_age_ms: max_age_ms}) do
     cutoff = System.system_time(:millisecond) - max_age_ms
 
-    # match spec: [{key, count, bucket_start}] where bucket_start < cutoff
-    match_spec = [{{:_, :_, :"$1"}, [{:<, :"$1", cutoff}], [true]}]
+    # match spec: [{{key, window_start}, count}] where window_start < cutoff
+    match_spec = [{{{:_, :"$1"}, :_}, [{:<, :"$1", cutoff}], [true]}]
 
     deleted = :ets.select_delete(table, match_spec)
 
