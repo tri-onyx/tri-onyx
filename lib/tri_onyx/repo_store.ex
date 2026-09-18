@@ -689,21 +689,38 @@ defmodule TriOnyx.RepoStore do
     branch = "conflict/#{principal_dir(principal)}/#{session_id}"
 
     # Abort any in-progress merge, then push the local commit as-is to a
-    # conflict branch and hard-reset the tree onto origin/main.
+    # conflict branch so it isn't lost.
     _ = git_tree(gd, tree, ["merge", "--abort"])
 
-    with {_, 0} <- git_tree(gd, tree, ["push", "-f", "origin", "HEAD:refs/heads/#{branch}"]),
-         {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
-         {_, 0} <- git_tree(gd, tree, ["reset", "--hard", "origin/#{@default_branch}"]) do
-      Logger.warning(
-        "RepoStore: push conflict on #{ref(repo_id)} — parked on #{branch}"
-      )
+    case git_tree(gd, tree, ["push", "-f", "origin", "HEAD:refs/heads/#{branch}"]) do
+      {_, 0} ->
+        Logger.warning("RepoStore: push conflict on #{ref(repo_id)} — parked on #{branch}")
+        reset_after_park(gd, tree, principal, branch)
 
+      {output, code} ->
+        {:error, {:conflict_park_failed, code, output}}
+    end
+  end
+
+  # Only the gateway-owned projections (`_ro`, `_gw`) are hard-reset onto
+  # origin after parking — they are pure projections of the bare repo with
+  # no other copy of their state. An agent's rw tree may be mounted rw into
+  # a still-running container that holds the only copy of work it hasn't
+  # committed yet (e.g. a file a connector delivery's restricted `:paths`
+  # commit never touched); resetting it would silently discard that work.
+  # Its own committed work is already safe on the conflict branch above, so
+  # it is left as-is — same rule `recover_failed_merge/5` applies to a
+  # diverged agent tree.
+  defp reset_after_park(gd, tree, principal, branch) when principal in [:ro, :gw] do
+    with {_, 0} <- git_tree(gd, tree, ["fetch", "origin"]),
+         {_, 0} <- git_tree(gd, tree, ["reset", "--hard", "origin/#{@default_branch}"]) do
       {:conflict, branch}
     else
       {output, code} -> {:error, {:conflict_park_failed, code, output}}
     end
   end
+
+  defp reset_after_park(_gd, _tree, _principal, branch), do: {:conflict, branch}
 
   # Working trees are checked out by the gateway user (root in the gateway
   # container) but mounted rw into agent containers running as the host

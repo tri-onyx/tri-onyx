@@ -182,7 +182,13 @@ defmodule TriOnyx.RepoStoreTest do
       )
 
     assert refs =~ "conflict/b/s2"
-    assert File.read!(Path.join(b_tree, "shared.md")) == "version a\n"
+
+    # b's own commit is safe on the conflict branch; its tree is left at
+    # that local commit rather than force-reset onto origin's "version a" —
+    # resetting an agent-owned tree could silently destroy uncommitted work
+    # a live container still holds the only copy of (see the park_conflict
+    # describe block below).
+    assert File.read!(Path.join(b_tree, "shared.md")) == "version b\n"
     refute RepoStore.dirty?("b", repo)
   end
 
@@ -361,6 +367,51 @@ defmodule TriOnyx.RepoStoreTest do
 
       refute File.exists?(Path.join(RepoStore.gitdir(:gw, repo), "MERGE_HEAD"))
       assert File.read!(Path.join(tree, "shared.md")) == "from origin\n"
+    end
+  end
+
+  # --- Conflict parking on an agent-owned tree ---
+
+  describe "park_conflict on an agent-owned tree" do
+    test "a push conflict does not destroy unrelated uncommitted work in the same tree" do
+      repo = {:shared, "knowledge"}
+      :ok = RepoStore.ensure_tree("writer", repo)
+      writer_tree = RepoStore.tree_dir("writer", repo)
+
+      File.write!(Path.join(writer_tree, "shared.md"), "v1\n")
+      {:ok, _} = RepoStore.commit_and_push("writer", repo, message: "init", session_id: "s0")
+
+      # A peer's clone of the same shared repo (a second repos_write grant on
+      # "knowledge") pushes a conflicting edit to shared.md — writer's tree
+      # hasn't fetched it yet.
+      :ok = RepoStore.ensure_tree("peer", repo)
+      peer_tree = RepoStore.tree_dir("peer", repo)
+      File.write!(Path.join(peer_tree, "shared.md"), "from peer\n")
+      {:ok, _} = RepoStore.commit_and_push("peer", repo, message: "peer edit", session_id: "p1")
+
+      # Meanwhile writer's live container has an in-progress, uncommitted
+      # edit to shared.md — its only copy of that work — and a connector
+      # delivers an unrelated file, committed with a restricted :paths list
+      # (as Workspace.record_external_write/5 does), the same way a real
+      # delivery never touches whatever else the agent is mid-editing.
+      File.write!(Path.join(writer_tree, "shared.md"), "live work in progress\n")
+      File.mkdir_p!(Path.join(writer_tree, "inbox"))
+      File.write!(Path.join(writer_tree, "inbox/msg.md"), "delivered\n")
+
+      assert {:ok, {:conflict, _branch}} =
+               RepoStore.commit_and_push("writer", repo,
+                 message: "connector delivery",
+                 session_id: "connector",
+                 paths: ["inbox/msg.md"]
+               )
+
+      # The delivered file's commit is safely preserved on the conflict
+      # branch (checked elsewhere) — but writer's own uncommitted work on
+      # shared.md, which this commit never touched, must survive: it has no
+      # other copy, unlike the already-pushed conflict-branch commit.
+      assert File.read!(Path.join(writer_tree, "shared.md")) == "live work in progress\n",
+             "an agent's own uncommitted work must not be wiped by a conflicting " <>
+               "push from a different writer of the same repo"
     end
   end
 
