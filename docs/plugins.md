@@ -102,9 +102,13 @@ This fails silently because `../skills/` doesn't start with `./`. Since
 
 ## Gateway: system command handling
 
-Messages starting with `/` are intercepted by the gateway's `SystemCommand`
-module before reaching agents. Known commands (e.g., `/restart`) are executed
-directly. Unknown commands return an error.
+Messages starting with `/` from a **verified** sender are intercepted by the
+gateway's `SystemCommand` module before reaching agents. Known commands
+(e.g., `/restart`) are executed directly; unknown commands return an error.
+An unverified sender's message is never parsed as a system command — it is
+routed to the agent as ordinary (high-taint) input instead, so a random
+Matrix room member or non-owner Slack user cannot force a privileged action
+like restarting an arbitrary agent just by typing a slash command.
 
 **Skill invocations** use colons (`/newsagg:fetchnews`) to distinguish
 themselves from system commands. The parser detects the `:` and passes the

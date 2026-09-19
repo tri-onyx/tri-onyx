@@ -181,8 +181,19 @@ defmodule TriOnyx.ConnectorHandler do
     channel = Map.get(frame, "channel", %{})
     trust = Map.get(frame, "trust", %{})
     images = Map.get(frame, "images", [])
+    trigger_type = trust_to_trigger(trust)
 
-    case SystemCommand.parse(content) do
+    # System commands are an operator-only, chat-native admin surface (see
+    # the moduledoc on TriOnyx.SystemCommand). Parsing is gated on verified
+    # trust so an unverified sender — any Matrix room member, since a DM
+    # always dispatches and group rooms default to dispatching everything,
+    # or any non-owner Slack sender in a channel bound as a "team space" —
+    # cannot smuggle a privileged action like `/restart <agent>` past the
+    # taint/trust model by simply typing a slash command; it is routed to
+    # the agent as ordinary (high-taint) input instead.
+    parsed = if trigger_type == :verified_input, do: SystemCommand.parse(content), else: :not_a_command
+
+    case parsed do
       {:command, cmd, args} ->
         context = %{agent_name: agent_name}
         {status, message} = SystemCommand.execute(cmd, args, context)
@@ -200,7 +211,6 @@ defmodule TriOnyx.ConnectorHandler do
         {:push, [{:text, reply}], state}
 
       :not_a_command ->
-        trigger_type = trust_to_trigger(trust)
         channel_hash = compute_channel_hash(channel)
         session_key = "#{agent_name}:#{channel_hash}"
         session_label = Map.get(channel, "display_name")
