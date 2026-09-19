@@ -426,6 +426,67 @@ defmodule TriOnyx.ConnectorHandlerTest do
     end
   end
 
+  describe "system commands require verified trust" do
+    setup do
+      Application.put_env(:tri_onyx, :connector_token, "test-secret-token")
+      on_exit(fn -> Application.delete_env(:tri_onyx, :connector_token) end)
+      {:ok, state} = ConnectorHandler.init([])
+
+      authed_state = %{
+        state
+        | authenticated: true,
+          connector_id: "matrix-1",
+          platform: "matrix"
+      }
+
+      {:ok, state: authed_state}
+    end
+
+    test "an unverified sender's /restart is not executed as a system command", %{state: state} do
+      frame =
+        Jason.encode!(%{
+          "type" => "message",
+          "agent_name" => "unverified-restart-target",
+          "content" => "/restart unverified-restart-target",
+          "channel" => %{"platform" => "matrix", "room_id" => "!attacker:matrix.org"},
+          "trust" => %{"level" => "unverified"}
+        })
+
+      assert {:push, [{:text, reply}], _state} =
+               ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
+
+      decoded = Jason.decode!(reply)
+
+      # Any Matrix room member (a Matrix DM always dispatches, per
+      # matrix.py's `_should_dispatch/3`) or any non-owner Slack sender in a
+      # bound channel can produce an "unverified" trust frame. The
+      # `/restart` admin command must stay operator-only — trust is what
+      # gates a privileged action here (see AGENTS.md's taint/trust model
+      # and InformationClassifier's :verified_input vs :unverified_input
+      # split) — so this must be routed to the agent as ordinary high-taint
+      # input, never intercepted as a system command.
+      refute decoded["type"] == "system_command_response",
+             "an unverified sender's /restart must not be executed as a system command"
+    end
+
+    test "a verified sender's /restart is still executed as a system command", %{state: state} do
+      frame =
+        Jason.encode!(%{
+          "type" => "message",
+          "agent_name" => "verified-restart-target",
+          "content" => "/restart verified-restart-target",
+          "channel" => %{"platform" => "matrix", "room_id" => "!operator:matrix.org"},
+          "trust" => %{"level" => "verified"}
+        })
+
+      assert {:push, [{:text, reply}], _state} =
+               ConnectorHandler.handle_in({frame, [opcode: :text]}, state)
+
+      decoded = Jason.decode!(reply)
+      assert decoded["type"] == "system_command_response"
+    end
+  end
+
   describe "invalid input handling" do
     setup do
       {:ok, state} = ConnectorHandler.init([])
