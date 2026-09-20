@@ -300,7 +300,7 @@ class MatrixAdapter(BaseAdapter):
             return
 
         # Mention gating: in group rooms, require @mention or direct reply
-        if not self._should_dispatch(room, event, room_cfg):
+        if not await self._should_dispatch(room, event, room_cfg):
             logger.debug(
                 "Ignoring message — mention gating filtered it (mode=%s, members=%d)",
                 room_cfg.mode,
@@ -721,7 +721,7 @@ class MatrixAdapter(BaseAdapter):
             except Exception:
                 logger.exception("Verification %s: MAC stage failed", event.transaction_id)
 
-    def _should_dispatch(
+    async def _should_dispatch(
         self, room: MatrixRoom, event: RoomMessageText, room_cfg: RoomConfig
     ) -> bool:
         """Determine whether this message should be forwarded to the gateway.
@@ -782,14 +782,29 @@ class MatrixAdapter(BaseAdapter):
             ):
                 return True
 
-            # Check for reply (relates_to with in_reply_to)
+            # Check for reply (relates_to with in_reply_to). Per docs/matrix-guide.md
+            # ("Replies to the bot's own messages also trigger the agent"), this is
+            # meant to be an implicit mention equivalent to continuing a thread with
+            # the bot — it must not fire for a reply to some other member's message,
+            # or any room member could bypass mention gating entirely just by
+            # hitting "reply" on an arbitrary message.
             relates = content.get("m.relates_to", {})
-            if "m.in_reply_to" in relates:
+            in_reply_to_id = relates.get("m.in_reply_to", {}).get("event_id")
+            if in_reply_to_id and await self._is_bot_authored(room.room_id, in_reply_to_id):
                 return True
             return False
 
         # Default: dispatch everything
         return True
+
+    async def _is_bot_authored(self, room_id: str, event_id: str) -> bool:
+        """True if *event_id* was sent by this bot (same check as approval reactions)."""
+        assert self._client is not None
+        resp = await self._client.room_get_event(room_id, event_id)
+        if not isinstance(resp, RoomGetEventResponse):
+            logger.warning("Failed to fetch event %s for reply check: %s", event_id, resp)
+            return False
+        return getattr(resp.event, "sender", None) == self._config.user_id
 
     def _extract_thread_id(self, event: RoomMessageText) -> str | None:
         """Extract the thread root event ID from ``m.relates_to``, if present."""
