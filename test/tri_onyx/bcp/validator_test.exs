@@ -181,6 +181,23 @@ defmodule TriOnyx.BCP.ValidatorTest do
                  "summary" => "this has way too many words"
                })
     end
+
+    test "a single whitespace-free blob cannot smuggle unbounded data past the word limit", %{
+      query: query
+    } do
+      # BCP's entire premise is that word count bounds the information a
+      # reader agent can return (Query.compute_bandwidth/1 assumes ~11 bits
+      # per word). A 10KB blob with no whitespace still counts as a single
+      # "word", so a compromised/tainted reader agent could exfiltrate
+      # arbitrary data (or smuggle further injection payloads back to a
+      # controller agent) through a response that "passes" a max_words: 5
+      # limit. This must be rejected the same way an over-word-count
+      # response is.
+      blob = String.duplicate("a", 10_000)
+
+      assert {:error, reason} = Validator.validate_response(query, %{"summary" => blob})
+      assert reason =~ "field 'summary'"
+    end
   end
 
   describe "validate_cat2/2 - person_name format" do
@@ -341,6 +358,16 @@ defmodule TriOnyx.BCP.ValidatorTest do
 
       assert {:error, "response: word count 15 exceeds limit of 10"} =
                Validator.validate_response(query, %{"response" => long_response})
+    end
+
+    test "a single whitespace-free blob is rejected despite passing word count", %{query: query} do
+      # Category 3 always requires human approval — a giant single-token
+      # blob would also flood the approval UI a human has to read, on top
+      # of defeating the bandwidth cap itself.
+      blob = String.duplicate("a", 10_000)
+
+      assert {:error, reason} = Validator.validate_response(query, %{"response" => blob})
+      assert reason =~ "response:"
     end
 
     test "requires_approval is always set", %{query: query} do

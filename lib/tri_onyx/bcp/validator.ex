@@ -163,15 +163,28 @@ defmodule TriOnyx.BCP.Validator do
 
   # -- Word count --
 
+  # Query.compute_bandwidth/1 prices category 2/3 responses at ~11 bits per
+  # word, so the word-count limit is BCP's only bound on how much
+  # information a response can carry. Splitting on whitespace without also
+  # bounding token length lets a single whitespace-free blob count as "1
+  # word" regardless of its size, so cap how long any one token may be.
+  @max_word_length 256
+
   defp check_word_count("", _max_words), do: :ok
 
   defp check_word_count(value, max_words) when is_binary(value) and is_integer(max_words) do
-    word_count = value |> String.split(~r/\s+/, trim: true) |> length()
+    words = value |> String.split(~r/\s+/, trim: true)
+    word_count = length(words)
 
-    if word_count <= max_words do
-      :ok
-    else
-      {:error, "word count #{word_count} exceeds limit of #{max_words}"}
+    cond do
+      word_count > max_words ->
+        {:error, "word count #{word_count} exceeds limit of #{max_words}"}
+
+      Enum.any?(words, &(String.length(&1) > @max_word_length)) ->
+        {:error, "contains a token longer than #{@max_word_length} characters"}
+
+      true ->
+        :ok
     end
   end
 
