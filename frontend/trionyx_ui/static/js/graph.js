@@ -213,24 +213,15 @@ function riskIcon(level) {
   return icons[level] || '●';
 }
 
-function escapeHtml(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+// escapeHtml/formatNetwork live in graph_safety.js (loaded before this
+// file — see graph.html) so they can be unit-tested without a DOM, and
+// so there is one place that decides what's safe to drop into a
+// template-literal `innerHTML` tooltip.
+var escapeHtml = GraphSafety.escapeHtml;
+var formatNetwork = GraphSafety.formatNetwork;
 
 function truncate(s, n) {
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
-}
-
-function formatNetwork(n) {
-  if (!n || n === 'none') return '<span style="color:var(--green)">isolated</span>';
-  if (n === 'outbound') return '<span style="color:var(--purple)">outbound (unrestricted)</span>';
-  if (Array.isArray(n)) return n.join(', ');
-  return String(n);
 }
 
 // ── Rating breakdown ──
@@ -674,7 +665,7 @@ function renderGraph() {
         <div class="header-info">
           <h3>${a.name}</h3>
           ${a.description ? `<div style="color:var(--muted);margin-bottom:4px">${escapeHtml(a.description)}</div>` : ''}
-          <div class="row"><span class="label">Model:</span><span>${a.model || '?'}</span></div>
+          <div class="row"><span class="label">Model:</span><span>${escapeHtml(a.model || '?')}</span></div>
           <div class="row"><span class="label">Status:</span><span>${a.status || 'inactive'}</span></div>
           <div class="row"><span class="label">Network:</span><span>${formatNetwork(a.network)}</span></div>
         </div>
