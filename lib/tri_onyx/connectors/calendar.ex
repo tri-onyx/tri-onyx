@@ -31,7 +31,8 @@ defmodule TriOnyx.Connectors.Calendar do
     from = Map.get(params, "from")
     to = Map.get(params, "to")
 
-    with {:ok, config} <- get_caldav_config(),
+    with :ok <- validate_calendar_name(calendar),
+         {:ok, config} <- get_caldav_config(),
          {:ok, ical_data} <- caldav_report(config, calendar, from, to),
          {:ok, events} <- parse_icalendar_multi(ical_data) do
       # Write event JSON files
@@ -153,26 +154,52 @@ defmodule TriOnyx.Connectors.Calendar do
   @spec calendar_delete(String.t(), String.t(), String.t()) ::
           {:ok, :deleted} | {:error, String.t()}
   def calendar_delete(uid, calendar, workspace_agent_dir) do
-    events_dir = Path.join([workspace_agent_dir, "events", calendar])
-    safe_uid = sanitize_uid(uid)
-    event_path = Path.join(events_dir, "#{safe_uid}.json")
+    case validate_calendar_name(calendar) do
+      {:error, reason} ->
+        {:error, reason}
 
-    with {:ok, contents} <- File.read(event_path),
-         {:ok, event} <- Jason.decode(contents),
-         href when is_binary(href) <- Map.get(event, "href") || {:error, "missing href in event"},
-         etag when is_binary(etag) <- Map.get(event, "etag") || {:error, "missing etag in event"},
-         {:ok, config} <- get_caldav_config(),
-         :ok <- caldav_delete(config, href, etag) do
-      # Remove cached event file
-      File.rm(event_path)
-      Logger.info("CalendarDelete: event #{uid} deleted from #{calendar}")
-      {:ok, :deleted}
-    else
-      {:error, :enoent} -> {:error, "event file not found: #{event_path}"}
-      {:error, reason} when is_binary(reason) -> {:error, reason}
-      {:error, reason} -> {:error, "calendar delete failed: #{inspect(reason)}"}
+      :ok ->
+        events_dir = Path.join([workspace_agent_dir, "events", calendar])
+        safe_uid = sanitize_uid(uid)
+        event_path = Path.join(events_dir, "#{safe_uid}.json")
+
+        with {:ok, contents} <- File.read(event_path),
+             {:ok, event} <- Jason.decode(contents),
+             href when is_binary(href) <- Map.get(event, "href") || {:error, "missing href in event"},
+             etag when is_binary(etag) <- Map.get(event, "etag") || {:error, "missing etag in event"},
+             {:ok, config} <- get_caldav_config(),
+             :ok <- caldav_delete(config, href, etag) do
+          # Remove cached event file
+          File.rm(event_path)
+          Logger.info("CalendarDelete: event #{uid} deleted from #{calendar}")
+          {:ok, :deleted}
+        else
+          {:error, :enoent} -> {:error, "event file not found: #{event_path}"}
+          {:error, reason} when is_binary(reason) -> {:error, reason}
+          {:error, reason} -> {:error, "calendar delete failed: #{inspect(reason)}"}
+        end
     end
   end
+
+  # The calendar name is folded, unescaped, into both a filesystem path
+  # (`events_dir` in calendar_query/2 and calendar_delete/3 — a `../` here
+  # reads or removes an arbitrary cached-event file outside the agent's own
+  # workspace, the same class of bug `TriOnyx.Connectors.Email.validate_folder_name/1`
+  # guards its own folder names against) and a raw CalDAV request line
+  # (`caldav_report/4` — an embedded CRLF there would splice extra headers,
+  # or an entirely separate request, onto the credentialed connection to
+  # the CalDAV server). Restricting it to the same safe alphabet closes
+  # both at once.
+  @spec validate_calendar_name(term()) :: :ok | {:error, String.t()}
+  defp validate_calendar_name(name) when is_binary(name) do
+    if Regex.match?(~r/^[a-zA-Z0-9_-]+$/, name) do
+      :ok
+    else
+      {:error, "invalid calendar name: #{inspect(name)}"}
+    end
+  end
+
+  defp validate_calendar_name(name), do: {:error, "invalid calendar name: #{inspect(name)}"}
 
   # --- CalDAV HTTP Helpers ---
 
