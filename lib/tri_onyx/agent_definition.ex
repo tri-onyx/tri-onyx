@@ -771,7 +771,7 @@ defmodule TriOnyx.AgentDefinition do
          {:ok, bcp_channels} <- parse_bcp_channels(yaml),
          {:ok, cron_schedules} <- parse_cron_schedules(yaml),
          {:ok, skills} <- parse_string_list(yaml, "skills"),
-         {:ok, plugins} <- parse_string_list(yaml, "plugins"),
+         {:ok, plugins} <- parse_plugins(yaml),
          {:ok, base_taint} <- parse_base_taint(yaml),
          {:ok, max_effective_risk} <- parse_max_effective_risk(yaml),
          {:ok, input_sources} <- parse_input_sources(yaml),
@@ -1583,6 +1583,29 @@ defmodule TriOnyx.AgentDefinition do
     case Map.get(yaml, key, false) do
       val when is_boolean(val) -> {:ok, val}
       _other -> {:error, {:invalid_field_type, key, :expected_boolean}}
+    end
+  end
+
+  # Plugin names are joined into host and container filesystem paths
+  # unsanitized (TriOnyx.Sandbox.plugin_paths/1: `<tree>/plugins/<name>`,
+  # mirrored into TRI_ONYX_PLUGIN_PATHS for the container entrypoint), so
+  # — like every other identifier Sandbox composes into a path (agent
+  # name, repo ref, github_repo) — a plugin name must be a single safe
+  # slug. Without this, a name such as "../../secret" escapes the
+  # `plugins/` directory on both the gateway host (during the File.dir?
+  # existence check) and inside the agent's own container.
+  @spec parse_plugins(map()) :: {:ok, [String.t()]} | {:error, term()}
+  defp parse_plugins(yaml) do
+    with {:ok, plugins} <- parse_string_list(yaml, "plugins") do
+      case Enum.find(plugins, &(not valid_name?(&1))) do
+        nil ->
+          {:ok, plugins}
+
+        invalid ->
+          {:error,
+           {:invalid_plugin_name, invalid,
+            "expected a safe slug (letters, digits, hyphens, underscores)"}}
+      end
     end
   end
 
