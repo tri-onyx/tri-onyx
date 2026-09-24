@@ -1343,6 +1343,30 @@ defmodule TriOnyx.AgentDefinitionTest do
       assert {:ok, def} = AgentDefinition.parse(@minimal_definition)
       assert def.plugins == []
     end
+
+    test "rejects plugin names that escape the plugins/ directory" do
+      # TriOnyx.Sandbox.plugin_paths/1 joins each plugin name unsanitized
+      # into "<tree>/plugins/<name>" on the gateway host and again into a
+      # container path handed to the container entrypoint. A traversal
+      # segment here breaks out of the plugins/ directory on both sides —
+      # the same class of bug repos_read/repos_write, github_repo, and
+      # slack_channel are all guarded against.
+      for bad <- ["../etc", "..", "a/../../b", "../../secret", "plugins/../.."] do
+        content = """
+        ---
+        name: bad-plugin-agent
+        tools: Read
+        plugins:
+          - "#{bad}"
+        ---
+
+        Bad.
+        """
+
+        assert {:error, {:invalid_plugin_name, ^bad, _reason}} = AgentDefinition.parse(content),
+               "expected plugin name #{inspect(bad)} to be rejected as path-unsafe"
+      end
+    end
   end
 
   describe "name validation" do
