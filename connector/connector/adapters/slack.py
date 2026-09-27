@@ -787,8 +787,26 @@ class SlackAdapter(BaseAdapter):
                 raise
 
             for ch in resp.get("channels", []):
-                if ch.get("name") == name:
-                    return ch["id"], bool(ch.get("is_member"))
+                if ch.get("name") != name:
+                    continue
+                # This is the create-lost-the-race fallback: conversations_create
+                # returned name_taken, so some existing channel already holds the
+                # name. Whoever holds a bound channel gets its every message
+                # treated as verified sender trust (_handle_bound_channel_message),
+                # so we must not join and bind a channel we cannot verify we
+                # created ourselves — an attacker who front-runs the auto-
+                # provisioning (e.g. after a rename frees the name, see the
+                # module docstring) could otherwise squat the name and have
+                # their own messages accepted as verified.
+                if ch.get("creator") != self._bot_user_id:
+                    logger.warning(
+                        "Channel #%s exists but was not created by this bot "
+                        "(creator=%s) — refusing to join and bind a channel we "
+                        "cannot verify, in case the name was squatted",
+                        name, ch.get("creator", "unknown"),
+                    )
+                    continue
+                return ch["id"], bool(ch.get("is_member"))
             cursor = resp.get("response_metadata", {}).get("next_cursor", "")
             if not cursor:
                 return None
