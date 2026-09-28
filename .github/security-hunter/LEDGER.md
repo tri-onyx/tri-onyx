@@ -1,0 +1,1 @@
+- 2026-09-28 | FIXED | frontend | Reject page_path characters that let the workspace-pages proxy redirect to an arbitrary gateway GET route with an attacker-chosen query string | frontend/trionyx_ui/views/chat.py

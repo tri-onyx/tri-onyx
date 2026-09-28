@@ -254,10 +254,29 @@ def session_audio(request, agent_name, session_id, audio_id):
 
 
 _COMMIT_SHA_RE = re.compile(r"\A[0-9a-f]{7,40}\Z")
+_UNSAFE_PAGE_PATH_CHARS = re.compile(r"[?#]")
+
+
+def _is_safe_page_path(page_path):
+    """Reject anything but a plain relative path.
+
+    `page_path` is spliced into the gateway request path as
+    `f"/pages/{commit}/{page_path}"` and handed to httpx, which parses it
+    as a URL: a literal "?"/"#" reopens the query/fragment (letting a
+    caller redirect the request to an arbitrary gateway route with an
+    arbitrary query string) and a ".."/leading-"/" segment escapes the
+    "/pages/" prefix entirely. None of that is valid in a real workspace
+    page path, so reject it before it ever reaches httpx.
+    """
+    if not page_path or _UNSAFE_PAGE_PATH_CHARS.search(page_path):
+        return False
+    return all(segment not in ("", ".", "..") for segment in page_path.split("/"))
 
 
 def session_page(request, commit, page_path):
     if not _COMMIT_SHA_RE.match(commit):
+        return HttpResponse(status=400)
+    if not _is_safe_page_path(page_path):
         return HttpResponse(status=400)
     ext = os.path.splitext(page_path)[1].lower()
     if ext not in (".html", ".htm"):
