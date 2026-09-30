@@ -299,6 +299,40 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    test "rejects traversal in the agent name (no reads outside logs/)" do
+      # A directory named "<session>_images" outside logs/ — e.g. one an agent
+      # created in its own repo tree — must not be reachable by moving the
+      # path prefix with "..%2F" in the agent name.
+      session = "poc#{System.unique_integer([:positive])}"
+      outside = Path.expand("#{session}_images")
+      File.mkdir_p!(outside)
+      File.write!(Path.join(outside, "leak.png"), "outside-logs")
+      on_exit(fn -> File.rm_rf!(outside) end)
+
+      conn =
+        conn(:get, "/images/#{URI.encode("..", &(&1 != ?/))}/#{session}/leak.png")
+        |> call_router()
+
+      assert conn.status == 400,
+             "agent name traversal must be rejected, got #{conn.status} with body #{inspect(conn.resp_body)}"
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode("../../..", &(&1 != ?/))}/x.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/images/test-agent/abc123/x.png") |> call_router()
+
+      assert conn.status == 404
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()
