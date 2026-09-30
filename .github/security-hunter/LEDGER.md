@@ -1,0 +1,2 @@
+- 2026-09-30 | FIXED     | gateway-http | GET /images/... built its directory from unvalidated agent_name/session_id (traversal moved the prefix check; symlink in an agent-writable *_images dir => host file read) | lib/tri_onyx/router.ex
+- 2026-09-30 | DOWNGRADED| gateway-http | extract_source_ip trusts cf-connecting-ip / x-forwarded-for unconditionally, so webhook IP allowlists and per-IP rate limits are spoofable by any client reaching the gateway directly; needs a trusted-proxy config decision | lib/tri_onyx/router.ex
