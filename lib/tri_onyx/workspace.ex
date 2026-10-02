@@ -503,16 +503,24 @@ defmodule TriOnyx.Workspace do
   `/workspace/<rest>` → `agents/<agent>/<rest>`;
   `/repos/<shared>/<rest>` → `shared/<name>/<rest>`;
   `/repos/agents/<other>/<rest>` → `agents/<other>/<rest>`.
-  Relative paths are treated as relative to `/workspace`.
+  Relative paths are treated as relative to `/workspace`. `.`/`..` segments
+  are resolved first, so the result names the file the container filesystem
+  actually reaches (`/workspace/../repos/x/f` → `shared/x/f`) — otherwise
+  manifest and provenance lookups keyed by canonical path can be dodged.
+  Paths that resolve outside `/workspace` and `/repos` return `:error`.
   """
   @spec canonical_path(String.t(), String.t()) :: {:ok, String.t()} | :error
   def canonical_path(agent_name, container_path) do
-    case container_path do
+    absolute =
+      if String.starts_with?(container_path, "/"),
+        do: container_path,
+        else: Path.join(container_root(), container_path)
+
+    case Path.expand(absolute) do
       "/workspace/" <> rest -> {:ok, "agents/#{agent_name}/#{rest}"}
       "/repos/agents/" <> rest -> {:ok, "agents/#{rest}"}
       "/repos/" <> rest -> {:ok, "shared/#{rest}"}
-      "/" <> _ -> :error
-      rel -> {:ok, "agents/#{agent_name}/#{rel}"}
+      _ -> :error
     end
   end
 
