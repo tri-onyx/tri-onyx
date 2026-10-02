@@ -1,0 +1,3 @@
+- 2026-10-02 | FIXED     | repo-store  | canonical_path/2 did not resolve `..`, letting Read of /workspace/../repos/<x>/f dodge risk-manifest sensitivity labels | lib/tri_onyx/workspace.ex
+- 2026-10-02 | DOWNGRADED| repo-store  | submit_image/submit_page use agent_host_path + File.regular?/File.cp, which follow agent-planted symlinks to gateway-host files (copied into logs/ and served via /images) — needs symlink-aware realpath check; not fixed here | lib/tri_onyx/workspace.ex, lib/tri_onyx/agent_session.ex
+- 2026-10-02 | DOWNGRADED| repo-store  | shared repo named "self" collides with an agent's own tree/gitdir (trees/<a>/self) — needs a reserved name in AgentDefinition repo-ref validation | lib/tri_onyx/repo_store.ex
