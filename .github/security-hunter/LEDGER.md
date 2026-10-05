@@ -1,0 +1,2 @@
+- 2026-10-05 | FIXED     | risk-model  | Bash results on networked agents were classified low taint at runtime (matrix says high) | lib/tri_onyx/information_classifier.ex
+- 2026-10-05 | DOWNGRADED| risk-model  | controlled_path? uses String.starts_with?(/workspace) without a separator, and classify_read_sensitivity feeds un-normalised paths to canonical_path (".." traversal -> manifest miss); neutralised today by the session-start read floor, not exploitable | lib/tri_onyx/information_classifier.ex

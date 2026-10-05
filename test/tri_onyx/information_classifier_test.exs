@@ -129,6 +129,22 @@ defmodule TriOnyx.InformationClassifierTest do
       assert %{taint: :low} = result
     end
 
+    test "Bash result has high taint when the agent has network access" do
+      for network <- [:outbound, ["example.com"]] do
+        result =
+          InformationClassifier.classify_tool_result("Bash", %{"command" => "curl example.com"}, %{
+            network: network
+          })
+
+        assert %{taint: :high} = result,
+               "Bash on a networked agent can fetch attacker-controlled content; " <>
+                 "its result must raise session taint (network: #{inspect(network)})"
+      end
+
+      assert %{taint: :low} =
+               InformationClassifier.classify_tool_result("Bash", %{"command" => "ls"}, %{network: :none})
+    end
+
     test "SendMessage result has low taint" do
       result = InformationClassifier.classify_tool_result("SendMessage", %{})
       assert %{taint: :low, reason: reason} = result
