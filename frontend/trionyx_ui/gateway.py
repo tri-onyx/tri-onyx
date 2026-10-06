@@ -1,5 +1,6 @@
 import json
 import logging
+from urllib.parse import quote
 
 import httpx
 from django.conf import settings
@@ -30,6 +31,22 @@ class GatewayValidationError(GatewayError):
     def __init__(self, message: str, errors: list[dict]):
         super().__init__(message, 400)
         self.errors = errors
+
+
+def _seg(value: str) -> str:
+    """Make one caller-supplied value safe to use as a gateway URL path
+    segment. httpx collapses ``.``/``..`` segments and honours ``?``/``#``,
+    so unchecked values (Django decodes ``%2e%2e`` and ``%3f`` before the
+    views see them) would let a dashboard client steer these requests to
+    arbitrary gateway endpoints."""
+    if value in ("", ".", ".."):
+        raise GatewayError("Invalid path segment", 400)
+    return quote(value, safe="")
+
+
+def _seg_path(value: str) -> str:
+    """Like ``_seg`` for a multi-segment path (``/``-separated)."""
+    return "/".join(_seg(part) for part in value.split("/"))
 
 
 def _request(
@@ -87,7 +104,7 @@ def get_agents() -> list[dict]:
 
 
 def get_agent(name: str) -> dict:
-    return _request("GET", f"/agents/{name}", not_found=f"Agent '{name}' not found").json()
+    return _request("GET", f"/agents/{_seg(name)}", not_found=f"Agent '{name}' not found").json()
 
 
 def get_health() -> dict:
@@ -116,7 +133,7 @@ def get_approvals() -> list[dict]:
 
 def approve_item(item_id: str, kind: str) -> dict:
     prefix = "bcp" if kind == "bcp" else "actions"
-    resp = _client().post(f"/{prefix}/approvals/{item_id}/approve")
+    resp = _client().post(f"/{prefix}/approvals/{_seg(item_id)}/approve")
     resp.raise_for_status()
     return resp.json()
 
@@ -124,7 +141,7 @@ def approve_item(item_id: str, kind: str) -> dict:
 def reject_item(item_id: str, kind: str, reason: str = "") -> dict:
     prefix = "bcp" if kind == "bcp" else "actions"
     resp = _client().post(
-        f"/{prefix}/approvals/{item_id}/reject",
+        f"/{prefix}/approvals/{_seg(item_id)}/reject",
         json={"reason": reason} if reason else {},
     )
     resp.raise_for_status()
@@ -138,7 +155,7 @@ def get_heartbeat_status() -> dict:
 def start_agent(name: str) -> dict:
     resp = _request(
         "POST",
-        f"/agents/{name}/start",
+        f"/agents/{_seg(name)}/start",
         json_body={"trigger_type": "verified_input"},
         not_found=f"Agent '{name}' not found",
         error_prefix="Failed to start agent",
@@ -153,7 +170,7 @@ def stop_agent(name: str, session_id: str | None = None) -> dict:
         body["session_id"] = session_id
     resp = _request(
         "POST",
-        f"/agents/{name}/stop",
+        f"/agents/{_seg(name)}/stop",
         json_body=body,
         error_prefix="Failed to stop agent",
     )
@@ -167,7 +184,7 @@ def send_prompt(name: str, content: str, session_id: str | None = None) -> dict:
         body["session_id"] = session_id
     resp = _request(
         "POST",
-        f"/agents/{name}/prompt",
+        f"/agents/{_seg(name)}/prompt",
         json_body=body,
         error_prefix="Failed to send prompt",
     )
@@ -176,7 +193,7 @@ def send_prompt(name: str, content: str, session_id: str | None = None) -> dict:
 
 
 def list_agent_sessions(agent_name: str) -> list[dict]:
-    return _try_get_json(f"/logs/{agent_name}", {}).get("sessions", [])
+    return _try_get_json(f"/logs/{_seg(agent_name)}", {}).get("sessions", [])
 
 
 def get_graph_analysis() -> dict:
@@ -186,7 +203,7 @@ def get_graph_analysis() -> dict:
 def get_session_image(agent_name: str, session_id: str, image_id: str):
     """Proxy a session image from the Elixir gateway. Returns raw httpx.Response."""
     resp = _client().get(
-        f"/images/{agent_name}/{session_id}/{image_id}",
+        f"/images/{_seg(agent_name)}/{_seg(session_id)}/{_seg(image_id)}",
         timeout=15.0,
     )
     resp.raise_for_status()
@@ -196,7 +213,7 @@ def get_session_image(agent_name: str, session_id: str, image_id: str):
 def get_session_audio(agent_name: str, session_id: str, audio_id: str):
     """Proxy a session audio file from the Elixir gateway. Returns raw httpx.Response."""
     resp = _client().get(
-        f"/audio/{agent_name}/{session_id}/{audio_id}",
+        f"/audio/{_seg(agent_name)}/{_seg(session_id)}/{_seg(audio_id)}",
         timeout=15.0,
     )
     resp.raise_for_status()
@@ -206,7 +223,7 @@ def get_session_audio(agent_name: str, session_id: str, audio_id: str):
 def get_session_page(commit: str, page_path: str):
     """Proxy an HTML page artifact from the Elixir gateway. Returns raw httpx.Response."""
     resp = _client().get(
-        f"/pages/{commit}/{page_path}",
+        f"/pages/{_seg(commit)}/{_seg_path(page_path)}",
         timeout=15.0,
     )
     resp.raise_for_status()
@@ -216,7 +233,7 @@ def get_session_page(commit: str, page_path: str):
 def get_session_log(agent_name: str, session_id: str) -> list[dict]:
     try:
         resp = _client().get(
-            f"/logs/{agent_name}/{session_id}",
+            f"/logs/{_seg(agent_name)}/{_seg(session_id)}",
             timeout=30.0,
         )
         resp.raise_for_status()
@@ -243,7 +260,7 @@ def get_agent_schema() -> dict:
 def get_agent_definition(name: str) -> dict:
     return _request(
         "GET",
-        f"/agents/{name}/definition",
+        f"/agents/{_seg(name)}/definition",
         not_found=f"Agent '{name}' not found",
     ).json()
 
@@ -252,7 +269,7 @@ def get_agent_context(name: str) -> str:
     return (
         _request(
             "GET",
-            f"/agents/{name}/context",
+            f"/agents/{_seg(name)}/context",
             not_found=f"Agent '{name}' not found",
         )
         .json()
@@ -276,7 +293,7 @@ def create_agent(data: dict) -> dict:
 def update_agent(name: str, data: dict) -> dict:
     resp = _request(
         "PUT",
-        f"/agents/{name}",
+        f"/agents/{_seg(name)}",
         json_body=data,
         not_found=f"Agent '{name}' not found",
         check_validation=True,
@@ -289,7 +306,7 @@ def update_agent(name: str, data: dict) -> dict:
 def delete_agent(name: str) -> dict:
     resp = _request(
         "DELETE",
-        f"/agents/{name}",
+        f"/agents/{_seg(name)}",
         not_found=f"Agent '{name}' not found",
         conflict="Agent has active sessions",
         error_prefix="Failed to delete agent",
