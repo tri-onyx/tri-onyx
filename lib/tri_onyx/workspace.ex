@@ -126,11 +126,32 @@ defmodule TriOnyx.Workspace do
     base = agent_dir(agent_name) |> Path.expand()
     full = Path.join(base, rel) |> Path.expand()
 
-    if String.starts_with?(full, base <> "/") or full == base do
+    if (String.starts_with?(full, base <> "/") or full == base) and
+         not symlink_in_path?(base, full) do
       {:ok, full}
     else
       {:error, :path_traversal}
     end
+  end
+
+  # The agent owns its tree and can plant symlinks whose targets only resolve
+  # on the gateway host. `Path.expand/1` is purely lexical, so refuse any
+  # existing symlink component between the tree root and the target.
+  @spec symlink_in_path?(String.t(), String.t()) :: boolean()
+  defp symlink_in_path?(base, full) do
+    full
+    |> Path.relative_to(base)
+    |> Path.split()
+    |> Enum.reject(&(&1 == "."))
+    |> Enum.reduce_while(base, fn part, acc ->
+      next = Path.join(acc, part)
+
+      case File.lstat(next) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, :symlink}
+        _ -> {:cont, next}
+      end
+    end)
+    |> Kernel.==(:symlink)
   end
 
   @doc """

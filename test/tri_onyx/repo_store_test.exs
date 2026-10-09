@@ -499,4 +499,32 @@ defmodule TriOnyx.RepoStoreTest do
       assert {:ok, %{"taint_level" => "high"}} = RiskManifest.lookup("shared/broken/x.md")
     end
   end
+
+  describe "Workspace.agent_host_path/2 symlink containment" do
+    test "rejects symlinks planted in the agent tree that point outside it", %{tmp: tmp} do
+      agent = "linker"
+      :ok = Workspace.ensure_agent_dir(agent)
+      tree = Workspace.agent_dir(agent)
+
+      secret_dir = Path.join(tmp, "outside")
+      File.mkdir_p!(secret_dir)
+      File.write!(Path.join(secret_dir, "host-secret.txt"), "host-only\n")
+
+      # What an agent can do from inside its container: symlinks whose
+      # targets only resolve on the gateway host.
+      File.ln_s!(Path.expand(Path.join(secret_dir, "host-secret.txt")), Path.join(tree, "leak"))
+      File.ln_s!(Path.expand(secret_dir), Path.join(tree, "dir"))
+      File.write!(Path.join(tree, "ok.png"), "png")
+
+      assert {:error, :path_traversal} = Workspace.agent_host_path(agent, "/workspace/leak"),
+             "a symlink to a host file must not resolve as an agent-tree path"
+
+      assert {:error, :path_traversal} =
+               Workspace.agent_host_path(agent, "/workspace/dir/host-secret.txt"),
+             "a symlinked directory must not let a path escape the agent tree"
+
+      assert {:ok, _} = Workspace.agent_host_path(agent, "/workspace/ok.png")
+      assert {:ok, _} = Workspace.agent_host_path(agent, "/workspace/not-yet-created.html")
+    end
+  end
 end
