@@ -544,6 +544,18 @@ class SlackAdapter(BaseAdapter):
         if user_id == self._bot_user_id:
             return
 
+        # The gateway applies whatever vote it is handed, so authorisation
+        # happens here: only the owner may decide an approval. Any other
+        # channel member (approvals are posted into agent-bound channels)
+        # is ignored without consuming the mapping, so the owner can still
+        # vote afterwards.
+        if not self._owner_user_id or user_id != self._owner_user_id:
+            logger.warning(
+                "Ignoring approval reaction from non-owner %s for %s",
+                user_id, approval_id,
+            )
+            return
+
         name = event.get("reaction", "")
         emoji = self._REACTION_UNICODE.get(name)
         if emoji is None:

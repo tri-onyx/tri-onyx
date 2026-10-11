@@ -143,3 +143,55 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class TestApprovalReactionAuthorization:
+    """Only the owner may approve/reject via reaction.
+
+    The gateway applies any approval reaction it receives, so a vote from an
+    arbitrary member of the channel must never be forwarded.
+    """
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._approval_events.put("1700000000.1", "appr-1")
+        adapter._received = []
+
+        async def capture(msg):
+            adapter._received.append(msg)
+
+        async def no_name(user_id):
+            return user_id
+
+        adapter._on_reaction = capture
+        adapter._get_display_name = no_name
+        return adapter
+
+    def _event(self, user, reaction="+1"):
+        return {
+            "type": "reaction_added",
+            "user": user,
+            "reaction": reaction,
+            "item": {"type": "message", "channel": "C1", "ts": "1700000000.1"},
+        }
+
+    async def test_non_owner_cannot_approve(self, adapter):
+        await adapter._handle_reaction(self._event("UMALLORY"))
+        assert adapter._received == [], "a non-owner channel member's vote must not reach the gateway"
+
+    async def test_non_owner_vote_does_not_consume_the_approval(self, adapter):
+        await adapter._handle_reaction(self._event("UMALLORY", "-1"))
+        await adapter._handle_reaction(self._event("UOWNER"))
+        assert len(adapter._received) == 1
+        assert adapter._received[0].approval_id == "appr-1"
+        assert adapter._received[0].emoji == "👍"
+
+    async def test_owner_can_reject(self, adapter):
+        await adapter._handle_reaction(self._event("UOWNER", "-1"))
+        assert [m.emoji for m in adapter._received] == ["👎"]
+
+    async def test_no_configured_owner_fails_closed(self, adapter):
+        adapter._owner_user_id = ""
+        await adapter._handle_reaction(self._event("UMALLORY"))
+        assert adapter._received == []
