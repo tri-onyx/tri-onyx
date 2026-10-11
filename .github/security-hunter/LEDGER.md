@@ -1,0 +1,2 @@
+- 2026-10-11 | FIXED     | connector   | Slack/Matrix approval reactions were forwarded from any room member; gateway ignores trust, so any member could approve/reject | connector/connector/adapters/slack.py, connector/connector/adapters/matrix.py
+- 2026-10-11 | DOWNGRADED| gateway-http| ConnectorHandler "reaction" frames carry a trust map the gateway never checks for approval_id votes; defence-in-depth would be to enforce verified trust there | lib/tri_onyx/connector_handler.ex

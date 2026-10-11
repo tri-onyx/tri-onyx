@@ -1304,6 +1304,15 @@ class MatrixAdapter(BaseAdapter):
         # Check if this is an approval reaction
         approval_id = self._approval_events.get(target_event_id)
         if approval_id:
+            # The gateway applies whatever vote it is handed, so only
+            # trusted_users may decide an approval; anyone else who can
+            # react in the room is ignored.
+            if trust.get("level") != "verified":
+                logger.warning(
+                    "Ignoring approval reaction from untrusted user %s for %s",
+                    sender, approval_id,
+                )
+                return
             msg = ReactionMessage(
                 emoji=emoji,
                 sender=sender,
