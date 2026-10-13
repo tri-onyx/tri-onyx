@@ -223,6 +223,15 @@ def agent_stop(request, name):
 
 _ALLOWED_IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
 
+# Agent-submitted media is untrusted. An SVG opened as a top-level document
+# would otherwise run its <script> on the dashboard origin; the sandbox CSP
+# gives it an opaque origin and blocks scripts while <img> embedding still works.
+_MEDIA_HEADERS = {
+    "Cache-Control": "private, max-age=3600",
+    "Content-Security-Policy": "sandbox; default-src 'none'; style-src 'unsafe-inline'",
+    "X-Content-Type-Options": "nosniff",
+}
+
 
 def session_image(request, agent_name, session_id, image_id):
     ext = os.path.splitext(image_id)[1].lower()
@@ -233,7 +242,7 @@ def session_image(request, agent_name, session_id, image_id):
         return HttpResponse(
             resp.content,
             content_type=resp.headers.get("content-type", "application/octet-stream"),
-            headers={"Cache-Control": "private, max-age=3600"},
+            headers=_MEDIA_HEADERS,
         )
     except Exception:
         return HttpResponse(status=404)
@@ -247,7 +256,7 @@ def session_audio(request, agent_name, session_id, audio_id):
         return HttpResponse(
             resp.content,
             content_type=resp.headers.get("content-type", "audio/ogg"),
-            headers={"Cache-Control": "private, max-age=3600"},
+            headers=_MEDIA_HEADERS,
         )
     except Exception:
         return HttpResponse(status=404)

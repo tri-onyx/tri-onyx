@@ -1,0 +1,3 @@
+- 2026-10-13 | FIXED     | frontend    | Serve agent-submitted SVG/audio with sandbox CSP + nosniff (stored XSS on dashboard origin) | frontend/trionyx_ui/views/chat.py
+- 2026-10-13 | DOWNGRADED| frontend    | PromptRateLimitMiddleware keys on client-controlled X-Forwarded-For (rate-limit bypass, low impact) | frontend/trionyx_ui/middleware.py
+- 2026-10-13 | DOWNGRADED| frontend    | agent_stop redirects to f"/agents/{name}/?active={session_id}" with unencoded session_id (same-origin, low impact) | frontend/trionyx_ui/views/chat.py
