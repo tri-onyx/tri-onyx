@@ -275,6 +275,35 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    setup do
+      dir = Path.join(File.cwd!(), "tmp/images-poc")
+      File.mkdir_p!(Path.join(dir, "x_images"))
+      File.write!(Path.join(dir, "x_images/leak.txt"), "outside-logs")
+      on_exit(fn -> File.rm_rf!(dir) end)
+      :ok
+    end
+
+    test "does not serve files outside the logs directory via agent-name traversal" do
+      conn =
+        conn(:get, "/images/#{URI.encode("../tmp/images-poc", &(&1 != ?/))}/x/leak.txt")
+        |> call_router()
+
+      refute conn.status == 200,
+             "traversal in :agent_name moved the safe prefix and leaked a file outside logs/"
+
+      assert conn.status == 400
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode("../..", &(&1 != ?/))}/x.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+  end
+
   describe "GET /audio/:agent_name/:session_id/:audio_id" do
     test "rejects traversal in the agent name" do
       conn =

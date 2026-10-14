@@ -1,0 +1,1 @@
+- 2026-10-14 | FIXED     | gateway-http | Validate agent/session names on GET /images (path traversal moved safe prefix; sibling-prefix check lacked trailing slash) | lib/tri_onyx/router.ex
