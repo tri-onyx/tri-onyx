@@ -1,0 +1,1 @@
+- 2026-10-17 | FIXED     | mcp-auth    | Redirect URI allowlist matched via canonical_resource (dropped query/fragment/trailing slash); now exact | mcp_server/mcp_server/auth.py

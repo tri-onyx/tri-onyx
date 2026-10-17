@@ -27,6 +27,7 @@ import secrets
 import time
 from dataclasses import dataclass, field
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from mcp.server.auth.provider import (
     AccessToken,
@@ -52,6 +53,22 @@ _CODE_BYTES = 32
 _TXN_BYTES = 32
 
 _SUBJECT = "operator"
+
+
+def _normalize_redirect(uri: str) -> str:
+    """Normalize a redirect URI for *exact* allowlist matching.
+
+    Unlike :func:`canonical_resource` this keeps the path verbatim (trailing
+    slash included), the query and the fragment: OAuth redirect URIs are
+    compared exactly, so ``<allowed>?next=//evil`` or ``<allowed>/`` must not
+    match. Only the case-insensitive scheme/host and a default port are
+    normalized.
+    """
+    parts = urlsplit(uri.strip())
+    origin = urlsplit(canonical_resource(uri))
+    return urlunsplit(
+        (origin.scheme, origin.netloc, parts.path, parts.query, parts.fragment)
+    )
 
 
 class LoginError(Exception):
@@ -217,7 +234,7 @@ class TriOnyxAuthProvider(
         self._completed: dict[str, _CompletedLogin] = {}
         self._codes: dict[str, AuthorizationCode] = {}
         self._allowed_redirects = {
-            canonical_resource(u) for u in config.auth.redirect_uris
+            _normalize_redirect(u) for u in config.auth.redirect_uris
         }
         self.limiter = LoginRateLimiter(
             max_failures=config.auth.max_login_failures,
@@ -231,7 +248,7 @@ class TriOnyxAuthProvider(
     # ------------------------------------------------------------------
 
     def _redirect_allowed(self, uri: str) -> bool:
-        return canonical_resource(uri) in self._allowed_redirects
+        return _normalize_redirect(uri) in self._allowed_redirects
 
     def _resource_ok(self, resource: str | None) -> bool:
         """RFC 8707: accept only this server's own canonical resource URL.

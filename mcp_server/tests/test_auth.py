@@ -714,3 +714,21 @@ async def test_the_newest_pending_authorization_survives_a_flood(provider):
     for _ in range(10):
         await provider.authorize(client, auth_params())
     assert provider.has_pending(mine)
+
+
+@pytest.mark.parametrize(
+    "variant",
+    [
+        CLAUDE_REDIRECT + "?next=https://evil.test",
+        CLAUDE_REDIRECT + "/",
+        CLAUDE_REDIRECT + "#frag",
+    ],
+)
+async def test_redirect_allowlist_is_an_exact_match(provider, variant):
+    """A variant of an allowed redirect URI (extra query, fragment or trailing
+    slash) must be refused — redirect URIs match exactly."""
+    assert not provider._redirect_allowed(variant), "variant slipped past allowlist"
+    with pytest.raises(RegistrationError):
+        await provider.register_client(make_client(redirect_uris=[variant]))
+    assert provider._redirect_allowed(CLAUDE_REDIRECT)
+    assert provider._redirect_allowed(CLAUDE_REDIRECT.replace("claude.ai", "Claude.AI"))
