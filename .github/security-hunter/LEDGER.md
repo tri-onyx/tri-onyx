@@ -1,0 +1,2 @@
+- 2026-10-18 | FIXED     | connector   | Only owner/trusted users may vote on approval reactions (Slack + Matrix); gateway ignores reaction trust | connector/connector/adapters/slack.py, matrix.py
+- 2026-10-18 | DOWNGRADED| connector   | ConnectorHandler approval reactions ignore frame trust entirely (defence in depth: gateway should enforce too); Slack bound-channel members are all treated as verified by design | lib/tri_onyx/connector_handler.ex
