@@ -143,3 +143,57 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class TestApprovalReactionAuthority:
+    """Only the owner may vote on an approval; the gateway trusts the frame."""
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._approval_events.put("1700000000.1", "appr-1")
+        adapter._reactions = []
+
+        async def capture(msg):
+            adapter._reactions.append(msg)
+
+        adapter._on_reaction = capture
+        return adapter
+
+    def _event(self, user, reaction="+1"):
+        return {
+            "type": "reaction_added",
+            "user": user,
+            "reaction": reaction,
+            "item": {"type": "message", "channel": "C1", "ts": "1700000000.1"},
+        }
+
+    async def test_non_owner_reaction_cannot_vote_on_an_approval(self, adapter):
+        await adapter._handle_reaction(self._event("UMALLORY"))
+
+        assert adapter._reactions == [], (
+            "a non-owner channel member's reaction was forwarded to the gateway, "
+            "which approves/rejects unconditionally"
+        )
+        assert adapter._approval_events.get("1700000000.1") == "appr-1", (
+            "a non-owner reaction must not consume the pending approval"
+        )
+
+    async def test_owner_reaction_still_votes(self, adapter):
+        await adapter._handle_reaction(self._event("UOWNER", "-1"))
+
+        assert [(m.approval_id, m.emoji) for m in adapter._reactions] == [("appr-1", "👎")]
+        assert adapter._approval_events.get("1700000000.1") is None
+
+    async def test_unset_owner_lets_nobody_vote(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._owner_user_id = ""
+        adapter._approval_events.put("1700000000.1", "appr-1")
+        seen = []
+
+        async def capture(msg):
+            seen.append(msg)
+
+        adapter._on_reaction = capture
+        await adapter._handle_reaction(self._event(""))
+        assert seen == []
