@@ -288,10 +288,13 @@ defmodule TriOnyx.RiskScorer do
     if rank[a] >= rank[b], do: a, else: b
   end
 
+  @doc """
+  Returns true if the network policy grants any outbound access.
+  """
   @spec has_network?(atom() | [String.t()]) :: boolean()
-  defp has_network?(:none), do: false
-  defp has_network?(:outbound), do: true
-  defp has_network?(hosts) when is_list(hosts) and hosts != [], do: true
-  defp has_network?(_), do: false
+  def has_network?(:none), do: false
+  def has_network?(:outbound), do: true
+  def has_network?(hosts) when is_list(hosts) and hosts != [], do: true
+  def has_network?(_), do: false
 
 end
