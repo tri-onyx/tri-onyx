@@ -1,0 +1,2 @@
+- 2026-10-19 | FIXED     | risk-model  | Bash output from network-enabled agents was classified low taint at runtime | lib/tri_onyx/information_classifier.ex
+- 2026-10-19 | NO-FINDING| risk-model  | Read-path sensitivity bypass via unnormalised /workspace/../ paths is moot: session start already floors sensitivity at max of all readable repos; controlled_path? prefix check lacks trailing slash but no sibling /workspace* dirs exist in containers | lib/tri_onyx/information_classifier.ex
