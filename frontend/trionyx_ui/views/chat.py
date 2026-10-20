@@ -233,7 +233,13 @@ def session_image(request, agent_name, session_id, image_id):
         return HttpResponse(
             resp.content,
             content_type=resp.headers.get("content-type", "application/octet-stream"),
-            headers={"Cache-Control": "private, max-age=3600"},
+            headers={
+                # Agent-authored SVG can carry <script>; opened top-level it
+                # would run on the dashboard origin. Sandbox it (as pages are).
+                "Content-Security-Policy": "sandbox",
+                "X-Content-Type-Options": "nosniff",
+                "Cache-Control": "private, max-age=3600",
+            },
         )
     except Exception:
         return HttpResponse(status=404)

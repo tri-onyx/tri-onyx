@@ -1,0 +1,2 @@
+- 2026-10-20 | FIXED     | frontend    | Sandbox agent-authored SVGs served by session_image (script ran on dashboard origin) | frontend/trionyx_ui/views/chat.py
+- 2026-10-20 | DOWNGRADED| frontend    | Dashboard has no auth/CSRF-bound identity and trusts X-Forwarded-For for rate limit; gateway proxy paths (page_path, item_id) interpolated unescaped into gateway URLs — dot-segment reach unproven here | frontend/trionyx_ui/gateway.py
