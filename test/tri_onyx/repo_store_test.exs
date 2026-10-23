@@ -499,4 +499,40 @@ defmodule TriOnyx.RepoStoreTest do
       assert {:ok, %{"taint_level" => "high"}} = RiskManifest.lookup("shared/broken/x.md")
     end
   end
+
+  describe "Workspace.agent_host_path/2 symlink confinement" do
+    test "rejects symlinks planted in the agent tree that point outside it", %{tmp: tmp} do
+      tree = Workspace.agent_dir("evil")
+      File.mkdir_p!(tree)
+
+      outside = Path.join(tmp, "outside-secret.txt")
+      File.write!(outside, "host-only")
+      outside_dir = Path.join(tmp, "outside-dir")
+      File.mkdir_p!(outside_dir)
+      File.write!(Path.join(outside_dir, "x.png"), "host-only")
+
+      File.ln_s!(Path.expand(outside), Path.join(tree, "leak.png"))
+      File.ln_s!(Path.expand(outside_dir), Path.join(tree, "linkdir"))
+
+      assert {:error, :path_traversal} =
+               Workspace.agent_host_path("evil", "/workspace/leak.png"),
+             "a symlink to a host file must not resolve as a path inside the agent's tree"
+
+      assert {:error, :path_traversal} =
+               Workspace.agent_host_path("evil", "/workspace/linkdir/x.png"),
+             "a symlinked directory must not let a path escape the agent's tree"
+    end
+
+    test "still resolves regular files and in-tree symlinks" do
+      tree = Workspace.agent_dir("good")
+      File.mkdir_p!(Path.join(tree, "sub"))
+      File.write!(Path.join(tree, "sub/a.png"), "x")
+      File.ln_s!("sub/a.png", Path.join(tree, "alias.png"))
+
+      assert {:ok, p} = Workspace.agent_host_path("good", "/workspace/sub/a.png")
+      assert File.regular?(p)
+      assert {:ok, p2} = Workspace.agent_host_path("good", "alias.png")
+      assert File.regular?(p2)
+    end
+  end
 end

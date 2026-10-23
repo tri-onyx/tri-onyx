@@ -126,11 +126,38 @@ defmodule TriOnyx.Workspace do
     base = agent_dir(agent_name) |> Path.expand()
     full = Path.join(base, rel) |> Path.expand()
 
-    if String.starts_with?(full, base <> "/") or full == base do
-      {:ok, full}
+    # The tree is agent-writable, so it may contain symlinks pointing at
+    # arbitrary host paths; confine the *resolved* path, not just the
+    # lexical one.
+    with true <- String.starts_with?(full, base <> "/") or full == base,
+         real_base = real_path(base, 0),
+         real_full = real_path(full, 0),
+         true <- String.starts_with?(real_full, real_base <> "/") or real_full == real_base do
+      {:ok, real_full}
     else
-      {:error, :path_traversal}
+      _ -> {:error, :path_traversal}
     end
+  end
+
+  # Resolves symlinks component by component (nonexistent tails are kept
+  # as-is). Gives up after 40 links, returning a path that fails confinement.
+  defp real_path(path, depth) when depth > 40, do: "/!symlink-loop" <> path
+
+  defp real_path(path, depth) do
+    [root | parts] = Path.split(path)
+
+    Enum.reduce_while(parts, {root, depth}, fn part, {acc, d} ->
+      next = Path.join(acc, part)
+
+      case File.read_link(next) do
+        {:ok, target} ->
+          {:cont, {real_path(Path.expand(target, acc), d + 1), d + 1}}
+
+        {:error, _} ->
+          {:cont, {next, d}}
+      end
+    end)
+    |> elem(0)
   end
 
   @doc """
