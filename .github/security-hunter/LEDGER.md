@@ -1,0 +1,1 @@
+- 2026-10-23 | FIXED     | repo-store  | agent_host_path followed agent-planted symlinks (SubmitImage copied arbitrary host files) | lib/tri_onyx/workspace.ex
