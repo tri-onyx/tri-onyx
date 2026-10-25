@@ -143,3 +143,52 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class TestBoundChannelSystemCommands:
+    """Gateway system commands (``/restart <agent>``) are operator-only.
+
+    The gateway parses leading-slash content before routing and ignores the
+    sender's trust, so the connector must keep non-owners (channel members,
+    GitHub/CI apps whose text is attacker-influenced) from issuing them.
+    """
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path, rooms={"C1": RoomConfig(agent="repo-agent", mode="all")})
+        adapter._received = []
+
+        async def capture(msg):
+            adapter._received.append(msg)
+
+        adapter._on_message = capture
+        return adapter
+
+    def _event(self, text, **overrides):
+        event = {"type": "message", "channel": "C1", "channel_type": "channel", "text": text}
+        event.update(overrides)
+        return event
+
+    async def test_app_post_cannot_run_system_commands(self, adapter):
+        await adapter._handle_message(
+            self._event("/restart other-agent", bot_id="BGITHUB", username="GitHub")
+        )
+        assert adapter._received == [], (
+            "an app-authored message must not reach the gateway as a system command"
+        )
+
+    async def test_non_owner_member_cannot_run_system_commands(self, adapter):
+        await adapter._handle_message(self._event("/restart other-agent", user="UALICE"))
+        await adapter._handle_message(self._event("<@UBOT> /restart other-agent", user="UALICE"))
+        assert adapter._received == [], (
+            "a non-owner must not restart agents through a bound channel"
+        )
+
+    async def test_owner_can_still_run_system_commands(self, adapter):
+        await adapter._handle_message(self._event("/restart", user="UOWNER"))
+        assert len(adapter._received) == 1
+
+    async def test_skill_invocations_and_plain_text_still_pass(self, adapter):
+        await adapter._handle_message(self._event("/newsagg:fetchnews", user="UALICE"))
+        await adapter._handle_message(self._event("see /tmp/x for details", user="UALICE"))
+        assert len(adapter._received) == 2
