@@ -1,0 +1,4 @@
+- 2026-10-25 | FIXED     | connector   | Slack bound channels forwarded `/restart <agent>` from any member or app; now owner-only | connector/connector/adapters/slack.py
+- 2026-10-25 | DOWNGRADED| connector   | Matrix adapter has no slash-command guard either (any room member/trusted_users-less sender can `/restart <agent>`); better fixed gateway-side by requiring verified trust in SystemCommand | connector/connector/adapters/matrix.py, lib/tri_onyx/connector_handler.ex
+- 2026-10-25 | DOWNGRADED| connector   | Gateway ignores reaction `trust`, so any member who can see an approval message can 👍/👎 it; docs say Slack is multi-user so possibly intended — human should decide | lib/tri_onyx/connector_handler.ex
+- 2026-10-25 | DOWNGRADED| connector   | Slack ApprovalStore keys on message ts only (not channel); Matrix reaction handler does not check room of target event — needs leaked/colliding IDs, low | connector/connector/adapters/slack.py

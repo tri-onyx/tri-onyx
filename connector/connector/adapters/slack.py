@@ -484,6 +484,23 @@ class SlackAdapter(BaseAdapter):
         if not text:
             return
 
+        # The gateway parses leading-slash content as operator system commands
+        # (e.g. ``/restart <any agent>``) before routing and ignores sender
+        # trust, so only the owner may send one from a bound channel. Apps
+        # and other members would otherwise restart any agent. Skill
+        # invocations (``/library:action``) pass through to the agent.
+        # Deliberately wider than SystemCommand.parse/1: every unknown
+        # "/word" is held back too.
+        if (
+            text.startswith("/")
+            and ":" not in text.split(None, 1)[0]
+            and not (user_id and user_id == self._owner_user_id)
+        ):
+            logger.warning(
+                "Dropping slash command from non-owner in bound channel %s", channel
+            )
+            return
+
         if not user_id and bot_id:
             # Another app posted (GitHub, CI, …). It has no Slack user, so
             # name it from the event itself.
