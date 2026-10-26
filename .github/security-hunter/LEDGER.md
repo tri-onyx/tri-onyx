@@ -1,0 +1,2 @@
+- 2026-10-26 | FIXED     | risk-model  | Normalize Read paths before risk-manifest sensitivity lookup (`..`/`.`/`//` dodged high-sensitivity labels) | lib/tri_onyx/information_classifier.ex
+- 2026-10-26 | DOWNGRADED| risk-model  | controlled_path? uses String.starts_with?(path, "/workspace") without trailing slash, so "/workspace-x/..." counts as controlled (low taint); needs a writable root-level dir in the container to exploit | lib/tri_onyx/information_classifier.ex

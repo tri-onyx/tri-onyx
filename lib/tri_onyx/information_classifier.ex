@@ -253,7 +253,9 @@ defmodule TriOnyx.InformationClassifier do
 
   @spec classify_read_sensitivity(map(), map()) :: sensitivity_level()
   defp classify_read_sensitivity(input, tool_meta) do
-    path = Map.get(input, "file_path", "")
+    # Normalize first: the OS resolves `..`, `.` and `//` when the agent reads,
+    # so the manifest key must be built from the resolved path, not the raw one.
+    path = input |> Map.get("file_path", "") |> normalize_container_path()
     agent = Map.get(tool_meta, :agent_name, "unknown")
 
     with true <- controlled_path?(path),
@@ -330,6 +332,12 @@ defmodule TriOnyx.InformationClassifier do
   defp trigger_reason(:external_message), do: "verified external message"
   defp trigger_reason(:verified_input), do: "verified connector message"
   defp trigger_reason(other), do: "trigger: #{other}"
+
+  @spec normalize_container_path(term()) :: String.t()
+  defp normalize_container_path(path) when is_binary(path) and path != "",
+    do: Path.expand(path, TriOnyx.Workspace.container_root())
+
+  defp normalize_container_path(_), do: ""
 
   @spec controlled_path?(String.t()) :: boolean()
   defp controlled_path?(""), do: false
