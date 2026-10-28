@@ -299,6 +299,50 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    # The images directory is built from path params, so traversal in the
+    # agent name or session id moves the safe prefix along with the target.
+    # A planted `<x>_images/<file>` anywhere on the gateway host would be served.
+    test "does not serve files from arbitrary directories via session id traversal" do
+      base = Path.join(System.tmp_dir!(), "router-img-#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(base, "sess_images"))
+      File.write!(Path.join([base, "sess_images", "loot.png"]), "SECRET")
+      on_exit(fn -> File.rm_rf!(base) end)
+
+      up = List.duplicate("..", 2 + length(Path.split(File.cwd!())) - 1) |> Enum.join("/")
+      session = "#{up}#{base}/sess"
+
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode(session, &(&1 != ?/))}/loot.png")
+        |> call_router()
+
+      assert conn.status == 400, "session id traversal must be rejected, got #{conn.status}"
+      refute conn.resp_body == "SECRET"
+    end
+
+    test "rejects traversal in the agent name" do
+      conn =
+        conn(:get, "/images/#{URI.encode("../../..", &(&1 != ?/))}/abc123/a.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "rejects image ids that are not a single generated file name" do
+      conn =
+        conn(:get, "/images/test-agent/abc123/#{URI.encode("../abc123_images2/a.png", &(&1 != ?/))}")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/images/test-agent/abc123/abcdef0123456.png") |> call_router()
+
+      assert conn.status == 404
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()

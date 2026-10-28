@@ -1324,36 +1324,46 @@ defmodule TriOnyx.Router do
 
   # --- Session Images ---
 
+  @image_id_re ~r/\A[A-Za-z0-9]{1,64}\.(png|jpe?g|gif|webp|svg)\z/i
+
   get "/images/:agent_name/:session_id/:image_id" do
-    images_dir = Path.join(["logs", agent_name, "#{session_id}_images"])
-    file_path = Path.join(images_dir, image_id) |> Path.expand()
-    safe_prefix = Path.expand(images_dir)
+    # Same hazard as /audio below: the directory is built from path params,
+    # so traversal in any of them would move the safe prefix with the target.
+    # Image ids are gateway-generated (<base32>.<ext>), a single plain segment.
+    if not (valid_agent_name?(agent_name) and valid_session_id?(session_id) and
+              Regex.match?(@image_id_re, image_id)) do
+      conn |> send_resp(400, "invalid path")
+    else
+      images_dir = Path.join(["logs", agent_name, "#{session_id}_images"])
+      file_path = Path.join(images_dir, image_id) |> Path.expand()
+      safe_prefix = Path.expand(images_dir) <> "/"
 
-    content_types = %{
-      ".png" => "image/png",
-      ".jpg" => "image/jpeg",
-      ".jpeg" => "image/jpeg",
-      ".gif" => "image/gif",
-      ".webp" => "image/webp",
-      ".svg" => "image/svg+xml"
-    }
+      content_types = %{
+        ".png" => "image/png",
+        ".jpg" => "image/jpeg",
+        ".jpeg" => "image/jpeg",
+        ".gif" => "image/gif",
+        ".webp" => "image/webp",
+        ".svg" => "image/svg+xml"
+      }
 
-    cond do
-      not String.starts_with?(file_path, safe_prefix) ->
-        conn |> send_resp(403, "forbidden")
+      cond do
+        not String.starts_with?(file_path, safe_prefix) ->
+          conn |> send_resp(403, "forbidden")
 
-      not File.regular?(file_path) ->
-        conn |> send_resp(404, "not found")
+        not File.regular?(file_path) ->
+          conn |> send_resp(404, "not found")
 
-      true ->
-        ext = Path.extname(image_id) |> String.downcase()
-        content_type = Map.get(content_types, ext, "application/octet-stream")
-        data = File.read!(file_path)
+        true ->
+          ext = Path.extname(image_id) |> String.downcase()
+          content_type = Map.get(content_types, ext, "application/octet-stream")
+          data = File.read!(file_path)
 
-        conn
-        |> put_resp_content_type(content_type)
-        |> put_resp_header("cache-control", "private, max-age=3600")
-        |> send_resp(200, data)
+          conn
+          |> put_resp_content_type(content_type)
+          |> put_resp_header("cache-control", "private, max-age=3600")
+          |> send_resp(200, data)
+      end
     end
   end
 

@@ -1,0 +1,1 @@
+- 2026-10-28 | FIXED     | gateway-http | Validate agent/session/image ids in GET /images (traversal moved the safe prefix; sibling of the /audio fix) | lib/tri_onyx/router.ex
