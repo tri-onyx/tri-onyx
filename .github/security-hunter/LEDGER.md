@@ -1,0 +1,3 @@
+- 2026-10-29 | FIXED     | sandbox-exec | Gateway followed agent-created symlinks in SubmitImage/SubmitPage/email/calendar draft paths (arbitrary host file read) | lib/tri_onyx/workspace.ex
+- 2026-10-29 | DOWNGRADED| sandbox-exec | plugin names unvalidated (',' / '=' injection into TRI_ONYX_PLUGIN_PATHS; only definition authors reach it, no privilege gain) | lib/tri_onyx/agent_definition.ex
+- 2026-10-29 | DOWNGRADED| sandbox-exec | Gateway handlers for SaveDraft/email/calendar/image/page requests do not check the tool is in definition.tools (only GitHub/restart do); a compromised runtime could send raw frames | lib/tri_onyx/agent_session.ex
