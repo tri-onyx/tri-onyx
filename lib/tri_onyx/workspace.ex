@@ -126,11 +126,34 @@ defmodule TriOnyx.Workspace do
     base = agent_dir(agent_name) |> Path.expand()
     full = Path.join(base, rel) |> Path.expand()
 
-    if String.starts_with?(full, base <> "/") or full == base do
+    if (String.starts_with?(full, base <> "/") or full == base) and
+         not symlink_below?(base, full) do
       {:ok, full}
     else
       {:error, :path_traversal}
     end
+  end
+
+  # The agent owns its tree and can create symlinks in it. The gateway
+  # resolves them on the host (outside the container's mount namespace), so a
+  # link to an absolute host path would turn a gateway-side read into an
+  # arbitrary file read. Reject any symlink component below the tree root.
+  @spec symlink_below?(String.t(), String.t()) :: boolean()
+  defp symlink_below?(base, full) do
+    full
+    |> Path.relative_to(base)
+    |> Path.split()
+    |> Enum.reject(&(&1 == "."))
+    |> Enum.reduce_while(base, fn segment, acc ->
+      current = Path.join(acc, segment)
+
+      case File.lstat(current) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, :symlink}
+        {:ok, _} -> {:cont, current}
+        {:error, _} -> {:halt, :missing}
+      end
+    end)
+    |> Kernel.==(:symlink)
   end
 
   @doc """

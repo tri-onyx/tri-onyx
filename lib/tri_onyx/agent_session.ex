@@ -1042,19 +1042,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:send_email_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: send_email_request draft=#{draft_path}")
 
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    # Validated host path inside the agent's own tree (rejects `..` escapes
+    # and symlinks, which the gateway would otherwise resolve on the host).
+    resolved = Workspace.agent_host_path(state.definition.name, draft_path)
 
-    # Translate agent path (/workspace/...) to host path
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    # Validate path is within agent workspace (prevent path traversal)
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
+    if match?({:ok, _}, resolved) do
+      {:ok, host_path} = resolved
       port = state.port
       session_id = state.id
       agent_name = state.definition.name
@@ -1193,17 +1186,12 @@ defmodule TriOnyx.AgentSession do
   defp handle_agent_event({:save_draft_request, req_id, draft_path}, state) do
     Logger.info("AgentSession #{state.id}: save_draft_request draft=#{draft_path}")
 
-    agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
+    # Validated host path inside the agent's own tree (rejects `..` escapes
+    # and symlinks, which the gateway would otherwise resolve on the host).
+    resolved = Workspace.agent_host_path(state.definition.name, draft_path)
 
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
-
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
+    if match?({:ok, _}, resolved) do
+      {:ok, host_path} = resolved
       port = state.port
 
       Task.start(fn ->
@@ -1310,15 +1298,12 @@ defmodule TriOnyx.AgentSession do
 
     agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
+    # Validated host path inside the agent's own tree (rejects `..` escapes
+    # and symlinks, which the gateway would otherwise resolve on the host).
+    resolved = Workspace.agent_host_path(state.definition.name, draft_path)
 
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
+    if match?({:ok, _}, resolved) do
+      {:ok, host_path} = resolved
       port = state.port
 
       Task.start(fn ->
@@ -1350,15 +1335,12 @@ defmodule TriOnyx.AgentSession do
 
     agent_dir = TriOnyx.Workspace.agent_dir(state.definition.name)
 
-    host_path =
-      draft_path
-      |> String.replace_prefix("#{TriOnyx.Workspace.container_root()}/", "")
-      |> then(&Path.join(agent_dir, &1))
-      |> Path.expand()
+    # Validated host path inside the agent's own tree (rejects `..` escapes
+    # and symlinks, which the gateway would otherwise resolve on the host).
+    resolved = Workspace.agent_host_path(state.definition.name, draft_path)
 
-    expanded_agent_dir = Path.expand(agent_dir)
-
-    if String.starts_with?(host_path, expanded_agent_dir) do
+    if match?({:ok, _}, resolved) do
+      {:ok, host_path} = resolved
       port = state.port
 
       Task.start(fn ->
