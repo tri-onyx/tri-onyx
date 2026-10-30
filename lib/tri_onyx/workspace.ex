@@ -113,7 +113,9 @@ defmodule TriOnyx.Workspace do
 
   Accepts `/workspace/<rest>` (absolute container path) or a bare
   relative path. Returns `{:ok, host_path}` or `{:error, :path_traversal}`
-  when the result escapes the agent's tree.
+  when the result escapes the agent's tree or passes through a symlink
+  (agents control their tree's contents, so a symlink would let the
+  gateway read files outside the mount set on the agent's behalf).
   """
   @spec agent_host_path(String.t(), String.t()) ::
           {:ok, String.t()} | {:error, :path_traversal}
@@ -126,11 +128,29 @@ defmodule TriOnyx.Workspace do
     base = agent_dir(agent_name) |> Path.expand()
     full = Path.join(base, rel) |> Path.expand()
 
-    if String.starts_with?(full, base <> "/") or full == base do
+    if (String.starts_with?(full, base <> "/") or full == base) and
+         not symlink_in_path?(base, full) do
       {:ok, full}
     else
       {:error, :path_traversal}
     end
+  end
+
+  # True when any component of `full` below `base` is a symlink.
+  defp symlink_in_path?(base, full) do
+    full
+    |> Path.relative_to(base)
+    |> Path.split()
+    |> Enum.reject(&(&1 == "."))
+    |> Enum.reduce_while(base, fn part, acc ->
+      next = Path.join(acc, part)
+
+      case File.lstat(next) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, :symlink}
+        _ -> {:cont, next}
+      end
+    end)
+    |> Kernel.==(:symlink)
   end
 
   @doc """

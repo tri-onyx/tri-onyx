@@ -1,0 +1,1 @@
+- 2026-10-30 | FIXED     | repo-store  | agent_host_path followed agent-planted symlinks, letting SubmitImage copy gateway-side files out of the mount set | lib/tri_onyx/workspace.ex
