@@ -1,0 +1,2 @@
+- 2026-11-01 | FIXED     | connector   | Slack approval reactions accepted from any channel member; now owner-only | connector/connector/adapters/slack.py
+- 2026-11-01 | DOWNGRADED| connector   | Matrix _dispatch_reaction forwards approval reactions from any room member and gateway connector_handler ignores trust on approval reactions (Elixir, not testable here: no Elixir toolchain) | connector/connector/adapters/matrix.py, lib/tri_onyx/connector_handler.ex
