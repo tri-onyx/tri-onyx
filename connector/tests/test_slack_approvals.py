@@ -143,3 +143,48 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class TestApprovalReactionAuthorization:
+    """Only the owner may approve/reject via reactions.
+
+    The gateway acts on any approval reaction regardless of sender trust, so
+    a non-owner member of the approval channel must not be able to vote.
+    """
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._approval_events.put("1700000000.1", "appr-1")
+        adapter._reactions = []
+
+        async def capture(msg):
+            adapter._reactions.append(msg)
+
+        adapter._on_reaction = capture
+
+        async def name(_uid):
+            return "someone"
+
+        adapter._get_display_name = name
+        return adapter
+
+    def _event(self, user):
+        return {
+            "type": "reaction_added",
+            "user": user,
+            "reaction": "+1",
+            "item": {"type": "message", "channel": "C1", "ts": "1700000000.1"},
+        }
+
+    async def test_non_owner_reaction_does_not_approve(self, adapter):
+        await adapter._handle_reaction(self._event("UMALLORY"))
+        assert adapter._reactions == [], "non-owner 👍 must not reach the gateway"
+        assert adapter._approval_events.get("1700000000.1") == "appr-1", (
+            "non-owner reaction must not consume the pending approval"
+        )
+
+    async def test_owner_reaction_approves(self, adapter):
+        await adapter._handle_reaction(self._event("UOWNER"))
+        assert len(adapter._reactions) == 1
+        assert adapter._reactions[0].approval_id == "appr-1"

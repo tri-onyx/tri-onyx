@@ -549,6 +549,17 @@ class SlackAdapter(BaseAdapter):
         if emoji is None:
             return
 
+        # The gateway applies any 👍/👎 on an approval id without looking at
+        # the sender's trust, so only the owner may vote here. Checked before
+        # resolve(): a non-owner reaction must neither approve nor burn the
+        # mapping so the owner's real vote is ignored.
+        if self._owner_user_id and user_id != self._owner_user_id:
+            logger.warning(
+                "Ignoring approval reaction from non-owner %s for %s",
+                user_id, approval_id,
+            )
+            return
+
         # This vote resolves the approval — forget the mapping so later
         # reactions on the same message are no longer forwarded and the
         # store does not accumulate entries.
