@@ -1,0 +1,3 @@
+- 2026-11-02 | FIXED     | risk-model  | Bash results from networked agents were classified low taint (network context never passed) | lib/tri_onyx/information_classifier.ex
+- 2026-11-02 | DOWNGRADED| risk-model  | controlled_path? uses "/workspace" prefix without trailing slash (matches /workspaceX); classify_read_sensitivity does not normalize ".." before canonical_path — both masked by session read-floor, low impact | lib/tri_onyx/information_classifier.ex
+- 2026-11-02 | NO-FINDING| sandbox-exec| agent_session email/calendar draft path check uses starts_with? without "/" but sibling dirs under trees/<agent>/ are only the agent's own clones — no boundary crossed | lib/tri_onyx/agent_session.ex

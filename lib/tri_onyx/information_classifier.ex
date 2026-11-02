@@ -81,7 +81,7 @@ defmodule TriOnyx.InformationClassifier do
   @spec classify_tool_result(String.t(), map(), map()) :: classification()
   def classify_tool_result(tool_name, input, tool_meta \\ %{})
       when is_binary(tool_name) and is_map(input) do
-    taint = classify_tool_taint(tool_name, input)
+    taint = classify_tool_taint(tool_name, input, tool_meta)
 
     sensitivity =
       if tool_name == "Read" do
@@ -272,16 +272,29 @@ defmodule TriOnyx.InformationClassifier do
     end
   end
 
-  @spec classify_tool_taint(String.t(), map()) :: information_level()
-  defp classify_tool_taint("Read", input) do
+  @spec classify_tool_taint(String.t(), map(), map()) :: information_level()
+  defp classify_tool_taint("Read", input, _tool_meta) do
     path = Map.get(input, "file_path", "")
     context = if controlled_path?(path), do: :controlled, else: :external
     TaintMatrix.tool_taint("Read", context)
   end
 
-  defp classify_tool_taint(tool_name, _input) do
+  # Bash with network access can pull in arbitrary external content
+  # (curl/wget), so its results carry the matrix's `:network` taint. The
+  # caller passes the agent's network policy as `tool_meta.network`.
+  defp classify_tool_taint("Bash", _input, tool_meta) do
+    context = if bash_network?(Map.get(tool_meta, :network)), do: :network, else: :isolated
+    TaintMatrix.tool_taint("Bash", context)
+  end
+
+  defp classify_tool_taint(tool_name, _input, _tool_meta) do
     TaintMatrix.tool_taint(tool_name)
   end
+
+  @spec bash_network?(term()) :: boolean()
+  defp bash_network?(:outbound), do: true
+  defp bash_network?(hosts) when is_list(hosts), do: hosts != []
+  defp bash_network?(_), do: false
 
   @spec tool_reason(String.t(), map(), information_level(), sensitivity_level()) :: String.t()
   defp tool_reason(tool_name, input, _taint, sensitivity) do
