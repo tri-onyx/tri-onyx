@@ -1,0 +1,2 @@
+- 2026-11-04 | FIXED     | gateway-http | Validate agent name / session id in GET /images (path traversal moved the safe prefix; also trailing-slash prefix check) | lib/tri_onyx/router.ex
+- 2026-11-04 | DOWNGRADED| gateway-http | extract_source_ip trusts cf-connecting-ip / x-forwarded-for from any client (webhook rate-limit bypass if gateway not behind a proxy) — deployment-dependent, needs human decision | lib/tri_onyx/router.ex

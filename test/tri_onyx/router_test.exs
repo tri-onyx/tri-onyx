@@ -275,6 +275,37 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    test "rejects traversal in the agent name (cannot read *_images dirs outside logs/)" do
+      dir = Path.join(["tmp", "hunter_images_poc", "abc123_images"])
+      File.mkdir_p!(dir)
+      File.write!(Path.join(dir, "secret.png"), "not-a-log-image")
+      on_exit(fn -> File.rm_rf!(Path.join("tmp", "hunter_images_poc")) end)
+
+      agent = URI.encode("../tmp/hunter_images_poc", &(&1 != ?/))
+
+      conn = conn(:get, "/images/#{agent}/abc123/secret.png") |> call_router()
+
+      assert conn.status == 400,
+             "agent-name traversal must not move the images root outside logs/ " <>
+               "(got #{conn.status}: #{inspect(conn.resp_body)})"
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode("../../..", &(&1 != ?/))}/x.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/images/test-agent/abc123/x.png") |> call_router()
+
+      assert conn.status == 404
+    end
+  end
+
   describe "GET /audio/:agent_name/:session_id/:audio_id" do
     test "rejects traversal in the agent name" do
       conn =
