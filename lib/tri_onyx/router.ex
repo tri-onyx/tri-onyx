@@ -1325,9 +1325,12 @@ defmodule TriOnyx.Router do
   # --- Session Images ---
 
   get "/images/:agent_name/:session_id/:image_id" do
+    # The directory itself is built from path params, so traversal in the
+    # agent name or session id would move the safe prefix along with the
+    # target and defeat the prefix check below. Validate them first.
     images_dir = Path.join(["logs", agent_name, "#{session_id}_images"])
     file_path = Path.join(images_dir, image_id) |> Path.expand()
-    safe_prefix = Path.expand(images_dir)
+    safe_prefix = Path.expand(images_dir) <> "/"
 
     content_types = %{
       ".png" => "image/png",
@@ -1339,6 +1342,9 @@ defmodule TriOnyx.Router do
     }
 
     cond do
+      not (valid_agent_name?(agent_name) and valid_session_id?(session_id)) ->
+        conn |> send_resp(400, "invalid path")
+
       not String.starts_with?(file_path, safe_prefix) ->
         conn |> send_resp(403, "forbidden")
 
