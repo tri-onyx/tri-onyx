@@ -299,6 +299,64 @@ defmodule TriOnyx.RouterTest do
     end
   end
 
+  describe "GET /images/:agent_name/:session_id/:image_id" do
+    test "does not serve files outside logs/ via traversal in the agent name" do
+      root = Path.join(System.tmp_dir!(), "router_images_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "secret_images"))
+      File.write!(Path.join([root, "secret_images", "key.png"]), "TOP-SECRET")
+      cwd = File.cwd!()
+
+      try do
+        File.cd!(root)
+
+        conn = conn(:get, "/images/../secret/key.png") |> call_router()
+
+        refute conn.status == 200 and conn.resp_body == "TOP-SECRET",
+               "agent_name '..' moved the safe prefix out of logs/ and leaked a file outside the logs root"
+
+        assert conn.status == 400
+      after
+        File.cd!(cwd)
+        File.rm_rf!(root)
+      end
+    end
+
+    test "rejects traversal in the session id" do
+      conn =
+        conn(:get, "/images/test-agent/#{URI.encode("../../..", &(&1 != ?/))}/x.png")
+        |> call_router()
+
+      assert conn.status == 400
+    end
+
+    test "does not serve sibling directories sharing the session-images prefix" do
+      root = Path.join(System.tmp_dir!(), "router_images_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join([root, "logs", "test-agent", "abc123_images_old"]))
+      File.write!(Path.join([root, "logs", "test-agent", "abc123_images_old", "k.png"]), "SIBLING")
+      File.mkdir_p!(Path.join([root, "logs", "test-agent", "abc123_images"]))
+      cwd = File.cwd!()
+
+      try do
+        File.cd!(root)
+
+        conn =
+          conn(:get, "/images/test-agent/abc123/#{URI.encode("../abc123_images_old/k.png", &(&1 != ?/))}")
+          |> call_router()
+
+        assert conn.status == 403
+      after
+        File.cd!(cwd)
+        File.rm_rf!(root)
+      end
+    end
+
+    test "accepts a well-formed path (404 when the file is absent)" do
+      conn = conn(:get, "/images/test-agent/abc123/img.png") |> call_router()
+
+      assert conn.status == 404
+    end
+  end
+
   describe "catch-all" do
     test "returns 404 for unknown routes" do
       conn = conn(:get, "/unknown") |> call_router()

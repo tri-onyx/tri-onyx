@@ -1,0 +1,5 @@
+- 2026-11-09 | FIXED     | risk-model→gateway-http | Validate agent/session ids and slash-terminate prefix check in GET /images route (twin of the /audio fix) | lib/tri_onyx/router.ex
+- 2026-11-09 | DOWNGRADED| gateway-http | GET /audio prefix check lacks trailing "/" (only .ogg siblings reachable, low value) | lib/tri_onyx/router.ex
+- 2026-11-09 | DOWNGRADED| risk-model   | InformationClassifier.controlled_path? uses starts_with?("/workspace") without "/" so "/workspaceX/.." counts as controlled; needs an attacker-created dir outside mounts | lib/tri_onyx/information_classifier.ex
+- 2026-11-09 | DOWNGRADED| sandbox-exec | agent_session draft_path guards (send_email/save_draft/calendar_*) use starts_with? without "/" and gateway File.read follows agent-created symlinks; only JSON drafts readable | lib/tri_onyx/agent_session.ex
+- 2026-11-09 | NO-FINDING| risk-model   | Reviewed sanitizer.ex (per-node limits only, no total-size cap), taint_matrix.ex, sensitivity_matrix.ex, information_classifier.ex; no matrix bypass found |
