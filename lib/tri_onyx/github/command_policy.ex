@@ -297,9 +297,10 @@ defmodule TriOnyx.GitHub.CommandPolicy do
   # force-push prefix; `:branch` is a remote deletion.
   defp targets_protected?(refspec, protected), do: dst_ref(refspec) in protected
 
-  # A destination that is `HEAD` (or empty) is resolved by git, not by the
-  # refspec, so it cannot be cleared by the protected-branch check.
-  defp ambiguous_target?(refspec), do: dst_ref(refspec) in ["HEAD", ""]
+  # A destination that is `HEAD`, its `@` alias, or empty is resolved by
+  # git, not by the refspec, so it cannot be cleared by the
+  # protected-branch check.
+  defp ambiguous_target?(refspec), do: dst_ref(refspec) in ["HEAD", "@", ""]
 
   defp dst_ref(refspec) do
     refspec
@@ -309,7 +310,11 @@ defmodule TriOnyx.GitHub.CommandPolicy do
     |> strip_ref_prefix()
   end
 
+  # git matches a destination that does not start with `refs/` against the
+  # remote's refs with its DWIM rules, which include `refs/<dst>` — so
+  # `heads/main` resolves to `refs/heads/main` just like the full name.
   defp strip_ref_prefix("refs/heads/" <> branch), do: branch
+  defp strip_ref_prefix("heads/" <> branch), do: branch
   defp strip_ref_prefix(branch), do: branch
 
   defp flag?(arg), do: String.starts_with?(arg, "-")

@@ -159,6 +159,35 @@ defmodule TriOnyx.GitHub.CommandPolicyTest do
       assert {:deny, _} = CommandPolicy.classify("git", ["push", "--force", "origin", "+main"])
     end
 
+    test "git's DWIM spellings of a protected branch are denied" do
+      # git resolves a destination that does not start with refs/ against
+      # the remote's refs using the `refs/<dst>` rule too, so `heads/main`
+      # updates refs/heads/main exactly like `refs/heads/main` does — with
+      # or without an explicit source side.
+      for argv <- [
+            ["push", "origin", "feature:heads/main"],
+            ["push", "origin", "+feature:heads/main"],
+            ["push", "origin", "HEAD:heads/master"],
+            ["push", "origin", "heads/main"],
+            ["push", "origin", ":heads/main"]
+          ] do
+        assert match?({:deny, _}, CommandPolicy.classify("git", argv)),
+               "git #{Enum.join(argv, " ")} updates a protected branch and must be denied"
+      end
+
+      # The same spelling of a non-protected branch is still an ordinary push.
+      assert :allow = CommandPolicy.classify("git", ["push", "origin", "feature:heads/feature"])
+    end
+
+    test "@ (git's alias for HEAD) never silently passes as a push target" do
+      # `git push origin @` pushes the current branch to its namesake, which
+      # is `main` whenever the clone has main checked out.
+      for argv <- [["push", "origin", "@"], ["push", "origin", "+@"]] do
+        refute CommandPolicy.classify("git", argv) == :allow,
+               "git #{Enum.join(argv, " ")} resolves to the current branch and must not be auto-allowed"
+      end
+    end
+
     test "deleting a protected branch is denied, feature branch deletion allowed" do
       assert {:deny, _} = CommandPolicy.classify("git", ["push", "origin", ":main"])
       assert :allow = CommandPolicy.classify("git", ["push", "origin", ":old-feature"])
