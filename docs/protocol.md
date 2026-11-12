@@ -5,6 +5,7 @@
 The runtime protocol defines the structured JSON messages exchanged between the
 Elixir gateway and the Python agent runtime.  This is a line-based protocol:
 each message is a single JSON object terminated by a newline (JSON Lines).
+The gateway drops any runtime-to-gateway line longer than 32 MiB.
 
 The gateway spawns the runtime as a subprocess via `uv run runtime/agent_runner.py`
 and communicates using three channels:

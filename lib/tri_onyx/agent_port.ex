@@ -74,7 +74,14 @@ defmodule TriOnyx.AgentPort do
           | {:image, String.t()}
           | {:mode, :normal | :reflection}
 
-  defstruct [:port, :notify, :buffer, :container_name]
+  defstruct [:port, :notify, :buffer, :container_name, discarding: false]
+
+  # Upper bound on a single protocol line from the container. The port's
+  # stdout is agent-writable (any process in the sandbox can write to the
+  # runner's stdout/stderr, which :stderr_to_stdout merges in), so an
+  # unterminated line must not be buffered without limit. Legitimate frames
+  # (including base64 image payloads) are far below this.
+  @max_line_bytes 32 * 1024 * 1024
 
   @default_runtime_path "runtime/agent_runner.py"
 
@@ -562,10 +569,9 @@ defmodule TriOnyx.AgentPort do
   end
 
   @impl GenServer
-  def handle_info({port, {:data, data}}, %{port: port, buffer: buffer} = state) do
+  def handle_info({port, {:data, data}}, %{port: port} = state) do
     # Accumulate data and process complete lines
-    new_buffer = buffer <> data
-    {lines, remaining} = split_lines(new_buffer)
+    {lines, state} = take_lines(state, data)
 
     Enum.each(lines, fn line ->
       line = String.trim(line)
@@ -584,7 +590,7 @@ defmodule TriOnyx.AgentPort do
       end
     end)
 
-    {:noreply, %{state | buffer: remaining}}
+    {:noreply, state}
   end
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
@@ -744,6 +750,40 @@ defmodule TriOnyx.AgentPort do
   end
 
   # --- Private Helpers ---
+
+  # Splits newly received port data into complete lines, carrying the
+  # unterminated tail in `state.buffer`. Only the new chunk is scanned (the
+  # buffer never contains a newline), and a tail longer than
+  # @max_line_bytes is dropped together with the rest of its line.
+  @spec take_lines(%__MODULE__{}, binary()) :: {[String.t()], %__MODULE__{}}
+  defp take_lines(%__MODULE__{discarding: true} = state, data) do
+    case :binary.split(data, "\n") do
+      [_dropped] ->
+        {[], state}
+
+      [_dropped, rest] ->
+        take_lines(%{state | discarding: false, buffer: ""}, rest)
+    end
+  end
+
+  defp take_lines(%__MODULE__{buffer: buffer} = state, data) do
+    {lines, remaining} =
+      case split_lines(data) do
+        {[], tail} -> {[], buffer <> tail}
+        {[first | rest], tail} -> {[buffer <> first | rest], tail}
+      end
+
+    if byte_size(remaining) > @max_line_bytes do
+      Logger.error(
+        "AgentPort: discarding protocol line longer than #{@max_line_bytes} bytes " <>
+          "(container=#{inspect(state.container_name)})"
+      )
+
+      {lines, %{state | buffer: "", discarding: true}}
+    else
+      {lines, %{state | buffer: remaining}}
+    end
+  end
 
   @spec split_lines(String.t()) :: {[String.t()], String.t()}
   defp split_lines(data) do
