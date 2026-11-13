@@ -135,11 +135,12 @@ defmodule TriOnyx.Workspace do
 
   @doc """
   Reads a file from an agent's own working tree. `relative_path` is
-  relative to the tree root.
+  relative to the tree root. Symlinks are never followed (see
+  `read_tree_file/2`).
   """
   @spec read_agent_file(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def read_agent_file(agent_name, relative_path) do
-    File.read(Path.join(agent_dir(agent_name), relative_path))
+    read_tree_file(agent_dir(agent_name), relative_path)
   end
 
   @doc """
@@ -153,16 +154,17 @@ defmodule TriOnyx.Workspace do
   def read_context(agent_name) do
     core_tree = RepoStore.tree_dir(:ro, {:shared, "core"})
 
+    agent_tree = agent_dir(agent_name)
+
     context = %{
-      soul: read_file_or_nil(Path.join(core_tree, "personality/SOUL.md")),
-      identity: read_file_or_nil(Path.join(core_tree, "personality/IDENTITY.md")),
-      user: read_file_or_nil(Path.join(core_tree, "personality/USER.md")),
-      notes: read_file_or_nil(Path.join(agent_dir(agent_name), "NOTES.md"))
+      soul: read_file_or_nil(core_tree, "personality/SOUL.md"),
+      identity: read_file_or_nil(core_tree, "personality/IDENTITY.md"),
+      user: read_file_or_nil(core_tree, "personality/USER.md"),
+      notes: read_file_or_nil(agent_tree, "NOTES.md")
     }
 
     today = Date.utc_today() |> Date.to_iso8601()
-    daily_path = Path.join(agent_dir(agent_name), "memory/#{today}.md")
-    Map.put(context, :daily_memory, read_file_or_nil(daily_path))
+    Map.put(context, :daily_memory, read_file_or_nil(agent_tree, "memory/#{today}.md"))
   end
 
   @doc """
@@ -626,11 +628,46 @@ defmodule TriOnyx.Workspace do
   defp level("high"), do: :high
   defp level(_), do: :high
 
-  @spec read_file_or_nil(String.t()) :: String.t() | nil
-  defp read_file_or_nil(path) do
-    case File.read(path) do
+  @spec read_file_or_nil(String.t(), String.t()) :: String.t() | nil
+  defp read_file_or_nil(base, rel) do
+    case read_tree_file(base, rel) do
       {:ok, content} -> content
       {:error, _} -> nil
     end
+  end
+
+  # Reads `rel` inside the working tree `base` without following symlinks.
+  #
+  # Working trees are agent-controlled: an agent can `ln -s` in its own rw
+  # tree, and any agent with a write grant can commit a symlink that is then
+  # checked out in `_ro`/`_gw` trees. The gateway resolves such links on the
+  # host, outside the container's mount namespace, so following one would
+  # read files no mount grants (other agents' trees, the gateway's
+  # `/proc/self/environ`, ...) — and `read_context/1` feeds the result
+  # straight back to the agent as its system prompt. Any symlink component
+  # below `base` is refused.
+  @spec read_tree_file(String.t(), String.t()) :: {:ok, binary()} | {:error, term()}
+  defp read_tree_file(base, rel) do
+    if symlink_in_tree?(base, rel) do
+      {:error, :symlink}
+    else
+      File.read(Path.join(base, rel))
+    end
+  end
+
+  @spec symlink_in_tree?(String.t(), String.t()) :: boolean()
+  defp symlink_in_tree?(base, rel) do
+    rel
+    |> Path.split()
+    |> Enum.reduce_while(base, fn segment, dir ->
+      path = Path.join(dir, segment)
+
+      case File.lstat(path) do
+        {:ok, %File.Stat{type: :symlink}} -> {:halt, :symlink}
+        {:ok, _} -> {:cont, path}
+        {:error, _} -> {:halt, :missing}
+      end
+    end)
+    |> Kernel.==(:symlink)
   end
 end
