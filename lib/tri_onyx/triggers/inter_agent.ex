@@ -28,14 +28,20 @@ defmodule TriOnyx.Triggers.InterAgent do
 
   alias TriOnyx.AgentSupervisor
   alias TriOnyx.AuditLog
+  alias TriOnyx.InformationClassifier
   alias TriOnyx.Sanitizer
   alias TriOnyx.TriggerRouter
 
   @type message :: %{
-          from: String.t(),
-          to: String.t(),
-          message_type: String.t(),
-          payload: map()
+          required(:from) => String.t(),
+          required(:to) => String.t(),
+          required(:message_type) => String.t(),
+          required(:payload) => map(),
+          # ID of the sending AgentSession. An agent can run several
+          # concurrent sessions (one per session_key), each with its own
+          # taint/sensitivity; this pins the lookup to the session that
+          # actually sent the message.
+          optional(:from_session_id) => String.t()
         }
 
   @type route_opts :: [
@@ -79,7 +85,7 @@ defmodule TriOnyx.Triggers.InterAgent do
       # the sender's sensitivity must propagate as sensitivity — conflating
       # them (the old combined information_level) wrongly raised receiver
       # taint for high-sensitivity/low-taint senders and dropped sensitivity.
-      sender_levels = lookup_sender_levels(supervisor, message.from)
+      sender_levels = lookup_sender_levels(supervisor, message)
 
       # Wrap the sanitized payload in a structured envelope so the receiving
       # agent has clear provenance metadata and knows how to reply.
@@ -233,31 +239,67 @@ defmodule TriOnyx.Triggers.InterAgent do
 
   @default_levels %{taint: :low, sensitivity: :low, information_level: :low}
 
-  # Fetches the sender's taint and sensitivity levels (separate axes) from
-  # its active session, plus the combined information_level for backward
-  # compat. Defaults to low on all axes when no session is found
-  # (conservative for the sanitized path).
-  @spec lookup_sender_levels(GenServer.server(), String.t()) :: %{
-          taint: TriOnyx.InformationClassifier.information_level(),
-          sensitivity: TriOnyx.InformationClassifier.sensitivity_level(),
-          information_level: TriOnyx.InformationClassifier.information_level()
+  # Fetches the sender's taint and sensitivity levels (separate axes) plus
+  # the combined information_level for backward compat.
+  #
+  # An agent may have several concurrent sessions (one per session_key) at
+  # different levels, so "some session of the sender agent" is not the
+  # sender. When the message names its sending session, that session's
+  # levels are used. Otherwise (or if it is gone) the element-wise max over
+  # all of the sender agent's live sessions is used, so a tainted session
+  # can never borrow a clean sibling's labels. Defaults to low on all axes
+  # when the sender has no live session.
+  @spec lookup_sender_levels(GenServer.server(), message()) :: %{
+          taint: InformationClassifier.information_level(),
+          sensitivity: InformationClassifier.sensitivity_level(),
+          information_level: InformationClassifier.information_level()
         }
-  defp lookup_sender_levels(supervisor, agent_name) do
-    case AgentSupervisor.find_session(supervisor, agent_name) do
-      {:ok, pid} ->
-        status = TriOnyx.AgentSession.get_status(pid)
+  defp lookup_sender_levels(supervisor, %{from: agent_name} = message) do
+    statuses = sender_statuses(supervisor, agent_name)
 
-        %{
-          taint: Map.get(status, :taint_level, :low),
-          sensitivity: Map.get(status, :sensitivity_level, :low),
-          information_level: Map.get(status, :information_level, :low)
-        }
+    exact =
+      case Map.get(message, :from_session_id) do
+        id when is_binary(id) -> Enum.filter(statuses, &(Map.get(&1, :id) == id))
+        _ -> []
+      end
 
-      :error ->
-        @default_levels
+    case if(exact != [], do: exact, else: statuses) do
+      [] -> @default_levels
+      matching -> Enum.reduce(matching, @default_levels, &max_levels/2)
     end
+  end
+
+  @spec sender_statuses(GenServer.server(), String.t()) :: [map()]
+  defp sender_statuses(supervisor, agent_name) do
+    supervisor
+    |> DynamicSupervisor.which_children()
+    |> Enum.flat_map(fn
+      {_, pid, :worker, _} when is_pid(pid) ->
+        try do
+          status = TriOnyx.AgentSession.get_status(pid)
+          if status.definition.name == agent_name, do: [status], else: []
+        catch
+          :exit, _ -> []
+        end
+
+      _ ->
+        []
+    end)
   catch
-    :exit, _ -> @default_levels
+    :exit, _ -> []
+  end
+
+  defp max_levels(status, acc) do
+    %{
+      taint: InformationClassifier.higher_level(acc.taint, Map.get(status, :taint_level, :low)),
+      sensitivity:
+        InformationClassifier.higher_level(acc.sensitivity, Map.get(status, :sensitivity_level, :low)),
+      information_level:
+        InformationClassifier.higher_level(
+          acc.information_level,
+          Map.get(status, :information_level, :low)
+        )
+    }
   end
 
   @mirror_max_len 1_500

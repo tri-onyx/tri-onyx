@@ -21,7 +21,7 @@ defmodule TriOnyx.Triggers.InterAgentTest.FakeSession do
       sensitivity_level: Map.get(state, :sensitivity_level, :low),
       information_level: Map.get(state, :information_level, :low),
       status: :ready,
-      session_key: nil
+      session_key: Map.get(state, :session_key)
     }
 
     {:reply, status, state}
@@ -390,6 +390,102 @@ defmodule TriOnyx.Triggers.InterAgentTest do
       assert metadata.taint_level == :low
       assert metadata.sensitivity_level == :low
       assert metadata.information_level == :low
+    end
+
+    test "labels the message with the sending session's levels, not a sibling session's",
+         %{router: router, audit_log: audit_log, supervisor: sup, sender: sender, receiver: receiver} do
+      # The sender agent has two concurrent sessions (e.g. two chat threads):
+      # a clean one, and one that ingested untrusted input and is tainted.
+      # The message is sent BY the tainted session, so the receiver must
+      # inherit :high taint — looking up "some session of sender-agent"
+      # launders the taint through the clean sibling.
+      start_fake_session(sup,
+        id: "sender-clean",
+        session_key: "thread-a",
+        definition: sender,
+        taint_level: :low,
+        sensitivity_level: :low,
+        information_level: :low
+      )
+
+      start_fake_session(sup,
+        id: "sender-tainted",
+        session_key: "thread-b",
+        definition: sender,
+        taint_level: :high,
+        sensitivity_level: :high,
+        information_level: :high
+      )
+
+      start_fake_session(sup, definition: receiver, test_pid: self())
+
+      message = %{
+        from: "sender-agent",
+        from_session_id: "sender-tainted",
+        to: "receiver-agent",
+        message_type: "status_update",
+        payload: %{"status" => "done"}
+      }
+
+      assert {:ok, _pid} =
+               InterAgent.route(message,
+                 router: router,
+                 audit_log: audit_log,
+                 supervisor: sup
+               )
+
+      assert_receive {:prompt_received, "receiver-agent", _payload, metadata}
+
+      assert metadata.taint_level == :high,
+             "receiver must inherit the sending session's taint, got #{inspect(metadata.taint_level)}"
+
+      assert metadata.sensitivity_level == :high,
+             "receiver must inherit the sending session's sensitivity, got #{inspect(metadata.sensitivity_level)}"
+    end
+
+    test "without a sending session id, uses the worst levels across the sender's sessions",
+         %{router: router, audit_log: audit_log, supervisor: sup, sender: sender, receiver: receiver} do
+      start_fake_session(sup,
+        id: "sender-clean",
+        session_key: "thread-a",
+        definition: sender,
+        taint_level: :low,
+        sensitivity_level: :low,
+        information_level: :low
+      )
+
+      start_fake_session(sup,
+        id: "sender-tainted",
+        session_key: "thread-b",
+        definition: sender,
+        taint_level: :high,
+        sensitivity_level: :medium,
+        information_level: :high
+      )
+
+      start_fake_session(sup, definition: receiver, test_pid: self())
+
+      message = %{
+        from: "sender-agent",
+        to: "receiver-agent",
+        message_type: "status_update",
+        payload: %{"status" => "done"}
+      }
+
+      assert {:ok, _pid} =
+               InterAgent.route(message,
+                 router: router,
+                 audit_log: audit_log,
+                 supervisor: sup
+               )
+
+      assert_receive {:prompt_received, "receiver-agent", _payload, metadata}
+
+      assert metadata.taint_level == :high,
+             "an unattributed message must not take the cleanest sibling's taint, got #{inspect(metadata.taint_level)}"
+
+      assert metadata.sensitivity_level == :medium
+      assert metadata.information_level == :high
     end
   end
 end

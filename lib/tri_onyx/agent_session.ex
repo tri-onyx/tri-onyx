@@ -681,6 +681,7 @@ defmodule TriOnyx.AgentSession do
     Task.start(fn ->
       message = %{
         from: from_name,
+        from_session_id: session_id,
         to: to,
         message_type: msg_type,
         payload: payload
