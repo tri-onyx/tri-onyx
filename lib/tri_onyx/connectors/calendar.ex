@@ -611,6 +611,7 @@ defmodule TriOnyx.Connectors.Calendar do
     case Jason.decode(contents) do
       {:ok, draft} ->
         with :ok <- validate_field(draft, "calendar"),
+             :ok <- validate_draft_calendar(draft["calendar"]),
              :ok <- validate_field(draft, "summary"),
              :ok <- validate_field(draft, "dtstart"),
              :ok <- validate_field(draft, "dtend") do
@@ -628,7 +629,8 @@ defmodule TriOnyx.Connectors.Calendar do
       {:ok, draft} ->
         with :ok <- validate_field(draft, "uid"),
              :ok <- validate_field(draft, "etag"),
-             :ok <- validate_field(draft, "href") do
+             :ok <- validate_field(draft, "href"),
+             :ok <- validate_optional_draft_calendar(Map.get(draft, "calendar")) do
           {:ok, draft}
         end
 
@@ -636,6 +638,30 @@ defmodule TriOnyx.Connectors.Calendar do
         {:error, "invalid JSON in update-draft file"}
     end
   end
+
+  # A draft's `calendar` is agent-authored. It becomes a directory under the
+  # agent's tree (AgentSession.write_calendar_event/2 mkdir_p's and writes
+  # `<agent_dir>/events/<calendar>/<uid>.json`) and is spliced into the raw
+  # CalDAV request line (`href`). Restrict it to a single safe path segment
+  # so `../` can't escape the agent's mount set and CR/LF can't inject
+  # headers or requests on the credentialed connection.
+  @calendar_name_re ~r/\A[A-Za-z0-9_-]+\z/
+
+  @spec validate_draft_calendar(term()) :: :ok | {:error, String.t()}
+  defp validate_draft_calendar(name) when is_binary(name) do
+    if Regex.match?(@calendar_name_re, name),
+      do: :ok,
+      else: {:error, "invalid calendar name: #{inspect(name)}"}
+  end
+
+  defp validate_draft_calendar(name), do: {:error, "invalid calendar name: #{inspect(name)}"}
+
+  # Update drafts may omit the calendar (the cached event file is then not
+  # rewritten), but a supplied one must be valid.
+  @spec validate_optional_draft_calendar(term()) :: :ok | {:error, String.t()}
+  defp validate_optional_draft_calendar(nil), do: :ok
+  defp validate_optional_draft_calendar(""), do: :ok
+  defp validate_optional_draft_calendar(name), do: validate_draft_calendar(name)
 
   # --- Utility ---
 
