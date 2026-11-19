@@ -1,0 +1,6 @@
+# Security hunter ledger
+
+- 2026-11-19 | FIXED     | sandbox-exec | Pass commit_and_push paths as literal pathspecs so SubmitPage can't commit the whole tree | lib/tri_onyx/repo_store.ex
+- 2026-11-19 | DOWNGRADED| sandbox-exec | Runner loads `setting_sources=["project"]` from agent-writable /workspace: an agent with Write but no Bash can add `.claude/settings.json` hooks/apiKeyHelper/env and get shell exec in later sessions, bypassing the tool allow-list (needs a skills-loading redesign; not unit-provable without the CLI) | runtime/agent_runner.py
+- 2026-11-19 | DOWNGRADED| sandbox-exec | Gateway Erlang distribution uses the hardcoded cookie `trionyx`; `docker_socket: true` agents are attached to the compose network, so an agent with `network: outbound` (or a host list that includes the gateway) could reach epmd/dist and RPC into the gateway (needs live repro; fix is deployment config) | docker-compose.yml, lib/tri_onyx/sandbox.ex
+- 2026-11-19 | DOWNGRADED| sandbox-exec | `Workspace.commit_page/2` commits the submitted page mid-session with no Taint-Level/Sensitivity-Level trailers, so commit_session never labels it in the risk manifest (single .html file, design gap) | lib/tri_onyx/workspace.ex

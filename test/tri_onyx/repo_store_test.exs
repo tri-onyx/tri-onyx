@@ -499,4 +499,39 @@ defmodule TriOnyx.RepoStoreTest do
       assert {:ok, %{"taint_level" => "high"}} = RiskManifest.lookup("shared/broken/x.md")
     end
   end
+
+  describe "commit_page pathspec handling" do
+    test "a page filename that is git pathspec magic commits only that file" do
+      RiskManifest.clear()
+      definition = definition("pager", [])
+      {:ok, _} = RepoStore.prepare_session(definition)
+      tree = Workspace.agent_dir("pager")
+
+      # Content produced during a (high-taint) session that must only land
+      # on main via commit_session, which labels it in the risk manifest.
+      File.write!(Path.join(tree, "loot.md"), "tainted\n")
+
+      # The page path is chosen by the agent. `:!x.html` is a regular file
+      # with an .html extension, but as a git pathspec it means "everything
+      # except x.html".
+      page = ":!x.html"
+      File.write!(Path.join(tree, page), "<html></html>\n")
+
+      assert {:ok, sha} = Workspace.commit_page("pager", "/workspace/" <> page)
+
+      {:ok, files} = RepoStore.ls_tree({:agent, "pager"})
+
+      refute "loot.md" in files,
+             "SubmitPage must commit only the submitted page, but commit #{sha} " <>
+               "also swept unlabeled session files onto main: #{inspect(files)}"
+
+      assert page in files
+
+      # The session's own commit still labels the rest of its work.
+      {:ok, _} = Workspace.commit_session(definition, "s1", :high, :low)
+
+      assert {:ok, %{"taint_level" => "high"}} = RiskManifest.lookup("agents/pager/loot.md"),
+             "session output must carry the session's taint label"
+    end
+  end
 end
