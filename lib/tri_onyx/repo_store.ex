@@ -484,7 +484,14 @@ defmodule TriOnyx.RepoStore do
             ["add", "-A"]
 
           paths ->
-            existing = Enum.filter(paths, &File.exists?(Path.join(tree, &1)))
+            # `paths` are file names, not pathspecs. Callers pass names an
+            # agent chose (SubmitPage), and `--` does not disable pathspec
+            # magic: a file named `:!x.html` would stage the whole tree.
+            existing =
+              paths
+              |> Enum.filter(&File.exists?(Path.join(tree, &1)))
+              |> Enum.map(&(":(literal)" <> &1))
+
             ["add", "--" | existing]
         end
 
