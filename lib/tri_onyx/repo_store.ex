@@ -742,7 +742,45 @@ defmodule TriOnyx.RepoStore do
   # `git add` with an empty explicit pathspec list is a no-op, not an
   # error — model it as a successful command with nothing staged.
   defp stage(_gd, _tree, ["add", "--"]), do: {"", 0}
-  defp stage(gd, tree, add_args), do: git_tree(gd, tree, add_args)
+
+  # Gitlinks are dropped from the index both before staging (`git add`
+  # spawns `git status` inside every gitlinked directory, so one left over
+  # from an earlier commit must go first) and after it (a nested repo the
+  # agent created is staged as a fresh gitlink). See `drop_gitlinks/2`.
+  defp stage(gd, tree, add_args) do
+    with {_, 0} <- drop_gitlinks(gd, tree),
+         {_, 0} <- git_tree(gd, tree, add_args) do
+      drop_gitlinks(gd, tree)
+    end
+  end
+
+  # An agent can `git init` anywhere in its own tree. Staged as a gitlink,
+  # that nested repo would make later gateway git commands on the tree run
+  # `git status` inside it with its agent-written config (`core.fsmonitor`,
+  # clean filters, ...) — command execution as the gateway, outside the
+  # sandbox. Gitlinks never belong in a gateway-managed repo, so remove them
+  # from the index with plumbing that never looks inside the nested repo;
+  # its files stay in the tree as untracked content.
+  defp drop_gitlinks(gd, tree) do
+    case git_tree(gd, tree, ["ls-files", "--stage", "-z"]) do
+      {out, 0} ->
+        gitlinks =
+          out
+          |> String.split(<<0>>, trim: true)
+          |> Enum.flat_map(fn
+            "160000 " <> rest -> [rest |> String.split("\t", parts: 2) |> List.last()]
+            _ -> []
+          end)
+
+        case gitlinks do
+          [] -> {"", 0}
+          paths -> git_tree(gd, tree, ["update-index", "--force-remove", "--" | paths])
+        end
+
+      error ->
+        error
+    end
+  end
 
   defp staged_changes?(gd, tree) do
     case git_tree(gd, tree, ["diff", "--cached", "--quiet"]) do
@@ -854,8 +892,12 @@ defmodule TriOnyx.RepoStore do
   # bare `git` for commands that take paths as args (init/clone)
   defp git(args), do: run_git(args)
 
+  # `diff.ignoreSubmodules=all` stops status/diff from descending into a
+  # gitlinked directory (running `git status` there with its own, possibly
+  # agent-written, config) — a backstop for gitlinks already in history;
+  # `stage/3` keeps new ones out of the index.
   defp run_git(args) do
-    safe = ["-c", "safe.directory=*"]
+    safe = ["-c", "safe.directory=*", "-c", "diff.ignoreSubmodules=all"]
     System.cmd("git", safe ++ args, stderr_to_stdout: true, env: committer_env())
   end
 
