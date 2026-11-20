@@ -197,6 +197,115 @@ defmodule TriOnyx.RepoStoreTest do
     assert RepoStore.dirty?("main", repo)
   end
 
+  describe "agent-planted nested git repos" do
+    # An agent can create a git repo anywhere in its own tree (`git init`
+    # via Bash). If the gateway ever stages it as a gitlink, every later
+    # gateway `git add`/`status`/`diff` on that tree spawns `git status`
+    # *inside* the nested repo — loading its agent-written config
+    # (`core.fsmonitor`, clean filters) and running commands as the
+    # gateway, outside the sandbox.
+    setup %{tmp: tmp} do
+      repo = {:agent, "news"}
+      :ok = RepoStore.ensure_tree("news", repo)
+      tree = RepoStore.tree_dir("news", repo)
+
+      marker = Path.expand(Path.join(tmp, "gateway-ran-agent-command"))
+      hook = Path.expand(Path.join(tmp, "agent-hook.sh"))
+      File.write!(hook, "#!/bin/sh\ntouch '#{marker}'\ncat\n")
+      File.chmod!(hook, 0o755)
+
+      nested = Path.join(tree, "vendor/lib")
+      File.mkdir_p!(nested)
+      nested_git!(nested, ["init", "-q", "-b", "main"])
+      File.write!(Path.join(nested, "f.txt"), "v1\n")
+      nested_git!(nested, ["add", "f.txt"])
+      nested_git!(nested, ["commit", "-q", "-m", "init"])
+
+      %{repo: repo, tree: tree, nested: nested, marker: marker, hook: hook}
+    end
+
+    test "are never recorded as gitlinks and never execute their config", ctx do
+      %{repo: repo, tree: tree, nested: nested, marker: marker, hook: hook} = ctx
+
+      # Session 1: the agent plants the repo alongside ordinary work.
+      File.write!(Path.join(tree, "NOTES.md"), "one\n")
+      assert {:ok, sha} = RepoStore.commit_and_push("news", repo, message: "s1", session_id: "s1")
+      assert is_binary(sha)
+
+      {ls, 0} =
+        System.cmd("git", ["--git-dir", RepoStore.bare_dir(repo), "ls-tree", "-r", "main"],
+          stderr_to_stdout: true
+        )
+
+      refute ls =~ "160000",
+             "agent-planted nested repo was committed as a gitlink:\n#{ls}"
+
+      # Session 2: the agent arms the nested repo's config.
+      arm_nested_repo!(nested, hook)
+      File.write!(Path.join(tree, "NOTES.md"), "two\n")
+
+      _ = RepoStore.changed_paths("news", repo)
+      _ = RepoStore.dirty?("news", repo)
+      _ = RepoStore.commit_and_push("news", repo, message: "s2", session_id: "s2")
+
+      refute File.exists?(marker),
+             "gateway git executed a command from an agent-controlled nested repo's config"
+    end
+
+    test "already-committed gitlinks do not execute their config", ctx do
+      %{repo: repo, tree: tree, nested: nested, marker: marker, hook: hook} = ctx
+
+      # A gitlink that reached the index/history before this was guarded.
+      {head, 0} = System.cmd("git", ["-C", nested, "rev-parse", "HEAD"])
+      gd = RepoStore.gitdir("news", repo)
+
+      {_, 0} =
+        System.cmd("git", [
+          "--git-dir",
+          gd,
+          "--work-tree",
+          tree,
+          "update-index",
+          "--add",
+          "--cacheinfo",
+          "160000,#{String.trim(head)},vendor/lib"
+        ])
+
+      :ok = local_commit!("news", repo, "legacy gitlink")
+
+      arm_nested_repo!(nested, hook)
+      File.write!(Path.join(tree, "NOTES.md"), "two\n")
+
+      _ = RepoStore.changed_paths("news", repo)
+      _ = RepoStore.dirty?("news", repo)
+      _ = RepoStore.commit_and_push("news", repo, message: "s2", session_id: "s2")
+
+      refute File.exists?(marker),
+             "gateway git executed a command from an agent-controlled nested repo's config"
+    end
+  end
+
+  defp nested_git!(dir, args) do
+    env = [
+      {"GIT_AUTHOR_NAME", "agent"},
+      {"GIT_AUTHOR_EMAIL", "agent@example.invalid"},
+      {"GIT_COMMITTER_NAME", "agent"},
+      {"GIT_COMMITTER_EMAIL", "agent@example.invalid"}
+    ]
+
+    {_, 0} = System.cmd("git", ["-C", dir | args], env: env, stderr_to_stdout: true)
+    :ok
+  end
+
+  # Both well-known "git status runs a command" knobs, plus a stat change
+  # so the nested repo looks dirty.
+  defp arm_nested_repo!(nested, hook) do
+    nested_git!(nested, ["config", "core.fsmonitor", hook])
+    nested_git!(nested, ["config", "filter.agent.clean", hook])
+    File.write!(Path.join(nested, ".gitattributes"), "* filter=agent\n")
+    File.write!(Path.join(nested, "f.txt"), "v2\n")
+  end
+
   test "expand_refs resolves the agents/* wildcard from disk" do
     :ok = RepoStore.ensure_repo({:agent, "news"})
     :ok = RepoStore.ensure_repo({:agent, "wiki"})
