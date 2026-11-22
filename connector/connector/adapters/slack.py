@@ -42,6 +42,17 @@ _CONSENT_ACCEPT_PHRASES = frozenset({"i agree", "agree"})
 _CONSENT_REVOKE_PHRASES = frozenset({"revoke consent", "disagree"})
 
 
+def _escape_mrkdwn(text: Any) -> str:
+    """Escape the three characters Slack treats as control characters.
+
+    Slack parses ``<...>`` in message text as links (``<url|label>`` shows
+    only *label*), user/channel mentions and ``<!channel>``-style pings, and
+    ``&`` starts an entity. Text we did not write must be escaped so it
+    renders literally. See Slack's "Formatting text for app surfaces".
+    """
+    return str(text).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
 def _normalize_consent_reply(text: str) -> str:
     """Normalize a user reply for consent-command matching.
 
@@ -805,7 +816,13 @@ class SlackAdapter(BaseAdapter):
         channel: dict[str, Any] | None = None,
         kind: str = "bcp",
     ) -> None:
-        """Post an approval request; 👍/👎 reactions decide it."""
+        """Post an approval request; 👍/👎 reactions decide it.
+
+        Everything except our own template comes from the (possibly tainted)
+        requesting agent and is escaped, so the reviewer sees the exact text
+        they are approving — a masked ``<url|label>`` link would otherwise
+        show a harmless URL while a different one is approved.
+        """
         if not self._web_client:
             return
 
@@ -824,7 +841,9 @@ class SlackAdapter(BaseAdapter):
 
         anomaly_text = ""
         if anomalies:
-            lines = [f"  • {a.get('message', str(a))}" for a in anomalies]
+            lines = [
+                f"  • {_escape_mrkdwn(a.get('message', a))}" for a in anomalies
+            ]
             anomaly_text = "\n*Anomalies:*\n" + "\n".join(lines) + "\n"
 
         header = (
@@ -834,9 +853,9 @@ class SlackAdapter(BaseAdapter):
         )
         body = (
             f":rotating_light: {header}\n"
-            f"Agent: `{from_agent}`\n"
-            f"{query_summary}\n\n"
-            f"{response_content}\n"
+            f"Agent: `{_escape_mrkdwn(from_agent)}`\n"
+            f"{_escape_mrkdwn(query_summary)}\n\n"
+            f"{_escape_mrkdwn(response_content)}\n"
             f"{anomaly_text}\n"
             f"React with :+1: to approve or :-1: to reject."
         )

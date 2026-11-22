@@ -143,3 +143,65 @@ class TestBoundChannelBotMessages:
             self._event(channel="D1", channel_type="im", bot_id="BGITHUB")
         )
         assert adapter._received == []
+
+
+class _FakeWebClient:
+    """Captures chat_postMessage calls instead of talking to Slack."""
+
+    def __init__(self):
+        self.posts = []
+
+    async def chat_postMessage(self, **kwargs):
+        self.posts.append(kwargs)
+        return {"ts": "1700000000.9"}
+
+
+class TestApprovalRequestEscaping:
+    """The approval message is what the human reviewer sees; tainted agent
+    content in it must render literally, not as Slack mrkdwn controls."""
+
+    @pytest.fixture
+    def adapter(self, tmp_path):
+        adapter = _make_adapter(tmp_path)
+        adapter._web_client = _FakeWebClient()
+        return adapter
+
+    async def _post(self, adapter, **overrides):
+        kwargs = dict(
+            approval_id="appr-1",
+            from_agent="reader",
+            to_agent="main",
+            category=3,
+            query_summary="Summarise the page",
+            response_content="Nothing unusual.",
+            anomalies=[],
+            channel={"platform": "slack", "room_id": "CAPPROVE"},
+        )
+        kwargs.update(overrides)
+        await adapter.send_approval_request(**kwargs)
+        assert len(adapter._web_client.posts) == 1
+        return adapter._web_client.posts[0]["text"]
+
+    async def test_tainted_content_cannot_mask_links_or_ping_the_channel(self, adapter):
+        # Slack renders <url|label> as just "label" and <!channel> as an
+        # @channel ping, so unescaped, the reviewer would see a harmless URL
+        # while approving a different one.
+        masked = "<https://attacker.invalid/x|https://docs.example.com>"
+        text = await self._post(
+            adapter,
+            query_summary="<!channel> urgent",
+            response_content=f"See {masked} & approve",
+            anomalies=[{"message": "<@UOWNER> says ok"}],
+        )
+
+        assert "<" not in text and ">" not in text, (
+            "untrusted approval content reached Slack as live mrkdwn: " + text
+        )
+        assert "&lt;https://attacker.invalid/x|https://docs.example.com&gt;" in text
+        assert "&lt;!channel&gt; urgent" in text
+        assert "&lt;@UOWNER&gt; says ok" in text
+        assert "See " in text and " &amp; approve" in text
+
+    async def test_approval_is_still_tracked_for_reactions(self, adapter):
+        await self._post(adapter, response_content="a < b")
+        assert adapter._approval_events.get("1700000000.9") == "appr-1"
