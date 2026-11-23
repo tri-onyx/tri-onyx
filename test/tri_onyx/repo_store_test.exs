@@ -453,6 +453,45 @@ defmodule TriOnyx.RepoStoreTest do
       refute Enum.any?(swept, fn {principal, _repo} -> principal == "busy" end)
       assert RepoStore.dirty?("busy", repo)
     end
+
+    test "a new session cannot inherit and relabel a crashed session's orphaned writes" do
+      RiskManifest.clear()
+      repo = {:agent, "relay"}
+      definition = definition("relay", [])
+      :ok = RepoStore.ensure_tree("relay", repo)
+
+      # A session died mid-turn (port down / killed) after writing, so its
+      # labels were never recorded. The periodic sweep has not run yet.
+      File.write!(Path.join(RepoStore.tree_dir("relay", repo), "NOTES.md"), "orphaned\n")
+
+      # The next session for the same agent starts before the sweep...
+      test = self()
+
+      pid =
+        spawn(fn ->
+          send(test, {:prepared, RepoStore.prepare_session(definition)})
+
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      assert_receive {:prepared, {:ok, _grants}}, 15_000
+      on_exit(fn -> stop_container(pid) end)
+
+      # ...so its read floor must already see the orphaned content...
+      floor = TriOnyx.InformationClassifier.classify_readable_repos(definition)
+
+      assert floor.taint == :high,
+             "orphaned writes of a crashed session must be labeled at the unlabeled floor " <>
+               "before another session mounts the tree (read-taint floor was #{floor.taint})"
+
+      # ...and a low-taint session end must not launder them as its own.
+      {:ok, _} = Workspace.commit_session(definition, "s2", :low, :low)
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "high"}} =
+               RiskManifest.lookup("agents/relay/NOTES.md")
+    end
   end
 
   # --- Label ordering (Workspace façade) ---

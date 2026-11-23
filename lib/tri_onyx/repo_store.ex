@@ -157,6 +157,11 @@ defmodule TriOnyx.RepoStore do
   def prepare_session(%{name: name} = definition) do
     %{self: self_repo, write: write, read: read} = g = grants(definition)
 
+    # Orphaned writes of a crashed session must be committed at the
+    # unlabeled floor before this session claims the trees (after which the
+    # sweeper skips them) — otherwise they'd be relabeled as this session's.
+    :ok = Sweeper.sweep_principal(name, [self_repo | write])
+
     rw_results =
       [self_repo | write]
       |> Enum.map(fn repo_id -> {repo_id, sync_tree(name, repo_id)} end)

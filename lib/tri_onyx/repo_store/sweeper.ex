@@ -20,7 +20,9 @@ defmodule TriOnyx.RepoStore.Sweeper do
   and gateway writers commit synchronously (`Workspace.record_external_write/5`).
   This sweeper only catches what those miss — trees *orphaned* by a
   crashed session or gateway restart — by periodically committing and
-  pushing any dirty tree that no live session owns.
+  pushing any dirty tree that no live session owns, and by sweeping an
+  agent's own trees when its next session starts (`sweep_principal/3`),
+  before that session can claim the orphaned writes as its own.
 
   Two rules keep it from interfering with running work or with provenance:
 
@@ -87,6 +89,24 @@ defmodule TriOnyx.RepoStore.Sweeper do
     GenServer.call(server, :sweep, :timer.minutes(2))
   end
 
+  @doc """
+  Sweeps `principal`'s dirty rw trees in `repo_ids` if no live container
+  holds them. Called by `RepoStore.prepare_session/1` before it syncs and
+  claims the trees: once claimed, the periodic sweep skips them, so a
+  crashed session's orphaned writes would otherwise be committed (and
+  labeled) by the next session with that session's own labels, and be
+  missing from its read-taint floor. Runs inside the custodian so it is
+  serialized with the periodic sweep. A no-op when the custodian isn't
+  running (unit tests).
+  """
+  @spec sweep_principal(GenServer.server(), String.t(), [RepoStore.repo_id()]) :: :ok
+  def sweep_principal(server \\ __MODULE__, principal, repo_ids)
+      when is_binary(principal) and is_list(repo_ids) do
+    GenServer.call(server, {:sweep_principal, principal, repo_ids}, :timer.minutes(2))
+  catch
+    :exit, {:noproc, _} -> :ok
+  end
+
   @impl GenServer
   def init(opts) do
     interval = Keyword.get(opts, :interval_ms, @default_interval_ms)
@@ -104,6 +124,16 @@ defmodule TriOnyx.RepoStore.Sweeper do
 
   def handle_call(:sweep, _from, state) do
     {:reply, do_sweep(), state}
+  end
+
+  def handle_call({:sweep_principal, principal, repo_ids}, _from, state) do
+    unless MapSet.member?(RepoStore.active_principals(), principal) do
+      for repo_id <- repo_ids, RepoStore.dirty?(principal, repo_id) do
+        sweep_tree(principal, repo_id)
+      end
+    end
+
+    {:reply, :ok, state}
   end
 
   @impl GenServer
