@@ -1753,7 +1753,9 @@ defmodule TriOnyx.AgentSession do
   # --- Private Helpers ---
 
   # Checks prompt metadata for classification info (set by inter-agent
-  # routing) and elevates the session's risk accordingly.
+  # routing, or by TriggerRouter from the trigger type when a prompt is
+  # routed into an already-running session) and elevates the session's
+  # risk accordingly.
   @spec maybe_elevate_from_metadata(t(), map()) :: t()
   defp maybe_elevate_from_metadata(state, metadata) when is_map(metadata) do
     # BCP taint-neutral delivery: skip elevation when channel_mode is :bcp.
@@ -1768,7 +1770,12 @@ defmodule TriOnyx.AgentSession do
     else
       taint = Map.get(metadata, :taint_level) || Map.get(metadata, :information_level)
       sensitivity = Map.get(metadata, :sensitivity_level, :low)
-      from_agent = Map.get(metadata, :from_agent, "unknown")
+      reason =
+        case metadata do
+          %{from_agent: from_agent} -> "inter-agent message from #{from_agent}"
+          %{trigger_type: trigger_type} -> "#{trigger_type} trigger"
+          _ -> "inter-agent message from unknown"
+        end
 
       case taint do
         level when level in [:low, :medium, :high] ->
@@ -1777,7 +1784,7 @@ defmodule TriOnyx.AgentSession do
           elevate_risk(state, %{
             taint: level,
             sensitivity: sensitivity_level,
-            reason: "inter-agent message from #{from_agent}"
+            reason: reason
           })
 
         _ ->
