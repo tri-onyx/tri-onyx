@@ -123,6 +123,114 @@ defmodule TriOnyx.TriggerRouterTest do
     # Here we test the routing logic and error handling.
   end
 
+  describe "dispatch/2 into an already-running session" do
+    # A session started by a clean trigger (cron, heartbeat, the owner's
+    # verified chat) is found by find_session/3 for any later trigger that
+    # carries no session_key — webhooks, email, calendar. Those inputs are
+    # attacker-controlled and must taint the session exactly as they would
+    # had they started it ("Webhook payloads always taint the receiving
+    # agent session" — WebhookReceiver moduledoc).
+    #
+    # The stub below stands in for the Docker-backed session process: it
+    # sits in the real AgentSupervisor and runs the real
+    # AgentSession.handle_call/3 for status and prompt calls, so the taint
+    # observed is what a live session would record.
+    defmodule ClassifiedStubSession do
+      use GenServer
+
+      def start_link(state), do: GenServer.start_link(__MODULE__, state)
+
+      @impl GenServer
+      def init(state), do: {:ok, state}
+
+      @impl GenServer
+      def handle_call(msg, from, state), do: TriOnyx.AgentSession.handle_call(msg, from, state)
+
+      @impl GenServer
+      def handle_info(_msg, state), do: {:noreply, state}
+    end
+
+    defp start_clean_session(supervisor, definition) do
+      state = %{
+        id: "stub-#{:erlang.unique_integer([:positive])}",
+        definition: definition,
+        port: nil,
+        capability_level: :low,
+        taint_level: :low,
+        sensitivity_level: :low,
+        information_level: :low,
+        information_sources: [],
+        input_risk: :low,
+        effective_risk: :low,
+        started_at: DateTime.utc_now(),
+        status: :starting,
+        trigger_type: :cron,
+        prompt_queue: [],
+        session_key: nil,
+        session_label: nil,
+        mode: :normal
+      }
+
+      {:ok, pid} = DynamicSupervisor.start_child(supervisor, {ClassifiedStubSession, state})
+      pid
+    end
+
+    for {trigger, expected_taint, expected_sensitivity} <- [
+          {:webhook, :high, :low},
+          {:unverified_input, :high, :medium}
+        ] do
+      test "#{trigger} payload routed into a clean running session taints it",
+           %{router: router, supervisor: supervisor} do
+        pid = start_clean_session(supervisor, @test_definition)
+
+        event = %{
+          type: unquote(trigger),
+          agent_name: "test-agent",
+          payload: ~s({"attacker":"controlled"}),
+          metadata: %{endpoint_id: "whk_test", source_ip: "203.0.113.7"}
+        }
+
+        assert {:ok, ^pid} = TriggerRouter.dispatch(router, event)
+
+        status = TriOnyx.AgentSession.get_status(pid)
+
+        assert status.taint_level == unquote(expected_taint),
+               "#{unquote(trigger)} content reached a running session without tainting it: " <>
+                 "taint_level is #{inspect(status.taint_level)}, expected " <>
+                 "#{inspect(unquote(expected_taint))} (what a fresh session for this trigger gets)"
+
+        assert status.sensitivity_level == unquote(expected_sensitivity)
+      end
+    end
+
+    test "inter-agent metadata labels are kept as the sender's levels",
+         %{router: router, supervisor: supervisor} do
+      pid = start_clean_session(supervisor, @test_definition)
+
+      event = %{
+        type: :inter_agent,
+        agent_name: "test-agent",
+        payload: "{}",
+        metadata: %{from_agent: "peer", taint_level: :low, sensitivity_level: :low}
+      }
+
+      assert {:ok, ^pid} = TriggerRouter.dispatch(router, event)
+      assert TriOnyx.AgentSession.get_status(pid).taint_level == :low
+    end
+
+    test "clean triggers leave a clean running session clean",
+         %{router: router, supervisor: supervisor} do
+      pid = start_clean_session(supervisor, @test_definition)
+
+      event = %{type: :heartbeat, agent_name: "test-agent", payload: "tick", metadata: %{}}
+
+      assert {:ok, ^pid} = TriggerRouter.dispatch(router, event)
+      status = TriOnyx.AgentSession.get_status(pid)
+      assert status.taint_level == :low
+      assert status.sensitivity_level == :low
+    end
+  end
+
   describe "load_agents/1" do
     # Boot path regression: TriOnyx.Application delegates initial agent
     # loading to TriggerRouter.load_agents/1. On the first load every agent

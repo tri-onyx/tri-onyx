@@ -25,6 +25,7 @@ defmodule TriOnyx.TriggerRouter do
   alias TriOnyx.AgentSession
   alias TriOnyx.AgentSupervisor
   alias TriOnyx.AuditLog
+  alias TriOnyx.InformationClassifier
   alias TriOnyx.Triggers.Scheduler
 
   @type trigger_type ::
@@ -335,6 +336,34 @@ defmodule TriOnyx.TriggerRouter do
           String.t(),
           map()
         ) :: {:ok, pid()} | {:error, term()}
+  # A new session takes its initial taint/sensitivity from `trigger_type`,
+  # but a running session found by find_session/3 never sees the trigger
+  # type — only the prompt and its metadata. Without a label here, webhook,
+  # email or unverified-chat content routed into a session that a clean
+  # trigger started would leave it at :low. Callers that already label the
+  # prompt with explicit levels (inter-agent routing carries the sender's)
+  # are left as they are.
+  @spec label_with_trigger_classification(map(), atom()) :: map()
+  defp label_with_trigger_classification(metadata, trigger_type) do
+    if Map.has_key?(metadata, :taint_level) or Map.has_key?(metadata, :information_level) do
+      metadata
+    else
+      %{taint: taint, sensitivity: sensitivity} =
+        InformationClassifier.classify_trigger(trigger_type)
+
+      sensitivity =
+        InformationClassifier.higher_level(
+          sensitivity,
+          Map.get(metadata, :sensitivity_level, :low)
+        )
+
+      metadata
+      |> Map.put(:taint_level, taint)
+      |> Map.put(:sensitivity_level, sensitivity)
+      |> Map.put_new(:trigger_type, trigger_type)
+    end
+  end
+
   defp ensure_session_and_prompt(supervisor, definition, trigger_type, payload, metadata) do
     session_key = Map.get(metadata, "session_key")
     session_label = Map.get(metadata, "session_label")
@@ -342,6 +371,8 @@ defmodule TriOnyx.TriggerRouter do
     case AgentSupervisor.find_session(supervisor, definition.name, session_key) do
       {:ok, pid} ->
         Logger.info("TriggerRouter: routing to existing session for '#{definition.name}'")
+
+        metadata = label_with_trigger_classification(metadata, trigger_type)
 
         case AgentSession.send_prompt(pid, payload, metadata) do
           :ok -> {:ok, pid}
