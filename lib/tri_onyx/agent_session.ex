@@ -785,7 +785,12 @@ defmodule TriOnyx.AgentSession do
         AgentPort.send_submit_page_response(state.port, req_id, false, "file not found")
 
       true ->
-        case Workspace.commit_page(state.definition.name, path) do
+        case Workspace.commit_page(
+               state.definition.name,
+               path,
+               state.taint_level,
+               state.sensitivity_level
+             ) do
           {:ok, sha} ->
             AgentPort.send_submit_page_response(state.port, req_id, true, "")
 
