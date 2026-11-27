@@ -486,6 +486,49 @@ defmodule TriOnyx.RepoStoreTest do
       assert :error = RiskManifest.lookup("shared/knowledge/doc.md")
     end
 
+    test "a SubmitPage commit carries and records the session's labels" do
+      RiskManifest.clear()
+      repo = {:agent, "pager"}
+      :ok = RepoStore.ensure_tree("pager", repo)
+      page = Path.join(RepoStore.tree_dir("pager", repo), "report.html")
+
+      # A low session publishes the page first; its labels are recorded.
+      File.write!(page, "<p>public</p>\n")
+      {:ok, _} = Workspace.commit_session(definition("pager", []), "s-low", :low, :low)
+
+      assert {:ok, %{"taint_level" => "low", "sensitivity_level" => "low"}} =
+               RiskManifest.lookup("agents/pager/report.html")
+
+      # A later high-taint, high-sensitivity session rewrites it and pins it
+      # mid-session via SubmitPage. The new content is on main now, so it
+      # must not keep describing itself with the earlier session's labels.
+      File.write!(page, "<p>secret</p>\n")
+      assert {:ok, sha} = Workspace.commit_page("pager", "/workspace/report.html", :high, :high)
+      assert is_binary(sha)
+
+      assert bare_log(repo, "%B") =~ "Taint-Level: high",
+             "page commit on main must carry the session's Taint-Level trailer"
+
+      assert bare_log(repo, "%B") =~ "Sensitivity-Level: high",
+             "page commit on main must carry the session's Sensitivity-Level trailer"
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "high"}} =
+               RiskManifest.lookup("agents/pager/report.html"),
+             "high-sensitivity page content was left labeled low in the live risk manifest"
+
+      # The durable record agrees: a rebuild from git history keeps the
+      # high labels instead of falling back to the older low commit.
+      :ok = RiskManifest.reload()
+
+      assert {:ok, %{"taint_level" => "high", "sensitivity_level" => "high"}} =
+               RiskManifest.lookup("agents/pager/report.html"),
+             "rebuilt manifest relabeled the page from the older low provenance commit"
+
+      # Nothing left for the session-end commit to label.
+      assert {:ok, [{"agents/pager", {:ok, :no_changes}}]} =
+               Workspace.commit_session(definition("pager", []), "s-high", :high, :high)
+    end
+
     test "a failed review leaves the recorded taint intact", %{tmp: tmp} do
       RiskManifest.clear()
       :ok = RiskManifest.put("news", ["shared/broken/x.md"], :high, :low)

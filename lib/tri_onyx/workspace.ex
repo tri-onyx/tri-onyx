@@ -204,14 +204,7 @@ defmodule TriOnyx.Workspace do
   def commit_session(definition, session_id, taint_level, sensitivity_level) do
     %{self: self_repo, write: write} = RepoStore.grants(definition)
 
-    trailers =
-      Enum.reject(
-        [
-          taint_level && "Taint-Level: #{taint_level}",
-          sensitivity_level && "Sensitivity-Level: #{sensitivity_level}"
-        ],
-        &is_nil/1
-      )
+    trailers = provenance_trailers(taint_level, sensitivity_level)
 
     results =
       Enum.map([self_repo | write], fn repo ->
@@ -270,9 +263,16 @@ defmodule TriOnyx.Workspace do
   the full commit SHA. Used by SubmitPage to pin an HTML artifact to a
   specific version. `path` is relative to the agent's tree (container
   `/workspace/` prefix is stripped if present).
+
+  The page lands on `main` mid-session, so the session-end commit never
+  sees it as changed. Like `commit_session/4`, the commit therefore carries
+  the session's current `Taint-Level`/`Sensitivity-Level` trailers and, once
+  pushed, the path is labeled with them in the risk manifest — otherwise
+  the page would keep whatever labels an older commit gave it.
   """
-  @spec commit_page(String.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
-  def commit_page(agent_name, path) do
+  @spec commit_page(String.t(), String.t(), atom() | nil, atom() | nil) ::
+          {:ok, String.t()} | {:error, term()}
+  def commit_page(agent_name, path, taint_level, sensitivity_level) do
     rel =
       path
       |> String.replace_prefix(container_root() <> "/", "")
@@ -280,10 +280,14 @@ defmodule TriOnyx.Workspace do
 
     repo = {:agent, agent_name}
 
-    with {:ok, _host} <- agent_host_path(agent_name, rel) do
+    with {:ok, host} <- agent_host_path(agent_name, rel) do
+      # Label the path as git records it (`a/../x.html` → `x.html`).
+      canonical = canonical_for_repo(repo, Path.relative_to(host, Path.expand(agent_dir(agent_name))))
+
       case RepoStore.commit_and_push(agent_name, repo,
              author: agent_name,
              message: "#{agent_name} page: #{Path.basename(rel)}",
+             trailers: provenance_trailers(taint_level, sensitivity_level),
              session_id: "page",
              paths: [rel]
            ) do
@@ -293,6 +297,13 @@ defmodule TriOnyx.Workspace do
             {:ok, sha} -> {:ok, sha}
             error -> error
           end
+
+        {:ok, sha} = res when is_binary(sha) ->
+          if taint_level != nil do
+            TriOnyx.RiskManifest.put(agent_name, [canonical], taint_level, sensitivity_level)
+          end
+
+          res
 
         {:ok, {:conflict, _branch}} = res ->
           res
@@ -568,6 +579,17 @@ defmodule TriOnyx.Workspace do
   def canonical_for_repo({:shared, name}, rel), do: "shared/#{name}/#{rel}"
 
   # --- Private Helpers ---
+
+  # Provenance trailers for a gateway commit of session-authored content.
+  defp provenance_trailers(taint_level, sensitivity_level) do
+    Enum.reject(
+      [
+        taint_level && "Taint-Level: #{taint_level}",
+        sensitivity_level && "Sensitivity-Level: #{sensitivity_level}"
+      ],
+      &is_nil/1
+    )
+  end
 
   # Seeds the core shared repo with personality files — from
   # workspace.template when present, inline placeholders otherwise.
